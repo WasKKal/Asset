@@ -12,19 +12,35 @@ local Lucide = {}
 
 local ICON_SIZE = 48
 
--- PNG sprite sheet URLs (direct binary download)
+-- Version tag for cache busting (change to force re-download)
+local CACHE_VERSION = "v2"
+local CACHE_DIR = "lucide-icons-" .. CACHE_VERSION
+
+-- PNG sprite sheet URLs
+-- Primary: jsDelivr CDN (fast propagation), Fallback: GitHub raw
 local SHEET_PNG_URLS = {
-    [0] = "https://raw.githubusercontent.com/WasKKal/Asset/master/lucide/sheet_0.png",
-    [1] = "https://raw.githubusercontent.com/WasKKal/Asset/master/lucide/sheet_1.png",
+    [0] = {
+        "https://cdn.jsdelivr.net/gh/WasKKal/Asset@master/lucide/sheet_0.png",
+        "https://raw.githubusercontent.com/WasKKal/Asset/master/lucide/sheet_0.png",
+    },
+    [1] = {
+        "https://cdn.jsdelivr.net/gh/WasKKal/Asset@master/lucide/sheet_1.png",
+        "https://raw.githubusercontent.com/WasKKal/Asset/master/lucide/sheet_1.png",
+    },
 }
 
 -- Base64 fallback URLs
 local SHEET_B64_URLS = {
-    [0] = "https://raw.githubusercontent.com/WasKKal/Asset/master/lucide/sheet_0.b64",
-    [1] = "https://raw.githubusercontent.com/WasKKal/Asset/master/lucide/sheet_1.b64",
+    [0] = {
+        "https://cdn.jsdelivr.net/gh/WasKKal/Asset@master/lucide/sheet_0.b64",
+        "https://raw.githubusercontent.com/WasKKal/Asset/master/lucide/sheet_0.b64",
+    },
+    [1] = {
+        "https://cdn.jsdelivr.net/gh/WasKKal/Asset@master/lucide/sheet_1.b64",
+        "https://raw.githubusercontent.com/WasKKal/Asset/master/lucide/sheet_1.b64",
+    },
 }
 
-local CACHE_DIR = "lucide-icons-latest"
 local cachedSheets = {}
 
 -- Base64 decoder (fallback only)
@@ -62,7 +78,6 @@ local function base64Decode(data)
 end
 
 local function httpGet(url)
-    -- Try executor request API first (handles binary better)
     local req = (syn and syn.request) or (http and http.request) or http_request or request
     if req then
         local ok, result = pcall(function()
@@ -71,9 +86,17 @@ local function httpGet(url)
         end)
         if ok and result then return result end
     end
-    -- Fallback to game:HttpGet
     local ok, result = pcall(function() return game:HttpGet(url) end)
     if ok and result and #result > 100 then return result end
+    return nil
+end
+
+local function httpGetMulti(urls)
+    for _, url in ipairs(urls) do
+        local data = httpGet(url)
+        if data and #data > 1000 then return data end
+        task.wait(0.2)
+    end
     return nil
 end
 
@@ -83,11 +106,10 @@ local function getSheetAsset(sheetIdx)
     if not getasset or not writefile then return nil end
 
     local fileName = CACHE_DIR .. "/sheet_" .. tostring(sheetIdx) .. ".png"
-    local filePath = fileName
 
     -- Check local cache first
-    if isfile and isfile(filePath) then
-        local ok, assetUrl = pcall(getasset, filePath)
+    if isfile and isfile(fileName) then
+        local ok, assetUrl = pcall(getasset, fileName)
         if ok and assetUrl then
             cachedSheets[sheetIdx] = assetUrl
             return assetUrl
@@ -99,14 +121,14 @@ local function getSheetAsset(sheetIdx)
         pcall(makefolder, CACHE_DIR)
     end
 
-    -- Method 1: Direct PNG download (preferred - no base64 overhead)
-    local pngUrl = SHEET_PNG_URLS[sheetIdx]
-    if pngUrl then
-        local pngData = httpGet(pngUrl)
+    -- Method 1: Direct PNG download (preferred)
+    local pngUrls = SHEET_PNG_URLS[sheetIdx]
+    if pngUrls then
+        local pngData = httpGetMulti(pngUrls)
         if pngData and #pngData > 1000 then
-            local ok = pcall(writefile, filePath, pngData)
+            local ok = pcall(writefile, fileName, pngData)
             if ok then
-                local ok2, assetUrl = pcall(getasset, filePath)
+                local ok2, assetUrl = pcall(getasset, fileName)
                 if ok2 and assetUrl then
                     cachedSheets[sheetIdx] = assetUrl
                     return assetUrl
@@ -116,15 +138,15 @@ local function getSheetAsset(sheetIdx)
     end
 
     -- Method 2: Base64 download + decode (fallback)
-    local b64Url = SHEET_B64_URLS[sheetIdx]
-    if b64Url then
-        local b64data = httpGet(b64Url)
+    local b64Urls = SHEET_B64_URLS[sheetIdx]
+    if b64Urls then
+        local b64data = httpGetMulti(b64Urls)
         if b64data and #b64data > 100 then
             local pngData = base64Decode(b64data)
             if pngData and #pngData > 1000 then
-                local ok = pcall(writefile, filePath, pngData)
+                local ok = pcall(writefile, fileName, pngData)
                 if ok then
-                    local ok2, assetUrl = pcall(getasset, filePath)
+                    local ok2, assetUrl = pcall(getasset, fileName)
                     if ok2 and assetUrl then
                         cachedSheets[sheetIdx] = assetUrl
                         return assetUrl

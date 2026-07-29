@@ -2,9 +2,9 @@
 --!optimize 2
 
 --[[
-    Lucide Icon Library for Roblox (Latest)
+    Lucide Icon Library for Roblox (Latest v2)
     Generated from lucide.dev - 1756 icons
-    Uses sprite sheets downloaded via HTTP and cached locally
+    Downloads PNG sprite sheets and caches locally
     MIT License | Copyright (c) lucide.dev
 ]]
 
@@ -12,7 +12,14 @@ local Lucide = {}
 
 local ICON_SIZE = 48
 
-local SHEET_URLS = {
+-- PNG sprite sheet URLs (direct binary download)
+local SHEET_PNG_URLS = {
+    [0] = "https://raw.githubusercontent.com/WasKKal/Asset/master/lucide/sheet_0.png",
+    [1] = "https://raw.githubusercontent.com/WasKKal/Asset/master/lucide/sheet_1.png",
+}
+
+-- Base64 fallback URLs
+local SHEET_B64_URLS = {
     [0] = "https://raw.githubusercontent.com/WasKKal/Asset/master/lucide/sheet_0.b64",
     [1] = "https://raw.githubusercontent.com/WasKKal/Asset/master/lucide/sheet_1.b64",
 }
@@ -20,6 +27,7 @@ local SHEET_URLS = {
 local CACHE_DIR = "lucide-icons-latest"
 local cachedSheets = {}
 
+-- Base64 decoder (fallback only)
 local b64chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
 local b64lookup = {}
 for i = 1, #b64chars do b64lookup[string.sub(b64chars, i, i)] = i - 1 end
@@ -53,46 +61,79 @@ local function base64Decode(data)
     return table.concat(result)
 end
 
-local function getSheetAsset(sheetIdx)
-    if cachedSheets[sheetIdx] then return cachedSheets[sheetIdx] end
-    local getasset = getcustomasset or getsynasset
-    if not getasset or not writefile then return nil end
-    local fileName = CACHE_DIR .. "/sheet_" .. tostring(sheetIdx) .. ".png"
-    if isfile and isfile(fileName) then
-        local ok, assetUrl = pcall(getasset, fileName)
-        if ok and assetUrl then
-            cachedSheets[sheetIdx] = assetUrl
-            return assetUrl
-        end
-    end
-    local url = SHEET_URLS[sheetIdx]
-    if not url then return nil end
-    local b64data = nil
+local function httpGet(url)
+    -- Try executor request API first (handles binary better)
     local req = (syn and syn.request) or (http and http.request) or http_request or request
     if req then
         local ok, result = pcall(function()
             local resp = req({Url = url, Method = "GET"})
             if resp and resp.Body and #resp.Body > 100 then return resp.Body end
         end)
-        if ok and result then b64data = result end
+        if ok and result then return result end
     end
-    if not b64data then
-        local ok, result = pcall(function() return game:HttpGet(url) end)
-        if ok and result and #result > 100 then b64data = result end
+    -- Fallback to game:HttpGet
+    local ok, result = pcall(function() return game:HttpGet(url) end)
+    if ok and result and #result > 100 then return result end
+    return nil
+end
+
+local function getSheetAsset(sheetIdx)
+    if cachedSheets[sheetIdx] then return cachedSheets[sheetIdx] end
+    local getasset = getcustomasset or getsynasset
+    if not getasset or not writefile then return nil end
+
+    local fileName = CACHE_DIR .. "/sheet_" .. tostring(sheetIdx) .. ".png"
+    local filePath = fileName
+
+    -- Check local cache first
+    if isfile and isfile(filePath) then
+        local ok, assetUrl = pcall(getasset, filePath)
+        if ok and assetUrl then
+            cachedSheets[sheetIdx] = assetUrl
+            return assetUrl
+        end
     end
-    if not b64data then return nil end
-    local pngData = base64Decode(b64data)
-    if not pngData or #pngData < 100 then return nil end
-    local ok2 = pcall(function()
-        if not isfolder(CACHE_DIR) then makefolder(CACHE_DIR) end
-        writefile(fileName, pngData)
-    end)
-    if not ok2 then return nil end
-    local ok3, assetUrl = pcall(getasset, fileName)
-    if ok3 and assetUrl then
-        cachedSheets[sheetIdx] = assetUrl
-        return assetUrl
+
+    -- Ensure cache directory exists
+    if isfolder and not isfolder(CACHE_DIR) then
+        pcall(makefolder, CACHE_DIR)
     end
+
+    -- Method 1: Direct PNG download (preferred - no base64 overhead)
+    local pngUrl = SHEET_PNG_URLS[sheetIdx]
+    if pngUrl then
+        local pngData = httpGet(pngUrl)
+        if pngData and #pngData > 1000 then
+            local ok = pcall(writefile, filePath, pngData)
+            if ok then
+                local ok2, assetUrl = pcall(getasset, filePath)
+                if ok2 and assetUrl then
+                    cachedSheets[sheetIdx] = assetUrl
+                    return assetUrl
+                end
+            end
+        end
+    end
+
+    -- Method 2: Base64 download + decode (fallback)
+    local b64Url = SHEET_B64_URLS[sheetIdx]
+    if b64Url then
+        local b64data = httpGet(b64Url)
+        if b64data and #b64data > 100 then
+            local pngData = base64Decode(b64data)
+            if pngData and #pngData > 1000 then
+                local ok = pcall(writefile, filePath, pngData)
+                if ok then
+                    local ok2, assetUrl = pcall(getasset, filePath)
+                    if ok2 and assetUrl then
+                        cachedSheets[sheetIdx] = assetUrl
+                        return assetUrl
+                    end
+                end
+            end
+        end
+    end
+
     return nil
 end
 
@@ -3658,7 +3699,7 @@ Lucide.IconNames = {
 }
 table.freeze(Lucide.IconNames)
 
-Lucide.PackageVersion = "1.0.0"
+Lucide.PackageVersion = "2.0.0"
 Lucide.LucideVersion = "latest"
 
 table.freeze(Lucide)

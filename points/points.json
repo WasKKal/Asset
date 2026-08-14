@@ -24,7 +24,16 @@
             "updatedAt": 1786726335905
         }
     },
-    "devices": [],
+    "devices": {
+        "dfa2399962a750b332ab3a6df39ffb11": {
+            "deviceId": "dfa2399962a750b332ab3a6df39ffb11",
+            "hwidHash": "132a4d828b1232adafada7332a752bdd65d4dd149c50cf7f65f8e35c371682cf",
+            "ip": "162.128.157.88",
+            "ua": "Delta Android\/2.0",
+            "createdAt": 1786727548,
+            "lastSeen": 1786727548
+        }
+    },
     "rate": {
         "34.47.199.108": {
             "date": "2026-8-14",
@@ -44,10 +53,9 @@
         },
         "162.128.157.88": {
             "date": "2026-8-14",
-            "newUsers": 0,
+            "newUsers": 1,
             "hits": [
-                1786727504383,
-                1786727546775
+                1786727504383
             ]
         }
     }

@@ -158,14 +158,14 @@
         "34dae411e3e9ba227c2398bb4330f73b": {
             "deviceId": "34dae411e3e9ba227c2398bb4330f73b",
             "hwidHash": null,
-            "balance": 5500,
+            "balance": 5394,
             "totalEarned": 5500,
-            "totalSpent": 0,
+            "totalSpent": 106,
             "lastLoginDate": "2026-8-14",
-            "totalRequests": 0,
-            "totalTokens": 0,
+            "totalRequests": 1,
+            "totalTokens": 2107,
             "createdAt": 1786734377981,
-            "updatedAt": 1786734377981
+            "updatedAt": 1786734379753
         }
     },
     "devices": {

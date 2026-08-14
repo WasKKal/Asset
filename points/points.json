@@ -170,14 +170,14 @@
         "6fa87309bc63dc6df9cd68727b610400": {
             "deviceId": "6fa87309bc63dc6df9cd68727b610400",
             "hwidHash": null,
-            "balance": 16826,
+            "balance": 16757,
             "totalEarned": 18000,
-            "totalSpent": 1174,
+            "totalSpent": 1243,
             "lastLoginDate": "2026-8-14",
-            "totalRequests": 19,
-            "totalTokens": 116212,
+            "totalRequests": 20,
+            "totalTokens": 123091,
             "createdAt": 1786734620631,
-            "updatedAt": 1786734815362
+            "updatedAt": 1786734823022
         }
     },
     "devices": {

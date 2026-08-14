@@ -62,14 +62,14 @@
         "1da6b23a69a87825b4c26470e2ecd828": {
             "deviceId": "1da6b23a69a87825b4c26470e2ecd828",
             "hwidHash": null,
-            "balance": 5220,
+            "balance": 5018,
             "totalEarned": 5500,
-            "totalSpent": 280,
+            "totalSpent": 482,
             "lastLoginDate": "2026-8-14",
-            "totalRequests": 2,
-            "totalTokens": 5579,
+            "totalRequests": 3,
+            "totalTokens": 9607,
             "createdAt": 1786728766137,
-            "updatedAt": 1786728879296
+            "updatedAt": 1786728886931
         }
     },
     "devices": {

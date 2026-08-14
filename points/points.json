@@ -38,14 +38,14 @@
         "cb13936ad2f1a5e47bf6e6166cbdf0cd": {
             "deviceId": "cb13936ad2f1a5e47bf6e6166cbdf0cd",
             "hwidHash": null,
-            "balance": 1208,
+            "balance": 618,
             "totalEarned": 5500,
-            "totalSpent": 4292,
+            "totalSpent": 4882,
             "lastLoginDate": "2026-8-14",
-            "totalRequests": 12,
-            "totalTokens": 85729,
+            "totalRequests": 13,
+            "totalTokens": 97523,
             "createdAt": 1786727645959,
-            "updatedAt": 1786728216825
+            "updatedAt": 1786728229449
         }
     },
     "devices": {

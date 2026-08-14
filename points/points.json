@@ -146,14 +146,14 @@
         "2fc4e836a99e3a9cf19d762c3d4d9c21": {
             "deviceId": "2fc4e836a99e3a9cf19d762c3d4d9c21",
             "hwidHash": null,
-            "balance": 5287,
+            "balance": 5176,
             "totalEarned": 5500,
-            "totalSpent": 213,
+            "totalSpent": 324,
             "lastLoginDate": "2026-8-14",
-            "totalRequests": 2,
-            "totalTokens": 4234,
+            "totalRequests": 3,
+            "totalTokens": 6442,
             "createdAt": 1786734007592,
-            "updatedAt": 1786734093524
+            "updatedAt": 1786734100636
         }
     },
     "devices": {

@@ -74,14 +74,14 @@
         "f94b08a3408a220df11576b114cb2357": {
             "deviceId": "f94b08a3408a220df11576b114cb2357",
             "hwidHash": null,
-            "balance": 5256,
+            "balance": 5113,
             "totalEarned": 5500,
-            "totalSpent": 244,
+            "totalSpent": 387,
             "lastLoginDate": "2026-8-14",
-            "totalRequests": 2,
-            "totalTokens": 4862,
+            "totalRequests": 3,
+            "totalTokens": 7705,
             "createdAt": 1786729074570,
-            "updatedAt": 1786729103137
+            "updatedAt": 1786729112694
         }
     },
     "devices": {

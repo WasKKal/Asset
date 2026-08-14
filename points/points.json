@@ -134,14 +134,14 @@
         "42192ca83ee9ae98a2ba559fc40201e7": {
             "deviceId": "42192ca83ee9ae98a2ba559fc40201e7",
             "hwidHash": null,
-            "balance": 2451,
+            "balance": 1770,
             "totalEarned": 5500,
-            "totalSpent": 3049,
+            "totalSpent": 3730,
             "lastLoginDate": "2026-8-14",
-            "totalRequests": 9,
-            "totalTokens": 60890,
+            "totalRequests": 10,
+            "totalTokens": 74492,
             "createdAt": 1786732168443,
-            "updatedAt": 1786732430457
+            "updatedAt": 1786732438064
         }
     },
     "devices": {

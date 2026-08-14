@@ -26,14 +26,14 @@
         "dfa2399962a750b332ab3a6df39ffb11": {
             "deviceId": "dfa2399962a750b332ab3a6df39ffb11",
             "hwidHash": null,
-            "balance": 7500,
-            "totalEarned": 7500,
+            "balance": 8500,
+            "totalEarned": 8500,
             "totalSpent": 0,
             "lastLoginDate": "2026-8-14",
             "totalRequests": 0,
             "totalTokens": 0,
             "createdAt": 1786727552218,
-            "updatedAt": 1786727620351
+            "updatedAt": 1786727642176
         }
     },
     "devices": {

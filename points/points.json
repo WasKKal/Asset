@@ -360,6 +360,14 @@
             "ua": "Delta iOS\/2.0",
             "createdAt": 1786743144,
             "lastSeen": 1786743144
+        },
+        "9047de3f83a7c796bcaf4df765de11ab": {
+            "deviceId": "9047de3f83a7c796bcaf4df765de11ab",
+            "hwidHash": "f2229c253eabfdfee8efcc3ff114d71adf6d8a96209f24f59e8ae8d8fb0a03e5",
+            "ip": "117.183.130.120",
+            "ua": "Delta iOS\/2.0",
+            "createdAt": 1786744367,
+            "lastSeen": 1786744367
         }
     },
     "rate": {
@@ -567,7 +575,7 @@
         },
         "117.183.130.120": {
             "date": "2026-8-14",
-            "newUsers": 2,
+            "newUsers": 3,
             "hits": [
                 1786744365812
             ],

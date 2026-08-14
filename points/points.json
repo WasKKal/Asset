@@ -11,11 +11,20 @@
         "maxDailyRewardsPerIPPerDay": 3
     },
     "users": [],
-    "devices": [],
+    "devices": {
+        "ade5230cbde44be924a578475590f1e8": {
+            "deviceId": "ade5230cbde44be924a578475590f1e8",
+            "hwidHash": "2db95e52571d5751f72594ea6400daa389bb56cb7c50ed40aec4a716015aa4bf",
+            "ip": "127.0.0.1",
+            "ua": "curl\/8.14.1",
+            "createdAt": 1786725956,
+            "lastSeen": 1786725956
+        }
+    },
     "rate": {
         "127.0.0.1": {
             "date": "2026-8-14",
-            "newUsers": 0,
+            "newUsers": 1,
             "hits": [
                 1786725953708
             ]

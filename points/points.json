@@ -1,0 +1,24 @@
+{
+    "config": {
+        "dailyReward": 2500,
+        "newUserReward": 3000,
+        "costPerToken": 0.05,
+        "minCostPerRequest": 5,
+        "maxCostPerRequest": 2000,
+        "maxRequestsPerMinutePerIP": 60,
+        "maxNewUsersPerIPPerDay": 3,
+        "maxUserBalance": 1000000,
+        "maxDailyRewardsPerIPPerDay": 3
+    },
+    "users": [],
+    "devices": [],
+    "rate": {
+        "127.0.0.1": {
+            "date": "2026-8-14",
+            "newUsers": 0,
+            "hits": [
+                1786725951137
+            ]
+        }
+    }
+}

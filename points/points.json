@@ -398,14 +398,14 @@
         "efcb694dada705139ca6a505dc60dbeb": {
             "deviceId": "efcb694dada705139ca6a505dc60dbeb",
             "hwidHash": null,
-            "balance": 5510,
+            "balance": 5438,
             "totalEarned": 18000,
-            "totalSpent": 12490,
+            "totalSpent": 12562,
             "lastLoginDate": "2026-8-15",
-            "totalRequests": 109,
-            "totalTokens": 1331295,
+            "totalRequests": 110,
+            "totalTokens": 1338495,
             "createdAt": 1786784050421,
-            "updatedAt": 1786803258115
+            "updatedAt": 1786803283324
         },
         "6a9281c66f20fb1e16429e9ec484f643": {
             "deviceId": "6a9281c66f20fb1e16429e9ec484f643",

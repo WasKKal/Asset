@@ -326,14 +326,14 @@
         "443fe74a0407c25d93994f149e0527cb": {
             "deviceId": "443fe74a0407c25d93994f149e0527cb",
             "hwidHash": null,
-            "balance": 17953,
+            "balance": 17927,
             "totalEarned": 18000,
-            "totalSpent": 47,
+            "totalSpent": 73,
             "lastLoginDate": "2026-8-15",
-            "totalRequests": 2,
-            "totalTokens": 4635,
+            "totalRequests": 3,
+            "totalTokens": 7199,
             "createdAt": 1786774847453,
-            "updatedAt": 1786774935699
+            "updatedAt": 1786774950430
         }
     },
     "devices": {

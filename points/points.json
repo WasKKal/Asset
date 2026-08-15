@@ -50,10 +50,10 @@
         "5b5ae713c2e4e4345123ea84eca5ce43": {
             "deviceId": "5b5ae713c2e4e4345123ea84eca5ce43",
             "hwidHash": null,
-            "balance": 0,
-            "totalEarned": 5500,
+            "balance": 8000,
+            "totalEarned": 13500,
             "totalSpent": 5609,
-            "lastLoginDate": "2026-8-14",
+            "lastLoginDate": "2026-8-15",
             "totalRequests": 19,
             "totalTokens": 111957,
             "createdAt": 1786728743143,
@@ -719,7 +719,7 @@
             "hits": [
                 1786770207751
             ],
-            "dailyCount": 1
+            "dailyCount": 2
         },
         "204.3.231.69": {
             "date": "2026-8-15",

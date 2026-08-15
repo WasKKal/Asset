@@ -98,10 +98,10 @@
         "1fe00112c98ee7aea86caff66d0c430e": {
             "deviceId": "1fe00112c98ee7aea86caff66d0c430e",
             "hwidHash": null,
-            "balance": 2000,
-            "totalEarned": 7500,
+            "balance": 10000,
+            "totalEarned": 15500,
             "totalSpent": 5620,
-            "lastLoginDate": "2026-8-14",
+            "lastLoginDate": "2026-8-15",
             "totalRequests": 13,
             "totalTokens": 112287,
             "createdAt": 1786731135896,
@@ -979,7 +979,8 @@
             "newUsers": 0,
             "hits": [
                 1786782271363
-            ]
+            ],
+            "dailyCount": 1
         }
     }
 }

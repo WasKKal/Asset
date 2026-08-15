@@ -530,14 +530,14 @@
         "2cd55f419f899c7f21a4e8e6f4d720ce": {
             "deviceId": "2cd55f419f899c7f21a4e8e6f4d720ce",
             "hwidHash": null,
-            "balance": 17953,
+            "balance": 17928,
             "totalEarned": 18000,
-            "totalSpent": 47,
+            "totalSpent": 72,
             "lastLoginDate": "2026-8-15",
-            "totalRequests": 2,
-            "totalTokens": 4554,
+            "totalRequests": 3,
+            "totalTokens": 7042,
             "createdAt": 1786818481117,
-            "updatedAt": 1786818556872
+            "updatedAt": 1786818566602
         }
     },
     "devices": {

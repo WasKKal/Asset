@@ -14,10 +14,10 @@
         "7c87807aa76910066fa162618077fe87": {
             "deviceId": "7c87807aa76910066fa162618077fe87",
             "hwidHash": null,
-            "balance": 5390,
-            "totalEarned": 5500,
+            "balance": 13390,
+            "totalEarned": 13500,
             "totalSpent": 110,
-            "lastLoginDate": "2026-8-14",
+            "lastLoginDate": "2026-8-15",
             "totalRequests": 1,
             "totalTokens": 2190,
             "createdAt": 1786726324108,
@@ -508,7 +508,7 @@
             "hits": [
                 1786765965860
             ],
-            "dailyCount": 1
+            "dailyCount": 2
         },
         "162.128.157.88": {
             "date": "2026-8-14",

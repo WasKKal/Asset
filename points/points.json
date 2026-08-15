@@ -434,14 +434,14 @@
         "61800bfbac1f2d63a8e0f723a5607fc7": {
             "deviceId": "61800bfbac1f2d63a8e0f723a5607fc7",
             "hwidHash": null,
-            "balance": 17742,
+            "balance": 17713,
             "totalEarned": 18000,
-            "totalSpent": 258,
+            "totalSpent": 287,
             "lastLoginDate": "2026-8-15",
-            "totalRequests": 7,
-            "totalTokens": 25474,
+            "totalRequests": 8,
+            "totalTokens": 28319,
             "createdAt": 1786785026194,
-            "updatedAt": 1786787228166
+            "updatedAt": 1786787434708
         }
     },
     "devices": {

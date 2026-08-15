@@ -458,14 +458,14 @@
         "ba0d90503d42752fd089701e059401a8": {
             "deviceId": "ba0d90503d42752fd089701e059401a8",
             "hwidHash": null,
-            "balance": 17810,
+            "balance": 17784,
             "totalEarned": 18000,
-            "totalSpent": 190,
+            "totalSpent": 216,
             "lastLoginDate": "2026-8-15",
-            "totalRequests": 5,
-            "totalTokens": 18731,
+            "totalRequests": 6,
+            "totalTokens": 21306,
             "createdAt": 1786787846447,
-            "updatedAt": 1786788407892
+            "updatedAt": 1786788460694
         }
     },
     "devices": {

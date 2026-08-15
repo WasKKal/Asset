@@ -518,14 +518,14 @@
         "8b55fd4ff2b0241b18df198c9dbe2027": {
             "deviceId": "8b55fd4ff2b0241b18df198c9dbe2027",
             "hwidHash": null,
-            "balance": 57995,
+            "balance": 57926,
             "totalEarned": 68000,
-            "totalSpent": 10005,
+            "totalSpent": 10074,
             "lastLoginDate": "2026-8-15",
-            "totalRequests": 187,
-            "totalTokens": 990857,
+            "totalRequests": 188,
+            "totalTokens": 997670,
             "createdAt": 1786818176931,
-            "updatedAt": 1786831594640
+            "updatedAt": 1786831605533
         },
         "2cd55f419f899c7f21a4e8e6f4d720ce": {
             "deviceId": "2cd55f419f899c7f21a4e8e6f4d720ce",

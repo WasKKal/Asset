@@ -62,10 +62,10 @@
         "1da6b23a69a87825b4c26470e2ecd828": {
             "deviceId": "1da6b23a69a87825b4c26470e2ecd828",
             "hwidHash": null,
-            "balance": 20,
-            "totalEarned": 5500,
+            "balance": 8020,
+            "totalEarned": 13500,
             "totalSpent": 5480,
-            "lastLoginDate": "2026-8-14",
+            "lastLoginDate": "2026-8-15",
             "totalRequests": 18,
             "totalTokens": 109411,
             "createdAt": 1786728766137,
@@ -646,9 +646,10 @@
             "date": "2026-8-15",
             "newUsers": 1,
             "hits": [
-                1786779871998
+                1786761067265,
+                1786761106862
             ],
-            "dailyCount": 2
+            "dailyCount": 3
         },
         "27.19.220.81": {
             "date": "2026-8-15",

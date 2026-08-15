@@ -86,10 +86,10 @@
         "213cb736f8685b7c3d33a195ef7da989": {
             "deviceId": "213cb736f8685b7c3d33a195ef7da989",
             "hwidHash": null,
-            "balance": 5500,
-            "totalEarned": 5500,
+            "balance": 13500,
+            "totalEarned": 13500,
             "totalSpent": 0,
-            "lastLoginDate": "2026-8-14",
+            "lastLoginDate": "2026-8-15",
             "totalRequests": 0,
             "totalTokens": 0,
             "createdAt": 1786729618540,
@@ -741,7 +741,7 @@
             "hits": [
                 1786783942546
             ],
-            "dailyCount": 1
+            "dailyCount": 2
         },
         "119.28.5.187": {
             "date": "2026-8-15",

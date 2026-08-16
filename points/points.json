@@ -230,10 +230,10 @@
         "3baf68ebc6da1358c3f0119828c85fe3": {
             "deviceId": "3baf68ebc6da1358c3f0119828c85fe3",
             "hwidHash": null,
-            "balance": 18000,
-            "totalEarned": 18000,
+            "balance": 26000,
+            "totalEarned": 26000,
             "totalSpent": 0,
-            "lastLoginDate": "2026-8-15",
+            "lastLoginDate": "2026-8-16",
             "totalRequests": 0,
             "totalTokens": 0,
             "createdAt": 1786757068005,
@@ -961,7 +961,7 @@
             "hits": [
                 1786849065779
             ],
-            "dailyCount": 2
+            "dailyCount": 3
         },
         "210.171.234.203": {
             "date": "2026-8-15",

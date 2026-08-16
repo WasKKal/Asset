@@ -638,14 +638,14 @@
         "03da07260b62b8dffcd0770c807d230c": {
             "deviceId": "03da07260b62b8dffcd0770c807d230c",
             "hwidHash": null,
-            "balance": 18000,
+            "balance": 17974,
             "totalEarned": 18000,
-            "totalSpent": 0,
+            "totalSpent": 26,
             "lastLoginDate": "2026-8-16",
-            "totalRequests": 0,
-            "totalTokens": 0,
+            "totalRequests": 1,
+            "totalTokens": 2553,
             "createdAt": 1786888357817,
-            "updatedAt": 1786888357817
+            "updatedAt": 1786888413901
         }
     },
     "devices": {

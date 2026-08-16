@@ -350,14 +350,14 @@
         "ccc216a45d5f80751fa356fe375fc366": {
             "deviceId": "ccc216a45d5f80751fa356fe375fc366",
             "hwidHash": null,
-            "balance": 25738,
+            "balance": 25683,
             "totalEarned": 26000,
-            "totalSpent": 262,
+            "totalSpent": 317,
             "lastLoginDate": "2026-8-16",
-            "totalRequests": 7,
-            "totalTokens": 25744,
+            "totalRequests": 8,
+            "totalTokens": 31146,
             "createdAt": 1786778202733,
-            "updatedAt": 1786873883351
+            "updatedAt": 1786873891281
         },
         "aaddc898f3128490113ca711bde4f878": {
             "deviceId": "aaddc898f3128490113ca711bde4f878",

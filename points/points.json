@@ -586,6 +586,18 @@
             "totalTokens": 0,
             "createdAt": 1786861859968,
             "updatedAt": 1786861859968
+        },
+        "c157d0aa479864feffe4f2cb282ffc05": {
+            "deviceId": "c157d0aa479864feffe4f2cb282ffc05",
+            "hwidHash": null,
+            "balance": 18000,
+            "totalEarned": 18000,
+            "totalSpent": 0,
+            "lastLoginDate": "2026-8-16",
+            "totalRequests": 0,
+            "totalTokens": 0,
+            "createdAt": 1786865855882,
+            "updatedAt": 1786865855882
         }
     },
     "devices": {
@@ -1726,11 +1738,12 @@
         },
         "162.128.157.63": {
             "date": "2026-8-16",
-            "newUsers": 1,
+            "newUsers": 2,
             "hits": [
                 1786865847928,
                 1786865852942
-            ]
+            ],
+            "dailyCount": 1
         }
     }
 }

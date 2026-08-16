@@ -446,10 +446,10 @@
         "367559d8507f11526d24e51a346002f2": {
             "deviceId": "367559d8507f11526d24e51a346002f2",
             "hwidHash": null,
-            "balance": 10702,
-            "totalEarned": 18000,
+            "balance": 18702,
+            "totalEarned": 26000,
             "totalSpent": 7298,
-            "lastLoginDate": "2026-8-15",
+            "lastLoginDate": "2026-8-16",
             "totalRequests": 117,
             "totalTokens": 723658,
             "createdAt": 1786787605949,
@@ -1157,7 +1157,7 @@
             "hits": [
                 1786865335892
             ],
-            "dailyCount": 2
+            "dailyCount": 3
         },
         "204.3.231.69": {
             "date": "2026-8-15",

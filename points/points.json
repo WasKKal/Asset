@@ -314,10 +314,10 @@
         "08fc9096d49c18bd55c8bd2b07fcdb16": {
             "deviceId": "08fc9096d49c18bd55c8bd2b07fcdb16",
             "hwidHash": null,
-            "balance": 18000,
-            "totalEarned": 18000,
+            "balance": 26000,
+            "totalEarned": 26000,
             "totalSpent": 0,
-            "lastLoginDate": "2026-8-15",
+            "lastLoginDate": "2026-8-16",
             "totalRequests": 0,
             "totalTokens": 0,
             "createdAt": 1786769710774,
@@ -1323,7 +1323,7 @@
             "hits": [
                 1786902343958
             ],
-            "dailyCount": 2
+            "dailyCount": 3
         },
         "204.3.231.47": {
             "date": "2026-8-16",

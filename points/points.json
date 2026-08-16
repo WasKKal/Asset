@@ -662,14 +662,14 @@
         "21e015ee2dc801f5e39a4f5c1c1d3409": {
             "deviceId": "21e015ee2dc801f5e39a4f5c1c1d3409",
             "hwidHash": null,
-            "balance": 16785,
+            "balance": 16742,
             "totalEarned": 18000,
-            "totalSpent": 1215,
+            "totalSpent": 1258,
             "lastLoginDate": "2026-8-16",
-            "totalRequests": 25,
-            "totalTokens": 120446,
+            "totalRequests": 26,
+            "totalTokens": 124714,
             "createdAt": 1786891525185,
-            "updatedAt": 1786892138190
+            "updatedAt": 1786892151919
         }
     },
     "devices": {

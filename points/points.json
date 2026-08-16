@@ -626,14 +626,14 @@
         "eb7e57024d555dff85da5de6b5758875": {
             "deviceId": "eb7e57024d555dff85da5de6b5758875",
             "hwidHash": null,
-            "balance": 15317,
+            "balance": 15250,
             "totalEarned": 18000,
-            "totalSpent": 2683,
+            "totalSpent": 2750,
             "lastLoginDate": "2026-8-16",
-            "totalRequests": 29,
-            "totalTokens": 266664,
+            "totalRequests": 30,
+            "totalTokens": 273337,
             "createdAt": 1786884671790,
-            "updatedAt": 1786885343185
+            "updatedAt": 1786885374997
         }
     },
     "devices": {

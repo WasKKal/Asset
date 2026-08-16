@@ -674,14 +674,14 @@
         "ec785a8b42d6eb73a8b116ae7c9dfc2a": {
             "deviceId": "ec785a8b42d6eb73a8b116ae7c9dfc2a",
             "hwidHash": null,
-            "balance": 17886,
+            "balance": 17829,
             "totalEarned": 18000,
-            "totalSpent": 114,
+            "totalSpent": 171,
             "lastLoginDate": "2026-8-16",
-            "totalRequests": 4,
-            "totalTokens": 11153,
+            "totalRequests": 5,
+            "totalTokens": 16800,
             "createdAt": 1786895622465,
-            "updatedAt": 1786902402809
+            "updatedAt": 1786902430358
         }
     },
     "devices": {

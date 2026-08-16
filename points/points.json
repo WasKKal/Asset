@@ -218,10 +218,10 @@
         "57610a4d1829a288ee38e42264128f19": {
             "deviceId": "57610a4d1829a288ee38e42264128f19",
             "hwidHash": null,
-            "balance": 17480,
-            "totalEarned": 18000,
+            "balance": 25480,
+            "totalEarned": 26000,
             "totalSpent": 520,
-            "lastLoginDate": "2026-8-15",
+            "lastLoginDate": "2026-8-16",
             "totalRequests": 19,
             "totalTokens": 51202,
             "createdAt": 1786756307958,
@@ -1671,7 +1671,8 @@
             "newUsers": 0,
             "hits": [
                 1786853969966
-            ]
+            ],
+            "dailyCount": 1
         }
     }
 }

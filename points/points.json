@@ -7,7 +7,7 @@
         "maxCostPerRequest": 300,
         "maxRequestsPerMinutePerIP": 60,
         "maxNewUsersPerIPPerDay": 3,
-        "maxUserBalance": 1000000,
+        "maxUserBalance": 10000000,
         "maxDailyRewardsPerIPPerDay": 3
     },
     "users": {

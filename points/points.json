@@ -470,10 +470,10 @@
         "95117494a484af162b73a685cf72cf9a": {
             "deviceId": "95117494a484af162b73a685cf72cf9a",
             "hwidHash": null,
-            "balance": 18000,
-            "totalEarned": 18000,
+            "balance": 26000,
+            "totalEarned": 26000,
             "totalSpent": 0,
-            "lastLoginDate": "2026-8-15",
+            "lastLoginDate": "2026-8-16",
             "totalRequests": 0,
             "totalTokens": 0,
             "createdAt": 1786789168065,
@@ -1703,7 +1703,8 @@
             "newUsers": 0,
             "hits": [
                 1786861008341
-            ]
+            ],
+            "dailyCount": 1
         }
     }
 }

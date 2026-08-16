@@ -590,14 +590,14 @@
         "c157d0aa479864feffe4f2cb282ffc05": {
             "deviceId": "c157d0aa479864feffe4f2cb282ffc05",
             "hwidHash": null,
-            "balance": 17794,
+            "balance": 17764,
             "totalEarned": 18000,
-            "totalSpent": 206,
+            "totalSpent": 236,
             "lastLoginDate": "2026-8-16",
-            "totalRequests": 6,
-            "totalTokens": 20361,
+            "totalRequests": 7,
+            "totalTokens": 23346,
             "createdAt": 1786865855882,
-            "updatedAt": 1786866241044
+            "updatedAt": 1786866267078
         }
     },
     "devices": {

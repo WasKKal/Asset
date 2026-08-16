@@ -554,14 +554,14 @@
         "bb67520b1140c50555dbe68509b5457d": {
             "deviceId": "bb67520b1140c50555dbe68509b5457d",
             "hwidHash": null,
-            "balance": 6706,
+            "balance": 6638,
             "totalEarned": 10000,
-            "totalSpent": 3294,
+            "totalSpent": 3362,
             "lastLoginDate": "2026-8-16",
-            "totalRequests": 46,
-            "totalTokens": 326781,
+            "totalRequests": 47,
+            "totalTokens": 333567,
             "createdAt": 1786850610271,
-            "updatedAt": 1786890824584
+            "updatedAt": 1786890833882
         },
         "f28c7696facda7741868a15072c28199": {
             "deviceId": "f28c7696facda7741868a15072c28199",

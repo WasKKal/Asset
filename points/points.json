@@ -11,30 +11,6 @@
         "maxDailyRewardsPerIPPerDay": 3
     },
     "users": {
-        "e9d845a94a11859640342a4db2add19b": {
-            "deviceId": "e9d845a94a11859640342a4db2add19b",
-            "hwidHash": null,
-            "balance": 14879,
-            "totalEarned": 15000,
-            "totalSpent": 121,
-            "lastLoginDate": "2026-8-17",
-            "totalRequests": 3,
-            "totalTokens": 11831,
-            "createdAt": 1786978518210,
-            "updatedAt": 1786978833457
-        },
-        "08fc9096d49c18bd55c8bd2b07fcdb16": {
-            "deviceId": "08fc9096d49c18bd55c8bd2b07fcdb16",
-            "hwidHash": null,
-            "balance": 15000,
-            "totalEarned": 15000,
-            "totalSpent": 0,
-            "lastLoginDate": "2026-8-17",
-            "totalRequests": 0,
-            "totalTokens": 0,
-            "createdAt": 1786978598198,
-            "updatedAt": 1786978598198
-        },
         "7c87807aa76910066fa162618077fe87": {
             "deviceId": "7c87807aa76910066fa162618077fe87",
             "hwidHash": null,
@@ -44,35 +20,16 @@
             "lastLoginDate": "2026-8-17",
             "totalRequests": 0,
             "totalTokens": 0,
-            "createdAt": 1786978811974,
-            "updatedAt": 1786978811974
+            "createdAt": 1786978850504,
+            "updatedAt": 1786978850504
         }
     },
     "devices": [],
     "rate": {
-        "101.47.72.63": {
-            "date": "2026-8-17",
-            "newUsers": 1,
-            "hits": [
-                1786978658269,
-                1786978684033
-            ],
-            "dailyCount": 1
-        },
-        "39.128.183.114": {
-            "date": "2026-8-17",
-            "newUsers": 1,
-            "hits": [
-                1786978594013
-            ],
-            "dailyCount": 1
-        },
         "39.166.47.177": {
             "date": "2026-8-17",
             "newUsers": 1,
-            "hits": [
-                1786978837346
-            ],
+            "hits": [],
             "dailyCount": 1
         }
     }

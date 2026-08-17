@@ -10,7 +10,15 @@
         "maxUserBalance": 100000000,
         "maxDailyRewardsPerIPPerDay": 3
     },
-    "users": {},
-    "devices": {},
-    "rate": {}
+    "users": [],
+    "devices": [],
+    "rate": {
+        "120.242.187.218": {
+            "date": "2026-8-17",
+            "newUsers": 0,
+            "hits": [
+                1786987238207
+            ]
+        }
+    }
 }

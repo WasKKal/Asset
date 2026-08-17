@@ -48,11 +48,20 @@
             "updatedAt": 1786978877833
         }
     },
-    "devices": [],
+    "devices": {
+        "c5c7ac9ca3c149776b9700e949d130ee": {
+            "deviceId": "c5c7ac9ca3c149776b9700e949d130ee",
+            "hwidHash": "4110aeaf3b9fb60107e5e4d62dd96941aca9ee61a74f6623a6065fbeb9ef0da7",
+            "ip": "39.166.47.177",
+            "ua": "Delta iOS\/2.0",
+            "createdAt": 1786978921,
+            "lastSeen": 1786978921
+        }
+    },
     "rate": {
         "39.166.47.177": {
             "date": "2026-8-17",
-            "newUsers": 1,
+            "newUsers": 2,
             "hits": [
                 1786978912380
             ],

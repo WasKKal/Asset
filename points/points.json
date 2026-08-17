@@ -722,14 +722,14 @@
         "13d4c8894ff0d60e29c99d6ac03c67c5": {
             "deviceId": "13d4c8894ff0d60e29c99d6ac03c67c5",
             "hwidHash": null,
-            "balance": 16298,
+            "balance": 16177,
             "totalEarned": 18000,
-            "totalSpent": 1702,
+            "totalSpent": 1823,
             "lastLoginDate": "2026-8-17",
-            "totalRequests": 29,
-            "totalTokens": 168882,
+            "totalRequests": 30,
+            "totalTokens": 180931,
             "createdAt": 1786947052202,
-            "updatedAt": 1786947724402
+            "updatedAt": 1786947736543
         }
     },
     "devices": {

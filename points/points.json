@@ -26,14 +26,14 @@
         "6978f59c8f0c66b8e33cf4c66bfbc1fe": {
             "deviceId": "6978f59c8f0c66b8e33cf4c66bfbc1fe",
             "hwidHash": null,
-            "balance": 15000,
-            "totalEarned": 15000,
+            "balance": 1515000,
+            "totalEarned": 1515000,
             "totalSpent": 0,
             "lastLoginDate": "2026-8-17",
             "totalRequests": 0,
             "totalTokens": 0,
             "createdAt": 1786987844247,
-            "updatedAt": 1786987844247
+            "updatedAt": 1786987857739
         }
     },
     "devices": {

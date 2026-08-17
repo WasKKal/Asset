@@ -1,6 +1,6 @@
 {
     "config": {
-        "dailyReward": 8000,
+        "dailyReward": 5000,
         "newUserReward": 10000,
         "costPerToken": 0.01,
         "minCostPerRequest": 5,

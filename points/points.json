@@ -10,79 +10,15 @@
         "maxUserBalance": 100000000,
         "maxDailyRewardsPerIPPerDay": 3
     },
-    "users": {
-        "3baf68ebc6da1358c3f0119828c85fe3": {
-            "deviceId": "3baf68ebc6da1358c3f0119828c85fe3",
-            "hwidHash": null,
-            "balance": 15000,
-            "totalEarned": 15000,
-            "totalSpent": 0,
-            "lastLoginDate": "2026-8-17",
-            "totalRequests": 0,
-            "totalTokens": 0,
-            "createdAt": 1786975446073,
-            "updatedAt": 1786975446073
-        },
-        "ec785a8b42d6eb73a8b116ae7c9dfc2a": {
-            "deviceId": "ec785a8b42d6eb73a8b116ae7c9dfc2a",
-            "hwidHash": null,
-            "balance": 15000,
-            "totalEarned": 15000,
-            "totalSpent": 0,
-            "lastLoginDate": "2026-8-17",
-            "totalRequests": 0,
-            "totalTokens": 0,
-            "createdAt": 1786975629555,
-            "updatedAt": 1786975629555
-        },
-        "e9d845a94a11859640342a4db2add19b": {
-            "deviceId": "e9d845a94a11859640342a4db2add19b",
-            "hwidHash": null,
-            "balance": 15000,
-            "totalEarned": 15000,
-            "totalSpent": 0,
-            "lastLoginDate": "2026-8-17",
-            "totalRequests": 0,
-            "totalTokens": 0,
-            "createdAt": 1786975809772,
-            "updatedAt": 1786975809772
-        }
-    },
-    "devices": {
-        "e9d845a94a11859640342a4db2add19b": {
-            "deviceId": "e9d845a94a11859640342a4db2add19b",
-            "hwidHash": "061247f192b8577e78ab6481ab8ba63ee3b2f44c547eab1576714e20f7003f89",
-            "ip": "204.3.231.141",
-            "ua": "Delta Android\/2.0",
-            "createdAt": 1786975800,
-            "lastSeen": 1786975800
-        }
-    },
+    "users": [],
+    "devices": [],
     "rate": {
-        "218.12.120.164": {
-            "date": "2026-8-17",
-            "newUsers": 1,
-            "hits": [
-                1786975479156
-            ],
-            "dailyCount": 1
-        },
         "27.19.220.81": {
             "date": "2026-8-17",
-            "newUsers": 1,
+            "newUsers": 0,
             "hits": [
-                1786976138433
-            ],
-            "dailyCount": 1
-        },
-        "204.3.231.141": {
-            "date": "2026-8-17",
-            "newUsers": 2,
-            "hits": [
-                1786975805703,
-                1786975860659
-            ],
-            "dailyCount": 1
+                1786976173417
+            ]
         }
     }
 }

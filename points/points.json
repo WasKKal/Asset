@@ -11,18 +11,6 @@
         "maxDailyRewardsPerIPPerDay": 3
     },
     "users": {
-        "ccc216a45d5f80751fa356fe375fc366": {
-            "deviceId": "ccc216a45d5f80751fa356fe375fc366",
-            "hwidHash": null,
-            "balance": 15000,
-            "totalEarned": 15000,
-            "totalSpent": 0,
-            "lastLoginDate": "2026-8-17",
-            "totalRequests": 0,
-            "totalTokens": 0,
-            "createdAt": 1786973424184,
-            "updatedAt": 1786973424184
-        },
         "3baf68ebc6da1358c3f0119828c85fe3": {
             "deviceId": "3baf68ebc6da1358c3f0119828c85fe3",
             "hwidHash": null,
@@ -32,111 +20,16 @@
             "lastLoginDate": "2026-8-17",
             "totalRequests": 0,
             "totalTokens": 0,
-            "createdAt": 1786973582466,
-            "updatedAt": 1786973582466
-        },
-        "6a9281c66f20fb1e16429e9ec484f643": {
-            "deviceId": "6a9281c66f20fb1e16429e9ec484f643",
-            "hwidHash": null,
-            "balance": 15000,
-            "totalEarned": 15000,
-            "totalSpent": 0,
-            "lastLoginDate": "2026-8-17",
-            "totalRequests": 0,
-            "totalTokens": 0,
-            "createdAt": 1786973970608,
-            "updatedAt": 1786973970608
-        },
-        "ec785a8b42d6eb73a8b116ae7c9dfc2a": {
-            "deviceId": "ec785a8b42d6eb73a8b116ae7c9dfc2a",
-            "hwidHash": null,
-            "balance": 15000,
-            "totalEarned": 15000,
-            "totalSpent": 0,
-            "lastLoginDate": "2026-8-17",
-            "totalRequests": 0,
-            "totalTokens": 0,
-            "createdAt": 1786974290276,
-            "updatedAt": 1786974290276
-        },
-        "08fc9096d49c18bd55c8bd2b07fcdb16": {
-            "deviceId": "08fc9096d49c18bd55c8bd2b07fcdb16",
-            "hwidHash": null,
-            "balance": 15000,
-            "totalEarned": 15000,
-            "totalSpent": 0,
-            "lastLoginDate": "2026-8-17",
-            "totalRequests": 0,
-            "totalTokens": 0,
-            "createdAt": 1786974411160,
-            "updatedAt": 1786974411160
-        },
-        "7c87807aa76910066fa162618077fe87": {
-            "deviceId": "7c87807aa76910066fa162618077fe87",
-            "hwidHash": null,
-            "balance": 15000,
-            "totalEarned": 15000,
-            "totalSpent": 0,
-            "lastLoginDate": "2026-8-17",
-            "totalRequests": 0,
-            "totalTokens": 0,
-            "createdAt": 1786974980383,
-            "updatedAt": 1786974980383
+            "createdAt": 1786975446073,
+            "updatedAt": 1786975446073
         }
     },
     "devices": [],
     "rate": {
-        "101.47.73.254": {
-            "date": "2026-8-17",
-            "newUsers": 1,
-            "hits": [],
-            "dailyCount": 1
-        },
         "218.12.120.164": {
             "date": "2026-8-17",
             "newUsers": 1,
-            "hits": [
-                1786975432602
-            ],
-            "dailyCount": 1
-        },
-        "223.73.233.156": {
-            "date": "2026-8-17",
-            "newUsers": 1,
-            "hits": [
-                1786974859801
-            ],
-            "dailyCount": 1
-        },
-        "27.19.220.81": {
-            "date": "2026-8-17",
-            "newUsers": 1,
-            "hits": [
-                1786974925053
-            ],
-            "dailyCount": 1
-        },
-        "101.47.74.114": {
-            "date": "2026-8-17",
-            "newUsers": 0,
-            "hits": [
-                1786974390193
-            ]
-        },
-        "39.128.183.114": {
-            "date": "2026-8-17",
-            "newUsers": 1,
-            "hits": [
-                1786975155555
-            ],
-            "dailyCount": 1
-        },
-        "39.166.47.177": {
-            "date": "2026-8-17",
-            "newUsers": 1,
-            "hits": [
-                1786974976810
-            ],
+            "hits": [],
             "dailyCount": 1
         }
     }

@@ -350,10 +350,10 @@
         "ccc216a45d5f80751fa356fe375fc366": {
             "deviceId": "ccc216a45d5f80751fa356fe375fc366",
             "hwidHash": null,
-            "balance": 25412,
-            "totalEarned": 26000,
+            "balance": 30412,
+            "totalEarned": 31000,
             "totalSpent": 588,
-            "lastLoginDate": "2026-8-16",
+            "lastLoginDate": "2026-8-17",
             "totalRequests": 13,
             "totalTokens": 58032,
             "createdAt": 1786778202733,
@@ -2347,7 +2347,8 @@
             "newUsers": 0,
             "hits": [
                 1786972575439
-            ]
+            ],
+            "dailyCount": 1
         }
     }
 }

@@ -86,14 +86,14 @@
         "77e81719cc5308fec672bf14bb7cc874": {
             "deviceId": "77e81719cc5308fec672bf14bb7cc874",
             "hwidHash": null,
-            "balance": 163570,
+            "balance": 163401,
             "totalEarned": 164890,
-            "totalSpent": 1320,
+            "totalSpent": 1489,
             "lastLoginDate": "2026-8-17",
-            "totalRequests": 15,
-            "totalTokens": 131230,
+            "totalRequests": 16,
+            "totalTokens": 148104,
             "createdAt": 1786990533615,
-            "updatedAt": 1786991062591
+            "updatedAt": 1786991071612
         }
     },
     "devices": {

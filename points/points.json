@@ -410,10 +410,10 @@
         "6a9281c66f20fb1e16429e9ec484f643": {
             "deviceId": "6a9281c66f20fb1e16429e9ec484f643",
             "hwidHash": null,
-            "balance": 26000,
-            "totalEarned": 26000,
+            "balance": 34000,
+            "totalEarned": 34000,
             "totalSpent": 0,
-            "lastLoginDate": "2026-8-16",
+            "lastLoginDate": "2026-8-17",
             "totalRequests": 0,
             "totalTokens": 0,
             "createdAt": 1786784175415,
@@ -1562,7 +1562,7 @@
             "hits": [
                 1786927059463
             ],
-            "dailyCount": 2
+            "dailyCount": 3
         },
         "111.48.114.80": {
             "date": "2026-8-15",

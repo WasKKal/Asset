@@ -38,14 +38,14 @@
         "e9d845a94a11859640342a4db2add19b": {
             "deviceId": "e9d845a94a11859640342a4db2add19b",
             "hwidHash": null,
-            "balance": 14772,
+            "balance": 14704,
             "totalEarned": 15000,
-            "totalSpent": 228,
+            "totalSpent": 296,
             "lastLoginDate": "2026-8-17",
-            "totalRequests": 5,
-            "totalTokens": 22552,
+            "totalRequests": 6,
+            "totalTokens": 29294,
             "createdAt": 1786978877833,
-            "updatedAt": 1786979054500
+            "updatedAt": 1786979098117
         }
     },
     "devices": {

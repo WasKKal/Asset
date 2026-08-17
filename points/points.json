@@ -710,14 +710,14 @@
         "cc168ffae252e15d25c08486d1c229c8": {
             "deviceId": "cc168ffae252e15d25c08486d1c229c8",
             "hwidHash": null,
-            "balance": 17796,
+            "balance": 17768,
             "totalEarned": 18000,
-            "totalSpent": 204,
+            "totalSpent": 232,
             "lastLoginDate": "2026-8-17",
-            "totalRequests": 8,
-            "totalTokens": 20065,
+            "totalRequests": 9,
+            "totalTokens": 22852,
             "createdAt": 1786946186247,
-            "updatedAt": 1786946535363
+            "updatedAt": 1786946549815
         }
     },
     "devices": {

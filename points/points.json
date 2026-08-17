@@ -158,14 +158,14 @@
         "84babd81cd7eaa323050aa9a2108590d": {
             "deviceId": "84babd81cd7eaa323050aa9a2108590d",
             "hwidHash": null,
-            "balance": 15000,
+            "balance": 14986,
             "totalEarned": 15000,
-            "totalSpent": 0,
+            "totalSpent": 14,
             "lastLoginDate": "2026-8-17",
-            "totalRequests": 0,
-            "totalTokens": 0,
+            "totalRequests": 1,
+            "totalTokens": 1314,
             "createdAt": 1786986780843,
-            "updatedAt": 1786986780843
+            "updatedAt": 1786986785956
         }
     },
     "devices": {

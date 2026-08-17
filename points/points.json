@@ -74,14 +74,14 @@
         "df461717fb4c950ed12dd752427df7f0": {
             "deviceId": "df461717fb4c950ed12dd752427df7f0",
             "hwidHash": null,
-            "balance": 15000,
+            "balance": 14986,
             "totalEarned": 15000,
-            "totalSpent": 0,
+            "totalSpent": 14,
             "lastLoginDate": "2026-8-17",
-            "totalRequests": 0,
-            "totalTokens": 0,
+            "totalRequests": 1,
+            "totalTokens": 1366,
             "createdAt": 1786989862093,
-            "updatedAt": 1786989862093
+            "updatedAt": 1786989865891
         }
     },
     "devices": {

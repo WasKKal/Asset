@@ -98,14 +98,14 @@
         "7688a6cd8248e81915125da07329e858": {
             "deviceId": "7688a6cd8248e81915125da07329e858",
             "hwidHash": null,
-            "balance": 14848,
+            "balance": 14739,
             "totalEarned": 15000,
-            "totalSpent": 152,
+            "totalSpent": 261,
             "lastLoginDate": "2026-8-17",
-            "totalRequests": 3,
-            "totalTokens": 15034,
+            "totalRequests": 4,
+            "totalTokens": 25912,
             "createdAt": 1786991470517,
-            "updatedAt": 1786991590985
+            "updatedAt": 1786991642807
         }
     },
     "devices": {

@@ -10,97 +10,15 @@
         "maxUserBalance": 100000000,
         "maxDailyRewardsPerIPPerDay": 3
     },
-    "users": {
-        "e9d845a94a11859640342a4db2add19b": {
-            "deviceId": "e9d845a94a11859640342a4db2add19b",
-            "hwidHash": null,
-            "balance": 11273,
-            "totalEarned": 15000,
-            "totalSpent": 3727,
-            "lastLoginDate": "2026-8-17",
-            "totalRequests": 39,
-            "totalTokens": 370925,
-            "createdAt": 1786976665198,
-            "updatedAt": 1786977836626
-        },
-        "7c87807aa76910066fa162618077fe87": {
-            "deviceId": "7c87807aa76910066fa162618077fe87",
-            "hwidHash": null,
-            "balance": 15000,
-            "totalEarned": 15000,
-            "totalSpent": 0,
-            "lastLoginDate": "2026-8-17",
-            "totalRequests": 0,
-            "totalTokens": 0,
-            "createdAt": 1786976691818,
-            "updatedAt": 1786976691818
-        },
-        "3baf68ebc6da1358c3f0119828c85fe3": {
-            "deviceId": "3baf68ebc6da1358c3f0119828c85fe3",
-            "hwidHash": null,
-            "balance": 15000,
-            "totalEarned": 15000,
-            "totalSpent": 0,
-            "lastLoginDate": "2026-8-17",
-            "totalRequests": 0,
-            "totalTokens": 0,
-            "createdAt": 1786976699320,
-            "updatedAt": 1786976699320
-        },
-        "08fc9096d49c18bd55c8bd2b07fcdb16": {
-            "deviceId": "08fc9096d49c18bd55c8bd2b07fcdb16",
-            "hwidHash": null,
-            "balance": 15000,
-            "totalEarned": 15000,
-            "totalSpent": 0,
-            "lastLoginDate": "2026-8-17",
-            "totalRequests": 0,
-            "totalTokens": 0,
-            "createdAt": 1786977574984,
-            "updatedAt": 1786977574984
-        }
-    },
+    "users": [],
     "devices": [],
     "rate": {
-        "204.3.231.141": {
+        "101.47.72.63": {
             "date": "2026-8-17",
             "newUsers": 0,
             "hits": [
-                1786977791756,
-                1786977825937
-            ],
-            "dailyCount": 1
-        },
-        "39.166.47.177": {
-            "date": "2026-8-17",
-            "newUsers": 1,
-            "hits": [
-                1786977773289
-            ],
-            "dailyCount": 1
-        },
-        "218.12.120.164": {
-            "date": "2026-8-17",
-            "newUsers": 1,
-            "hits": [
-                1786976695503
-            ],
-            "dailyCount": 1
-        },
-        "27.19.220.81": {
-            "date": "2026-8-17",
-            "newUsers": 0,
-            "hits": [
-                1786977260733
+                1786978509268
             ]
-        },
-        "39.128.183.114": {
-            "date": "2026-8-17",
-            "newUsers": 1,
-            "hits": [
-                1786978326944
-            ],
-            "dailyCount": 1
         }
     }
 }

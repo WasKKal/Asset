@@ -11,11 +11,20 @@
         "maxDailyRewardsPerIPPerDay": 3
     },
     "users": [],
-    "devices": [],
+    "devices": {
+        "2f2b0177575b24e9d73bcceb87d56029": {
+            "deviceId": "2f2b0177575b24e9d73bcceb87d56029",
+            "hwidHash": "79ac59e65285f137d91f6d36287326ad55b48b5942b828e4bc55141ce08e4154",
+            "ip": "204.3.231.118",
+            "ua": "Delta Android\/2.0",
+            "createdAt": 1787359389,
+            "lastSeen": 1787359389
+        }
+    },
     "rate": {
         "204.3.231.118": {
             "date": "2026-8-22",
-            "newUsers": 0,
+            "newUsers": 1,
             "hits": [
                 1787359387469
             ]

@@ -76,6 +76,14 @@
             "ua": "Delta Android\/2.0",
             "createdAt": 1787397845,
             "lastSeen": 1787397845
+        },
+        "cd2cf6df9fcf61ae9dd889e32605d547": {
+            "deviceId": "cd2cf6df9fcf61ae9dd889e32605d547",
+            "hwidHash": "acdbeba40cd2609299d5fdb72fcdc3e52ff8ea9b0fe0d4a4023943d6ac869449",
+            "ip": "124.156.116.140",
+            "ua": "Delta Android\/2.0",
+            "createdAt": 1787441074,
+            "lastSeen": 1787441074
         }
     },
     "rate": {
@@ -194,7 +202,7 @@
         },
         "124.156.116.140": {
             "date": "2026-8-22",
-            "newUsers": 0,
+            "newUsers": 1,
             "hits": [
                 1787441072687
             ]

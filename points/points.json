@@ -10,7 +10,20 @@
         "maxUserBalance": 100000000,
         "maxDailyRewardsPerIPPerDay": 3
     },
-    "users": [],
+    "users": {
+        "2f2b0177575b24e9d73bcceb87d56029": {
+            "deviceId": "2f2b0177575b24e9d73bcceb87d56029",
+            "hwidHash": null,
+            "balance": 15000,
+            "totalEarned": 15000,
+            "totalSpent": 0,
+            "lastLoginDate": "2026-8-22",
+            "totalRequests": 0,
+            "totalTokens": 0,
+            "createdAt": 1787359393752,
+            "updatedAt": 1787359393752
+        }
+    },
     "devices": {
         "2f2b0177575b24e9d73bcceb87d56029": {
             "deviceId": "2f2b0177575b24e9d73bcceb87d56029",
@@ -24,11 +37,12 @@
     "rate": {
         "204.3.231.118": {
             "date": "2026-8-22",
-            "newUsers": 1,
+            "newUsers": 2,
             "hits": [
                 1787359387469,
                 1787359392214
-            ]
+            ],
+            "dailyCount": 1
         }
     }
 }

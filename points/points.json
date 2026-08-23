@@ -26,10 +26,10 @@
         "d0f477ade11bb3ad38bdcabaa3779b9e": {
             "deviceId": "d0f477ade11bb3ad38bdcabaa3779b9e",
             "hwidHash": null,
-            "balance": 15000,
-            "totalEarned": 15000,
+            "balance": 20000,
+            "totalEarned": 20000,
             "totalSpent": 0,
-            "lastLoginDate": "2026-8-22",
+            "lastLoginDate": "2026-8-23",
             "totalRequests": 0,
             "totalTokens": 0,
             "createdAt": 1787373432063,
@@ -248,7 +248,8 @@
             "newUsers": 0,
             "hits": [
                 1787471820566
-            ]
+            ],
+            "dailyCount": 1
         }
     }
 }

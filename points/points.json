@@ -62,10 +62,10 @@
         "cd2cf6df9fcf61ae9dd889e32605d547": {
             "deviceId": "cd2cf6df9fcf61ae9dd889e32605d547",
             "hwidHash": null,
-            "balance": 15000,
-            "totalEarned": 15000,
+            "balance": 20000,
+            "totalEarned": 20000,
             "totalSpent": 0,
-            "lastLoginDate": "2026-8-22",
+            "lastLoginDate": "2026-8-23",
             "totalRequests": 0,
             "totalTokens": 0,
             "createdAt": 1787441077390,
@@ -241,7 +241,8 @@
             "newUsers": 0,
             "hits": [
                 1787466785036
-            ]
+            ],
+            "dailyCount": 1
         }
     }
 }

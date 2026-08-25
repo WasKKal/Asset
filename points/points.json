@@ -86,10 +86,10 @@
         "efa946e4240db5fad6aa929142225f9c": {
             "deviceId": "efa946e4240db5fad6aa929142225f9c",
             "hwidHash": null,
-            "balance": 15000,
-            "totalEarned": 15000,
+            "balance": 20000,
+            "totalEarned": 20000,
             "totalSpent": 0,
-            "lastLoginDate": "2026-8-24",
+            "lastLoginDate": "2026-8-25",
             "totalRequests": 0,
             "totalTokens": 0,
             "createdAt": 1787615398763,
@@ -174,7 +174,8 @@
             "newUsers": 0,
             "hits": [
                 1787624445902
-            ]
+            ],
+            "dailyCount": 1
         },
         "129.226.52.215": {
             "date": "2026-8-22",

@@ -14,10 +14,10 @@
         "2f2b0177575b24e9d73bcceb87d56029": {
             "deviceId": "2f2b0177575b24e9d73bcceb87d56029",
             "hwidHash": null,
-            "balance": 30000,
-            "totalEarned": 30000,
+            "balance": 35000,
+            "totalEarned": 35000,
             "totalSpent": 0,
-            "lastLoginDate": "2026-8-25",
+            "lastLoginDate": "2026-8-26",
             "totalRequests": 0,
             "totalTokens": 0,
             "createdAt": 1787359393752,
@@ -352,7 +352,7 @@
             "hits": [
                 1787704616466
             ],
-            "dailyCount": 1
+            "dailyCount": 2
         },
         "150.221.114.163": {
             "date": "2026-8-24",

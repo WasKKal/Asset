@@ -98,6 +98,12 @@ local DEOBF_TOOLS = {
     { id = "wearedev_clean", name = "WeAreDev 清理", icon = "sparkles", desc = "清理 WeAreDev 混淆特征", color = "warn" },
     { id = "control_flow", name = "控制流还原", icon = "git-branch", desc = "还原被扁平化的控制流", color = "accent" },
     { id = "gc_clean", name = "垃圾代码清理", icon = "trash-2", desc = "移除无效的死代码和垃圾指令", color = "red" },
+    { id = "prometheus_full", name = "Prometheus 完全反混淆", icon = "wand-2", desc = "一键完全反混淆 Prometheus 脚本", color = "green" },
+    { id = "num_expr", name = "数字表达式还原", icon = "binary", desc = "将算术表达式还原为数字常量", color = "accent2" },
+    { id = "unsplit_str", name = "分割字符串合并", icon = "git-merge", desc = "合并被拆分的字符串片段", color = "green" },
+    { id = "unwrap_func", name = "函数包装解除", icon = "package-open", desc = "解除外层函数包装", color = "accent" },
+    { id = "const_array", name = "常量数组内联", icon = "list", desc = "将常量数组引用内联为原始值", color = "accent2" },
+    { id = "unproxify", name = "代理变量还原", icon = "link-2-off", desc = "解除 Proxy 代理恢复原始变量", color = "warn" },
     { id = "format", name = "代码格式化", icon = "align-left", desc = "自动缩进和格式化代码", color = "accent" },
     { id = "analyze", name = "代码分析", icon = "search-code", desc = "分析代码结构和特征", color = "accent2" },
 }
@@ -653,6 +659,53 @@ local function deobfDetectObfuscation(code)
         totalScore = totalScore + 10
     end
     
+    -- Prometheus 检测
+    local prometheusScore = 0
+    -- Prometheus Watermark
+    if code:match("Prometheus") or code:match("prometheus") or code:match("levno%-710") then
+        prometheusScore = prometheusScore + 35
+        table.insert(results, "Prometheus 特征: 找到 Watermark 标记")
+    end
+    -- ConstantArray: 大量 table 构造器 + 索引引用
+    local constArrMatches = select(2, code:gsub('local%s+[%w_]+%s*=%s*{', ""))
+    if constArrMatches >= 3 then
+        prometheusScore = prometheusScore + 15
+        table.insert(results, "Prometheus 特征: 检测到 " .. constArrMatches .. " 处常量数组构造")
+    end
+    -- NumbersToExpressions: 复杂算术表达式替代数字
+    local numExprCount = select(2, code:gsub('0x[%x]+%s*[%%+%-%*/]', ""))
+    if numExprCount > 10 then
+        prometheusScore = prometheusScore + 15
+        table.insert(results, "Prometheus 特征: 检测到 " .. numExprCount .. " 处数字表达式混淆")
+    end
+    -- WrapInFunction: return (function(...) ... end)(...)
+    if code:match("return%s*%(?%s*function%s*%(%.%.%.%)") then
+        prometheusScore = prometheusScore + 20
+        table.insert(results, "Prometheus 特征: 检测到函数包装 (WrapInFunction)")
+    end
+    -- SplitStrings: table.concat 拼接片段
+    local splitStrCount = select(2, code:gsub('table%.concat', ""))
+    if splitStrCount > 5 then
+        prometheusScore = prometheusScore + 10
+        table.insert(results, "Prometheus 特征: 检测到 " .. splitStrCount .. " 处 table.concat 字符串拼接")
+    end
+    -- ProxifyLocals: setmetatable + __index
+    local proxifyCount = select(2, code:gsub('setmetatable', ""))
+    if proxifyCount > 5 then
+        prometheusScore = prometheusScore + 15
+        table.insert(results, "Prometheus 特征: 检测到 " .. proxifyCount .. " 处 setmetatable 代理")
+    end
+    -- EncryptStrings: string.char 大量使用
+    local strCharCount = select(2, code:gsub('string%.char', ""))
+    if strCharCount > 20 then
+        prometheusScore = prometheusScore + 15
+        table.insert(results, "Prometheus 特征: 检测到 " .. strCharCount .. " 处 string.char 加密")
+    end
+    if prometheusScore > 0 then
+        table.insert(results, "Prometheus 置信度: " .. math.min(100, prometheusScore) .. "%")
+        totalScore = totalScore + prometheusScore
+    end
+
     -- 最终判断
     table.insert(results, "")
     table.insert(results, "=== 总体评估 ===")
@@ -665,8 +718,15 @@ local function deobfDetectObfuscation(code)
     else
         table.insert(results, "基本无混淆 (置信度 " .. math.min(100, totalScore) .. "%)")
     end
-    
-    return results
+
+    -- 返回 results 数组和 detection 对象
+    return results, {
+        confidence = math.min(100, totalScore),
+        prometheus = prometheusScore,
+        wearedev = wearedevScore,
+        luraph = luraphScore,
+        results = results,
+    }
 end
 
 -- 变量重命名
@@ -871,6 +931,346 @@ local function deobfRestoreControlFlow(code)
     end)
     
     return result, changes
+end
+
+-- ========== Prometheus 反混淆功能 ==========
+
+-- 数字表达式还原: 将 NumbersToExpressions 生成的算术表达式还原为数字常量
+local function deobfNumExprRestore(code)
+    local result = code
+    local count = 0
+
+    -- 还原 hex 数字: 0xFF -> 255
+    result = result:gsub("0x(%x+)", function(hex)
+        local n = tonumber(hex, 16)
+        if n then
+            count = count + 1
+            return tostring(n)
+        end
+        return "0x" .. hex
+    end)
+
+    -- 还原科学计数法: 1e3 -> 1000
+    result = result:gsub("(%d+)%s*[eE]%s*([%+%-]?%d+)", function(mantissa, exp)
+        local n = tonumber(mantissa .. "e" .. exp)
+        if n and n == math.floor(n) and math.abs(n) < 1e15 then
+            count = count + 1
+            return tostring(n)
+        end
+        return mantissa .. "e" .. exp
+    end)
+
+    -- 还原简单加法表达式: (a + b) -> a+b
+    result = result:gsub("%(%s*(%-?%d+)%s*%+%s*(%-?%d+)%s*%)", function(a, b)
+        local n = tonumber(a) + tonumber(b)
+        count = count + 1
+        return tostring(n)
+    end)
+
+    -- 还原简单减法表达式: (a - b) -> a-b
+    result = result:gsub("%(%s*(%-?%d+)%s*%-%s*(%-?%d+)%s*%)", function(a, b)
+        local n = tonumber(a) - tonumber(b)
+        count = count + 1
+        return tostring(n)
+    end)
+
+    -- 还原乘法表达式: (a * b) -> a*b
+    result = result:gsub("%(%s*(%-?%d+)%s*%*%s*(%-?%d+)%s*%)", function(a, b)
+        local n = tonumber(a) * tonumber(b)
+        count = count + 1
+        return tostring(n)
+    end)
+
+    -- 还原取模表达式: (a % b) -> a%b 的结果（仅在能确定时）
+    result = result:gsub("%(%s*(%-?%d+)%s*%%%%%s*(%-?%d+)%s*%)", function(a, b)
+        local na, nb = tonumber(a), tonumber(b)
+        if nb ~= 0 then
+            local n = na % nb
+            count = count + 1
+            return tostring(n)
+        end
+        return "(" .. a .. "%" .. b .. ")"
+    end)
+
+    -- 还原位运算表达式: (a ~ b) -> XOR 结果 (Luau)
+    result = result:gsub("%(%s*(%-?%d+)%s*%~%s*(%-?%d+)%s*%)", function(a, b)
+        local na, nb = tonumber(a), tonumber(b)
+        if na >= 0 and nb >= 0 and na < 2^32 and nb < 2^32 then
+            local n = na ~ nb
+            count = count + 1
+            return tostring(n)
+        end
+        return "(" .. a .. "~" .. b .. ")"
+    end)
+
+    -- 多层嵌套表达式递归还原 (最多3层)
+    for _ = 1, 3 do
+        local prev = result
+        result = result:gsub("%(%s*(%-?%d+)%s*([%+%-%*])%s*(%-?%d+)%s*%)", function(a, op, b)
+            local na, nb = tonumber(a), tonumber(b)
+            local n
+            if op == "+" then n = na + nb
+            elseif op == "-" then n = na - nb
+            elseif op == "*" then n = na * nb
+            end
+            if n and n == math.floor(n) and math.abs(n) < 1e15 then
+                count = count + 1
+                return tostring(n)
+            end
+            return "(" .. a .. op .. b .. ")"
+        end)
+        if result == prev then break end
+    end
+
+    return result, count
+end
+
+-- 分割字符串合并: 将 SplitStrings 拆分的片段重新合并
+local function deobfUnsplitStrings(code)
+    local result = code
+    local count = 0
+
+    -- 合并 table.concat({...}) 模式
+    result = result:gsub('table%.concat%s*%(%s*{%s*([^}]*)}%s*%)', function(entries)
+        local parts = {}
+        for str in entries:gmatch('"([^"]*)"') do
+            table.insert(parts, str)
+        end
+        if #parts > 1 then
+            count = count + 1
+            return '"' .. table.concat(parts) .. '"'
+        end
+        return 'table.concat({' .. entries .. '})'
+    end)
+
+    -- 合并连续字符串拼接: "a" .. "b" -> "ab"
+    repeat
+        local prev = result
+        result = result:gsub('"([^"]*)"%s*%.%.%s*"([^"]*)"', function(a, b)
+            count = count + 1
+            return '"' .. a .. b .. '"'
+        end)
+    until result == prev
+
+    -- 合并 string.rep("x", n) -> "xxx" (小 n)
+    result = result:gsub('string%.rep%s*%(%s*"([^"]*)"%s*,%s*(%d+)%s*%)', function(str, n)
+        local nn = tonumber(n)
+        if nn and nn <= 100 then
+            count = count + 1
+            return '"' .. string.rep(str, nn) .. '"'
+        end
+        return 'string.rep("' .. str .. '",' .. n .. ')'
+    end)
+
+    return result, count
+end
+
+-- 函数包装解除: 解除 WrapInFunction 的外层包装
+local function deobfUnwrapFunction(code)
+    local result = code
+    local count = 0
+
+    -- 匹配: return (function(...) <body> end)(...)
+    -- 也匹配: local <var> = (function(...) <body> end)(...)
+    local function unwrapPattern(prefix, suffix)
+        local pattern = prefix .. '%(s*function%s*%(%.%.%.%)%s*(.-)%s*end%)%s*%(%.%.%.%)' .. suffix
+        return pattern
+    end
+
+    -- 简化版: return (function(...) <body> end)(...)
+    result = result:gsub('return%s*%(?%s*function%s*%(%.%.%.%)%s*\n', function()
+        count = count + 1
+        return ""
+    end)
+
+    -- 移除尾部的 end)(...) 包装
+    if count > 0 then
+        -- 找到最后的 end)(...) 并移除
+        result = result:gsub('%s*end%s*%)*%s*%(%.%.%.%)%s*$', function()
+            return ""
+        end)
+    end
+
+    -- 解除 local var = (function(...) body end)(...) 模式
+    result = result:gsub('local%s+([%w_]+)%s*=%s*%(s*function%s*%(%s*%)%s*\n', function(varname)
+        count = count + 1
+        return "do\n"
+    end)
+
+    -- 如果没有匹配到复杂模式，尝试简单的一行包装
+    if count == 0 then
+        result = result:gsub('^%s*return%s+function%s*%(%.%.%.%)%s*\n(.-)\n%s*end%s*%(%.%.%.%)%s*$', function(body)
+            count = count + 1
+            return body
+        end)
+    end
+
+    return result, count
+end
+
+-- 常量数组内联: 将 ConstantArray 提取的常量引用替换回原始值
+local function deobfConstantArrayInline(code)
+    local result = code
+    local count = 0
+
+    -- 查找常量数组定义: local <arr> = { "val1", "val2", ... } 或 local <arr> = { val1, val2, ... }
+    -- 然后替换所有 <arr>[<idx>] 为对应值
+    local arrays = {}
+
+    -- 匹配字符串常量数组
+    result = result:gsub('local%s+([%w_]+)%s*=%s*{%s*([^}]-)%s*}', function(arrName, content)
+        -- 仅处理看起来像常量数组的（全字符串或全数字）
+        local items = {}
+        local allStrings = true
+        local allNumbers = true
+        for item in content:gmatch('%s*([^,]+)') do
+            item = item:match("^%s*(.-)%s*$")
+            if item ~= "" then
+                table.insert(items, item)
+                if not item:match('^".*"$') and not item:match("^'.*'$") then
+                    allStrings = false
+                end
+                if not item:match("^%-?%d+%.?%d*$") then
+                    allNumbers = false
+                end
+            end
+        end
+        if (allStrings or allNumbers) and #items > 0 then
+            arrays[arrName] = items
+            count = count + 1
+            return "" -- 移除数组定义
+        end
+        return "local " .. arrName .. " = {" .. content .. "}"
+    end)
+
+    -- 替换数组索引引用: <arr>[<idx>]
+    for arrName, items in pairs(arrays) do
+        result = result:gsub(arrName .. '%s*%[%s*(%d+)%s*%]', function(idx)
+            local i = tonumber(idx)
+            if i and items[i + 1] then -- Lua 1-indexed
+                count = count + 1
+                return items[i + 1]
+            end
+            return arrName .. "[" .. idx .. "]"
+        end)
+    end
+
+    return result, count
+end
+
+-- 代理变量还原: 解除 ProxifyLocals 的 setmetatable 代理
+local function deobfUnproxify(code)
+    local result = code
+    local count = 0
+
+    -- 匹配 proxy 对象创建: local <proxy> = setmetatable({}, { __index = function(_, k) return <original>[k] end })
+    local proxies = {}
+
+    result = result:gsub('local%s+([%w_]+)%s*=%s*setmetatable%s*%(%s*{}%s*,%s*{%s*__index%s*=%s*function%s*%([^)]*%)%s*return%s+([%w_]+)%s*%%[k%]%s*end%s*}%s*%)', function(proxyName, origName)
+        proxies[proxyName] = origName
+        count = count + 1
+        return ""
+    end)
+
+    -- 更宽泛的匹配
+    result = result:gsub('local%s+([%w_]+)%s*=%s*setmetatable%s*%(%s*{}%s*,%s*{%s*__index%s*=%s*function%s*%(%s*[%w_,%s]*%)%s*return%s+([%w_]+)', function(proxyName, origName)
+        if not proxies[proxyName] then
+            proxies[proxyName] = origName
+            count = count + 1
+            return ""
+        end
+        return "local " .. proxyName .. " = setmetatable({}, {__index = function() return " .. origName
+    end)
+
+    -- 替换 proxy 引用为原始变量
+    for proxyName, origName in pairs(proxies) do
+        result = result:gsub("%f[%a_]" .. proxyName .. "%f[^%w_]", origName)
+    end
+
+    -- 清理空的 setmetatable 调用
+    result = result:gsub('setmetatable%s*%(%s*{}%s*,%s*{%s*__index%s*=%s*function%s*%([^)]*%)%s*end%s*}%s*%)%s*\n', function()
+        count = count + 1
+        return ""
+    end)
+
+    return result, count
+end
+
+-- Prometheus 完全反混淆: 一键执行全部 Prometheus 反混淆步骤
+local function deobfPrometheusFull(code)
+    local result = code
+    local totalChanges = 0
+    local stepCount = 0
+
+    -- Step 1: 常量数组内联
+    local r1, c1 = deobfConstantArrayInline(result)
+    result = r1
+    totalChanges = totalChanges + c1
+    stepCount = stepCount + 1
+    AddLog("[Step " .. stepCount .. "] 常量数组内联: " .. c1 .. " 处", "info")
+
+    -- Step 2: 字符串解密
+    local r2, c2 = deobfStringDecrypt(result)
+    result = r2
+    totalChanges = totalChanges + c2
+    stepCount = stepCount + 1
+    AddLog("[Step " .. stepCount .. "] 字符串解密: " .. c2 .. " 处", "info")
+
+    -- Step 3: 分割字符串合并
+    local r3, c3 = deobfUnsplitStrings(result)
+    result = r3
+    totalChanges = totalChanges + c3
+    stepCount = stepCount + 1
+    AddLog("[Step " .. stepCount .. "] 分割字符串合并: " .. c3 .. " 处", "info")
+
+    -- Step 4: 数字表达式还原
+    local r4, c4 = deobfNumExprRestore(result)
+    result = r4
+    totalChanges = totalChanges + c4
+    stepCount = stepCount + 1
+    AddLog("[Step " .. stepCount .. "] 数字表达式还原: " .. c4 .. " 处", "info")
+
+    -- Step 5: 代理变量还原
+    local r5, c5 = deobfUnproxify(result)
+    result = r5
+    totalChanges = totalChanges + c5
+    stepCount = stepCount + 1
+    AddLog("[Step " .. stepCount .. "] 代理变量还原: " .. c5 .. " 处", "info")
+
+    -- Step 6: 函数包装解除
+    local r6, c6 = deobfUnwrapFunction(result)
+    result = r6
+    totalChanges = totalChanges + c6
+    stepCount = stepCount + 1
+    AddLog("[Step " .. stepCount .. "] 函数包装解除: " .. c6 .. " 处", "info")
+
+    -- Step 7: 控制流还原
+    local r7, c7 = deobfRestoreControlFlow(result)
+    result = r7
+    totalChanges = totalChanges + c7
+    stepCount = stepCount + 1
+    AddLog("[Step " .. stepCount .. "] 控制流还原: " .. c7 .. " 处", "info")
+
+    -- Step 8: 变量重命名
+    local r8, c8 = deobfRenameVars(result)
+    result = r8
+    totalChanges = totalChanges + c8
+    stepCount = stepCount + 1
+    AddLog("[Step " .. stepCount .. "] 变量重命名: " .. c8 .. " 处", "info")
+
+    -- Step 9: 垃圾代码清理
+    local r9, c9 = deobfGcClean(result)
+    result = r9
+    totalChanges = totalChanges + c9
+    stepCount = stepCount + 1
+    AddLog("[Step " .. stepCount .. "] 垃圾代码清理: " .. c9 .. " 处", "info")
+
+    -- Step 10: 格式化
+    result = deobfFormatCode(result)
+    stepCount = stepCount + 1
+    AddLog("[Step " .. stepCount .. "] 代码格式化完成", "info")
+
+    return result, totalChanges
 end
 
 -- 垃圾代码清理
@@ -1107,7 +1507,42 @@ local function deobfRunTool(toolId)
         end
         return
     end
-    
+
+    -- Prometheus 完全反混淆
+    if toolId == "prometheus_full" then
+        local content = ""
+        if deobfSelectedFile and dataApi then
+            content = dataApi.readFile(deobfSelectedFile) or ""
+        end
+        if content == "" then
+            content = deobfEditorTextBox and deobfEditorTextBox.Text or ""
+        end
+        if content == "" then
+            AddLog("请先选择文件或输入代码", "warn")
+            return
+        end
+
+        AddLog("=== Prometheus 完全反混淆 ===", "info")
+        AddLog("开始处理...", "info")
+
+        local formatted, totalChanges = deobfPrometheusFull(content)
+
+        if dataApi and deobfSelectedFile then
+            local backupName = deobfSelectedFile:gsub("%.([^%.]+)$", "_deobfuscated.%1")
+            dataApi.writeFile(backupName, formatted)
+            if deobfViewMode == "editor" and deobfEditorTextBox then
+                deobfEditorTextBox.Text = formatted
+            end
+            AddLog("=== 反混淆完成 ===", "info")
+            AddLog("总计 " .. totalChanges .. " 处修改", "info")
+            AddLog("结果已保存到: " .. backupName, "info")
+        else
+            AddLog("=== 反混淆完成 ===", "info")
+            AddLog("总计 " .. totalChanges .. " 处修改", "info")
+        end
+        return
+    end
+
     -- WeAreDev 完全反混淆
     if toolId == "wearedev_full" then
         local content = ""
@@ -1128,11 +1563,9 @@ local function deobfRunTool(toolId)
         local totalChanges = 0
         
         -- Step 1: 检测
-        local detection = deobfDetectObfuscation(content)
-        local isWeAreDev = detection.confidence > 20 and detection.confidence < 100
-        if detection.confidence >= 100 or detection.confidence >= 50 then
-            isWeAreDev = true
-        end
+        local _, detection = deobfDetectObfuscation(content)
+        local isWeAreDev = detection.wearedev > 0 or detection.confidence > 20
+        AddLog("检测到 WeAreDev 特征: " .. tostring(isWeAreDev), "info")
         
         -- Step 2: 字符串解密
         local decrypted, strCount = deobfStringDecrypt(content)
@@ -1222,6 +1655,21 @@ local function deobfRunTool(toolId)
     elseif toolId == "control_flow" then
         newContent, count = deobfRestoreControlFlow(content)
         info = "还原了 " .. count .. " 处控制流"
+    elseif toolId == "num_expr" then
+        newContent, count = deobfNumExprRestore(content)
+        info = "还原了 " .. count .. " 处数字表达式"
+    elseif toolId == "unsplit_str" then
+        newContent, count = deobfUnsplitStrings(content)
+        info = "合并了 " .. count .. " 处分割字符串"
+    elseif toolId == "unwrap_func" then
+        newContent, count = deobfUnwrapFunction(content)
+        info = "解除了 " .. count .. " 层函数包装"
+    elseif toolId == "const_array" then
+        newContent, count = deobfConstantArrayInline(content)
+        info = "内联了 " .. count .. " 个常量数组引用"
+    elseif toolId == "unproxify" then
+        newContent, count = deobfUnproxify(content)
+        info = "还原了 " .. count .. " 个代理变量"
     elseif toolId == "gc_clean" then
         newContent, count = deobfGcClean(content)
         info = "清理了 " .. count .. " 行垃圾代码"
@@ -1837,7 +2285,7 @@ function pageDef.build(frame, helpers)
         return
     end
     
-    if _G.__DeltaUI_AddLog then _G.__DeltaUI_AddLog("[反混淆] 页面构建完成 v1.1.0", "info") end
+    if _G.__DeltaUI_AddLog then _G.__DeltaUI_AddLog("[反混淆] 页面构建完成 v1.2.0", "info") end
 end
 
 local function register()

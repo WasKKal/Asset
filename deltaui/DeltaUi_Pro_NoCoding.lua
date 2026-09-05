@@ -3196,7 +3196,6 @@ local PRESET_PAGES = {
 local presetList = create("Frame", {
     Size = UDim2.new(1, 0, 0, 0),
     BackgroundTransparency = 1,
-    AutomaticCanvasSize = Enum.AutomaticSize.None,
     LayoutOrder = 2.5,
     ZIndex = 4,
 })

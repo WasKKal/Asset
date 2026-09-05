@@ -3262,7 +3262,7 @@ for i, preset in ipairs(PRESET_PAGES) do
 
     local installBtn = makeGradientBtn(card, UDim2.new(0, 88, 0, 30), Vector2.new(1, 0.5), UDim2.new(1, -10, 0.5, 0), t("install_page"))
     safeConnect(installBtn, "MouseButton1Click", function()
-        installExternalPageFromURL(preset.url)
+        installExternalPageFromURL(preset.url, preset.unsafe)
     end)
 
     -- 如果需要不安全模式，添加警告图标
@@ -3893,7 +3893,7 @@ end
 
 
 
-function registerExternalPage(code, url, defOverride)
+function registerExternalPage(code, url, defOverride, forceUnsafe)
     if type(code) ~= "string" or code == "" then
         ShowNotification(t("page_install_failed"), 3)
         return false
@@ -3911,7 +3911,7 @@ function registerExternalPage(code, url, defOverride)
     local captured = nil
     local prevReg = _G.DeltaRegisterPage
     local prevPage = _G.DeltaPage
-    local safeMode = (loadConfig()).pageSafeMode ~= false  
+    local safeMode = (not forceUnsafe) and (loadConfig()).pageSafeMode ~= false  
 
     local chunk = loadstring(code, "@external_page")
     if not chunk then
@@ -4042,7 +4042,7 @@ function registerExternalPage(code, url, defOverride)
     return true
 end
 
-function installExternalPageFromURL(url)
+function installExternalPageFromURL(url, forceUnsafe)
     if type(url) ~= "string" or url == "" or url:sub(1, 4) ~= "http" then
         ShowNotification(t("invalid_page_url"), 2)
         return false
@@ -4065,7 +4065,7 @@ function installExternalPageFromURL(url)
         ShowNotification(t("page_install_failed"), 3)
         return false
     end
-    return registerExternalPage(code, url, nil)
+    return registerExternalPage(code, url, nil, forceUnsafe)
 end
 
 function uninstallExternalPage(name)

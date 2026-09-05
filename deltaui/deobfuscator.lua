@@ -591,26 +591,23 @@ local function deobfFormatCode(code)
         local trimmed = line:match("^%s*(.-)%s*$")
         if trimmed == "" then
             table.insert(result, "")
-            goto continue
+        else
+            local startsBlock = trimmed:match("^function") or trimmed:match("^if.*then$") or trimmed:match("^for.*do$") or trimmed:match("^while.*do$") or trimmed:match("^do$") or trimmed:match("^repeat$")
+            local endsBlock = trimmed:match("^end") or trimmed:match("^else") or trimmed:match("^elseif") or trimmed:match("^until")
+            
+            if endsBlock and not startsBlock then
+                indent = math.max(0, indent - 1)
+            end
+            
+            table.insert(result, indentStr:rep(indent) .. trimmed)
+            
+            if startsBlock then
+                indent = indent + 1
+            end
+            if trimmed:match("^else") or trimmed:match("^elseif") then
+                indent = indent + 1
+            end
         end
-        
-        local startsBlock = trimmed:match("^function") or trimmed:match("^if.*then$") or trimmed:match("^for.*do$") or trimmed:match("^while.*do$") or trimmed:match("^do$") or trimmed:match("^repeat$")
-        local endsBlock = trimmed:match("^end") or trimmed:match("^else") or trimmed:match("^elseif") or trimmed:match("^until")
-        
-        if endsBlock and not startsBlock then
-            indent = math.max(0, indent - 1)
-        end
-        
-        table.insert(result, indentStr:rep(indent) .. trimmed)
-        
-        if startsBlock then
-            indent = indent + 1
-        end
-        if trimmed:match("^else") or trimmed:match("^elseif") then
-            indent = indent + 1
-        end
-        
-        ::continue::
     end
     
     return table.concat(result, "\n")
@@ -661,21 +658,19 @@ local function deobfGcClean(code)
     local result = {}
     for _, line in ipairs(lines) do
         local trimmed = line:match("^%s*(.-)%s*$")
+        local skip = false
         if trimmed == "" then
+            -- 空行保留
+        elseif trimmed:match("^local%s+[%a_][%w_]*%s*=%s*nil%s*$") then
+            skip = true
+        elseif trimmed:match("^[%a_][%w_]*%s*=%s*nil%s*$") then
+            skip = true
+        elseif trimmed:match("^if%s+false%s+then") then
+            skip = true
+        end
+        if not skip then
             table.insert(result, line)
-            goto continue
         end
-        if trimmed:match("^local%s+[%a_][%w_]*%s*=%s*nil%s*$") then
-            goto continue
-        end
-        if trimmed:match("^[%a_][%w_]*%s*=%s*nil%s*$") then
-            goto continue
-        end
-        if trimmed:match("^if%s+false%s+then") then
-            goto continue
-        end
-        table.insert(result, line)
-        ::continue::
     end
     
     return table.concat(result, "\n")
@@ -1378,7 +1373,7 @@ local pageDef = {
     title = "反混淆工具",
     icon = "shield-check",
     dataFolder = "deobfuscator",
-    version = "1.0.1",
+    version = "1.0.2",
 }
 
 function pageDef.build(frame, helpers)

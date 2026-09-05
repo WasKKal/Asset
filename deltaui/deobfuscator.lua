@@ -6,8 +6,76 @@ local theme = nil
 local AddLog = nil
 local dataApi = nil
 
+
 local DEOBF_LEFT_W = 260
 local DEOBF_ANIM_DUR = 0.2
+
+-- 长按判定阈值（秒）：按下超过该时长视为"编辑"意图
+local DEOBF_LONG_PRESS = 0.5
+
+-- 由 build() 从 helpers 缓存：页面切换 & 通知
+local deobfSwitchPage = nil
+local deobfNotify = nil
+
+-- ===== HousePage（主页代码编辑器）桥接 =====
+-- 通过主程序暴露的 _G.__DeltaUI_* 把任意内容打开到主页编辑器标签页
+local function deobfOpenInHouseEditor(name, content)
+    name = tostring(name or "untitled")
+    content = tostring(content or "")
+    local api = _G
+    -- 需要主程序暴露：addTab / codeBox / saveCurrentTab / renderTabs
+    if not (api.__DeltaUI_addTab and api.__DeltaUI_codeBox and api.__DeltaUI_saveCurrentTab) then
+        if deobfNotify then deobfNotify("主页编辑器未就绪，无法打开", 2) end
+        warn("[Deobf] HouseEditor bridge not ready")
+        return false
+    end
+    -- 1) 新建一个空白标签页
+    api.__DeltaUI_addTab()
+    -- 2) 写入内容：isProgrammaticTextChange 置 false，让 PropertyChanged 触发 saveCurrentTab 落盘到 tabs[currentTab]
+    local cb = api.__DeltaUI_codeBox
+    local prev = cb.Text
+    _G.__DeltaUI_isProgrammatic = false  -- 确保保存路径生效
+    cb.Text = content
+    -- 兜底：直接调用一次 saveCurrentTab 持久化（防止信号被屏蔽）
+    pcall(api.__DeltaUI_saveCurrentTab)
+    if api.__DeltaUI_renderTabs then pcall(api.__DeltaUI_renderTabs) end
+    -- 3) 切换到主页
+    if deobfSwitchPage then deobfSwitchPage("house") end
+    if deobfNotify then deobfNotify("已在主页编辑器打开: " .. name, 1) end
+    return true
+end
+
+-- 虚拟"编辑器文本框"桥接对象：
+-- 工具函数里 `deobfEditorTextBox.Text = formatted` 会把结果自动发到 HousePage 编辑器。
+-- 这样彻底移除页面内置输入框，又不破坏各处输出逻辑。
+local deobfEditorBridge = {
+    Text = "",
+    -- 读取时返回当前选中文件内容（兼容 detect_obf 等读取分支）
+    _getValue = function(self)
+        if deobfSelectedFile and dataApi then
+            return dataApi.readFile(deobfSelectedFile) or ""
+        end
+        return self.Text or ""
+    end,
+}
+setmetatable(deobfEditorBridge, {
+    __index = function(t, k)
+        if k == "Text" then return rawget(t, "Text") or "" end
+        return rawget(t, k)
+    end,
+    __newindex = function(t, k, v)
+        if k == "Text" then
+            rawset(t, "Text", v)
+            -- 输出结果 -> 发送到主页编辑器
+            local ok = deobfOpenInHouseEditor(deobfSelectedFile or "deobf_result.lua", v)
+            if not ok and deobfNotify then
+                deobfNotify("无法打开主页编辑器（未安装桥接）", 2)
+            end
+        else
+            rawset(t, k, v)
+        end
+    end,
+})
 
 local function ensureDeps()
     if not svc then
@@ -74,18 +142,15 @@ local deobfFileItems = {}
 local deobfFiles = {}
 
 local deobfRightPanel = nil
-local deobfViewMode = "tools" -- "tools" | "editor" | "hooklog"
+local deobfViewMode = "tools" -- "tools" | "editor"(保留兼容) | "hooklog"
 local deobfToolsView = nil
-local deobfEditorView = nil
 local deobfHookLogView = nil
 local deobfHookLogList = nil
 local deobfHookLogScroll = nil
 local deobfHookLogItems = {}
 local deobfHookRecords = {}
-local deobfEditorTextBox = nil
-local deobfEditorTitle = nil
-local deobfEditorSaveBtn = nil
-local deobfEditorBackBtn = nil
+-- 虚拟桥接：替代原页面内置 TextBox，所有 .Text = X 输出自动发往 HousePage 编辑器
+local deobfEditorTextBox = deobfEditorBridge
 local deobfToolButtons = {}
 
 local DEOBF_TOOLS = {
@@ -242,29 +307,58 @@ local function deobfRefreshFileList()
         end
         delBtn.Parent = row
         
+        -- 长按（编辑）检测：按下超过 DEOBF_LONG_PRESS 秒未松开 => 视为"编辑"
+        local longPressCancelled = false
+        local isLongPressed = false
+
+        local function startLongPress()
+            longPressCancelled = false
+            isLongPressed = false
+            task.spawn(function()
+                task.wait(DEOBF_LONG_PRESS)
+                if not longPressCancelled then
+                    isLongPressed = true
+                    -- === 长按：编辑文件 -> 自动跳转 HousePage 主页编辑器 ===
+                    deobfSelectedFile = fname
+                    local content = (dataApi and dataApi.readFile(fname)) or ""
+                    deobfOpenInHouseEditor(fname, content)
+                    deobfRefreshFileList()
+                end
+            end)
+        end
+
+        local function cancelLongPress()
+            longPressCancelled = true
+        end
+
         row.MouseEnter:Connect(function()
             deobfTween(row, {BackgroundColor3 = theme.accent, BackgroundTransparency = 0.8}, 0.15)
             delBtn.Visible = true
         end)
         row.MouseLeave:Connect(function()
+            cancelLongPress()
             if deobfSelectedFile ~= fname then
                 deobfTween(row, {BackgroundColor3 = theme.surface, BackgroundTransparency = 0.4}, 0.15)
             end
             delBtn.Visible = false
         end)
-        row.MouseButton1Click:Connect(function()
-            deobfSelectedFile = fname
-            deobfOpenEditor(fname)
-            deobfRefreshFileList()
+        -- 单击 = 仅选中（高亮），不打开编辑器
+        row.MouseButton1Down:Connect(function()
+            startLongPress()
+        end)
+        row.MouseButton1Up:Connect(function()
+            if not isLongPressed then
+                -- 真正的"单击选中"
+                deobfSelectedFile = fname
+                deobfRefreshFileList()
+            end
+            cancelLongPress()
         end)
         delBtn.MouseButton1Click:Connect(function()
             if dataApi and dataApi.deleteFile(fname) then
                 AddLog("已删除: " .. fname, "info")
                 if deobfSelectedFile == fname then
                     deobfSelectedFile = nil
-                    if deobfViewMode == "editor" then
-                        deobfShowTools()
-                    end
                 end
                 deobfRefreshFileList()
             end
@@ -326,11 +420,10 @@ local function deobfCreateNewFile()
         return
     end
     if dataApi.writeFile(fname, "") then
-        AddLog("已创建: " .. fname, "info")
+        AddLog("已创建: " .. fname .. "（长按文件即可编辑）", "info")
         deobfSelectedFile = fname
         deobfHideNewFileInput()
         deobfRefreshFileList()
-        deobfOpenEditor(fname)
     end
 end
 
@@ -338,33 +431,28 @@ end
 function deobfShowTools()
     deobfViewMode = "tools"
     if deobfToolsView then deobfToolsView.Visible = true end
-    if deobfEditorView then deobfEditorView.Visible = false end
     if deobfHookLogView then deobfHookLogView.Visible = false end
 end
 
+-- 兼容旧调用：编辑文件 = 在 HousePage 主页编辑器打开
 function deobfOpenEditor(fname)
     deobfViewMode = "editor"
     deobfSelectedFile = fname
     deobfViewingHookRecord = nil
     if deobfToolsView then deobfToolsView.Visible = false end
-    if deobfEditorView then deobfEditorView.Visible = true end
     if deobfHookLogView then deobfHookLogView.Visible = false end
-    if deobfEditorTitle then deobfEditorTitle.Text = fname end
-    
-    if dataApi and deobfEditorTextBox then
-        local content = dataApi.readFile(fname) or ""
-        deobfEditorTextBox.Text = content
-    end
+    local content = (dataApi and dataApi.readFile(fname)) or ""
+    deobfOpenInHouseEditor(fname, content)
 end
 
 function deobfShowHookLog()
     deobfViewMode = "hooklog"
     if deobfToolsView then deobfToolsView.Visible = false end
-    if deobfEditorView then deobfEditorView.Visible = false end
     if deobfHookLogView then deobfHookLogView.Visible = true end
     deobfRefreshHookLog()
 end
 
+-- Hook 记录查看 = 在 HousePage 编辑器打开（可编辑/保存）
 function deobfEditorFromHook(record)
     if not record then return end
     deobfViewMode = "editor"
@@ -372,11 +460,8 @@ function deobfEditorFromHook(record)
     deobfSelectedFile = nil
     if deobfToolsView then deobfToolsView.Visible = false end
     if deobfHookLogView then deobfHookLogView.Visible = false end
-    if deobfEditorView then deobfEditorView.Visible = true end
-    if deobfEditorTitle then deobfEditorTitle.Text = "#" .. record.id .. " " .. tostring(record.chunkname or "unknown") end
-    if deobfEditorTextBox then
-        deobfEditorTextBox.Text = tostring(record.source or "")
-    end
+    local name = "#" .. record.id .. "_" .. tostring(record.chunkname or "hook"):gsub("[^%w_%-]", "_") .. ".lua"
+    deobfOpenInHouseEditor(name, tostring(record.source or ""))
 end
 
 local function deobfRefreshHookLog()
@@ -500,7 +585,7 @@ local function deobfRefreshHookLog()
         local viewLabel = create("TextLabel", {
             Size = UDim2.new(1, 0, 1, 0),
             BackgroundTransparency = 1,
-            Text = "查看",
+            Text = "编辑",
             TextColor3 = Color3.fromRGB(255,255,255),
             TextSize = 10,
             Font = Enum.Font.SourceSansBold,
@@ -571,30 +656,9 @@ local function deobfRefreshHookLog()
     end
 end
 
+-- 保存逻辑已移交 HousePage 主页编辑器；保留空函数以兼容潜在旧引用
 local function deobfSaveCurrentFile()
-    if not dataApi or not deobfEditorTextBox then return end
-    
-    if deobfViewingHookRecord then
-        local fname = "hooked_" .. deobfViewingHookRecord.id .. ".lua"
-        if dataApi.writeFile(fname, deobfEditorTextBox.Text) then
-            deobfViewingHookRecord.source = deobfEditorTextBox.Text
-            deobfSelectedFile = fname
-            deobfViewingHookRecord = nil
-            if deobfEditorTitle then deobfEditorTitle.Text = fname end
-            AddLog("已保存: " .. fname, "info")
-            deobfRefreshFileList()
-        else
-            AddLog("保存失败", "warn")
-        end
-        return
-    end
-    
-    if not deobfSelectedFile then return end
-    if dataApi.writeFile(deobfSelectedFile, deobfEditorTextBox.Text) then
-        AddLog("已保存: " .. deobfSelectedFile, "info")
-    else
-        AddLog("保存失败", "warn")
-    end
+    if deobfNotify then deobfNotify("请在主页编辑器中保存", 1) end
 end
 
 -- ========== 反混淆工具 ==========
@@ -2601,120 +2665,9 @@ local function buildUI()
     })
     deobfHookLogList.Parent = deobfHookLogScroll
     
-    -- ===== 编辑器视图 =====
-    deobfEditorView = create("Frame", {
-        Size = UDim2.new(1, 0, 1, 0),
-        BackgroundTransparency = 1,
-        ZIndex = 4,
-        Visible = false,
-    })
-    deobfEditorView.Parent = deobfRightPanel
-    
-    -- 编辑器头部
-    local editorHeader = create("Frame", {
-        Size = UDim2.new(1, 0, 0, 44),
-        Position = UDim2.new(0, 0, 0, 0),
-        BackgroundTransparency = 1,
-        ZIndex = 5,
-    })
-    editorHeader.Parent = deobfEditorView
-    
-    -- 返回按钮
-    deobfEditorBackBtn = create("TextButton", {
-        Position = UDim2.new(0, 12, 0.5, 0),
-        AnchorPoint = Vector2.new(0, 0.5),
-        Size = UDim2.new(0, 32, 0, 32),
-        BackgroundColor3 = theme.surface,
-        BackgroundTransparency = 0.3,
-        BorderSizePixel = 0,
-        Text = "",
-        AutoButtonColor = false,
-        ZIndex = 6,
-    })
-    corner(8, deobfEditorBackBtn)
-    local backIcon = GetIcon("chevron-left", UDim2.new(0, 14, 0, 14), theme.text)
-    if backIcon then
-        backIcon.AnchorPoint = Vector2.new(0.5, 0.5)
-        backIcon.Position = UDim2.new(0.5, 0, 0.5, 0)
-        backIcon.ZIndex = 7
-        backIcon.Parent = deobfEditorBackBtn
-    end
-    deobfEditorBackBtn.Parent = editorHeader
-    deobfEditorBackBtn.MouseButton1Click:Connect(deobfShowTools)
-    
-    -- 文件名
-    deobfEditorTitle = create("TextLabel", {
-        Position = UDim2.new(0, 52, 0, 0),
-        Size = UDim2.new(1, -120, 0, 44),
-        BackgroundTransparency = 1,
-        Text = "",
-        TextColor3 = theme.text,
-        TextSize = 13,
-        Font = Enum.Font.SourceSansBold,
-        TextXAlignment = Enum.TextXAlignment.Left,
-        TextYAlignment = Enum.TextYAlignment.Center,
-        TextTruncate = Enum.TextTruncate.AtEnd,
-        ZIndex = 6,
-    })
-    deobfEditorTitle.Parent = editorHeader
-    
-    -- 保存按钮
-    deobfEditorSaveBtn = create("TextButton", {
-        AnchorPoint = Vector2.new(1, 0.5),
-        Position = UDim2.new(1, -12, 0.5, 0),
-        Size = UDim2.new(0, 64, 0, 32),
-        BackgroundColor3 = theme.green,
-        BackgroundTransparency = 0.3,
-        BorderSizePixel = 0,
-        Text = "",
-        AutoButtonColor = false,
-        ZIndex = 6,
-    })
-    corner(8, deobfEditorSaveBtn)
-    local saveLabel = create("TextLabel", {
-        Size = UDim2.new(1, 0, 1, 0),
-        BackgroundTransparency = 1,
-        Text = "保存",
-        TextColor3 = Color3.fromRGB(255,255,255),
-        TextSize = 12,
-        Font = Enum.Font.SourceSansBold,
-        TextXAlignment = Enum.TextXAlignment.Center,
-        TextYAlignment = Enum.TextYAlignment.Center,
-        ZIndex = 7,
-    })
-    saveLabel.Parent = deobfEditorSaveBtn
-    deobfEditorSaveBtn.Parent = editorHeader
-    deobfEditorSaveBtn.MouseButton1Click:Connect(deobfSaveCurrentFile)
-    
-    -- 编辑器文本框
-    local editorBg = create("Frame", {
-        Position = UDim2.new(0, 12, 0, 52),
-        Size = UDim2.new(1, -24, 1, -64),
-        BackgroundColor3 = theme.bg,
-        BackgroundTransparency = 0.3,
-        BorderSizePixel = 0,
-        ZIndex = 5,
-    })
-    corner(12, editorBg)
-    stroke(theme.border, 1, editorBg)
-    editorBg.Parent = deobfEditorView
-    
-    deobfEditorTextBox = create("TextBox", {
-        Position = UDim2.new(0, 12, 0, 10),
-        Size = UDim2.new(1, -24, 1, -20),
-        BackgroundTransparency = 1,
-        Text = "",
-        TextColor3 = theme.text,
-        TextSize = 12,
-        Font = Enum.Font.Code,
-        TextXAlignment = Enum.TextXAlignment.Left,
-        TextYAlignment = Enum.TextYAlignment.Top,
-        ClearTextOnFocus = false,
-        MultiLine = true,
-        TextWrapped = false,
-        ZIndex = 6,
-    })
-    deobfEditorTextBox.Parent = editorBg
+    -- ===== 编辑器已移除：编辑文件改为在 HousePage 主页编辑器打开 =====
+    -- 长按文件列表项，或点击 Hook 记录"编辑"，均通过 deobfOpenInHouseEditor 跳转主页。
+    -- 保留 deobfEditorTextBox 作为虚拟桥接（见文件顶部），工具输出自动发送到主页编辑器。
     
     -- 初始化
     deobfRefreshFileList()
@@ -2728,13 +2681,18 @@ local pageDef = {
     title = "反混淆工具",
     icon = "shield-check",
     dataFolder = "deobfuscator",
-    version = "1.0.0",
+    version = "1.1.0",
 }
 
 function pageDef.build(frame, helpers)
     deobfDataApi = helpers and helpers.data
     deobfPage = frame
     frame.Name = "deobfuscator"
+    -- 缓存页面切换 & 通知接口（helpers.switchPage 由主程序注入，见主文件）
+    if helpers then
+        deobfSwitchPage = helpers.switchPage
+        deobfNotify = helpers.ShowNotification
+    end
 
     local fn, err = loadstring(DEOBFUSCATOR_PAGE_SOURCE, "@deobfuscator")
     if not fn then
@@ -2751,7 +2709,7 @@ function pageDef.build(frame, helpers)
         return
     end
     
-    if _G.__DeltaUI_AddLog then _G.__DeltaUI_AddLog("[反混淆] 页面构建完成 v1.0.0", "info") end
+    if _G.__DeltaUI_AddLog then _G.__DeltaUI_AddLog("[反混淆] 页面构建完成 v1.1.0", "info") end
 end
 
 local function register()

@@ -1414,11 +1414,23 @@ local function deobfNumExprRestore(code)
         return "(" .. a .. "%" .. b .. ")"
     end)
 
-    -- 还原位运算表达式: (a ~ b) -> XOR 结果 (Luau)
+    -- 还原位运算表达式: (a ~ b) -> XOR 结果
+    -- 注意: 不能用 Lua 5.1 的 `~` 运算符 (该版本不支持按位 ~ / & / |)，
+    -- 这里用纯 Lua 实现的 32 位 XOR，兼容 Roblox Lua 5.1 / Luau。
+    local function bit_xor32(x, y)
+        x = math.floor(tonumber(x) or 0) % 0x100000000
+        y = math.floor(tonumber(y) or 0) % 0x100000000
+        local r, b = 0, 1
+        for i = 0, 31 do
+            if (x % 2 == 1) ~= (y % 2 == 1) then r = r + b end
+            x = math.floor(x / 2); y = math.floor(y / 2); b = b * 2
+        end
+        return r
+    end
     result = result:gsub("%(%s*(%-?%d+)%s*%~%s*(%-?%d+)%s*%)", function(a, b)
         local na, nb = tonumber(a), tonumber(b)
-        if na >= 0 and nb >= 0 and na < 2^32 and nb < 2^32 then
-            local n = na ~ nb
+        if na and nb and na >= 0 and nb >= 0 and na < 2^32 and nb < 2^32 then
+            local n = bit_xor32(na, nb)
             count = count + 1
             return tostring(n)
         end

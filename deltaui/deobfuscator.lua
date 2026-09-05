@@ -18,9 +18,13 @@ local deobfSwitchPage = nil
 local deobfNotify = nil
 
 -- ===== HousePage（主页代码编辑器）桥接 =====
--- 通过主程序暴露的 _G.__DeltaUI_* 把任意内容打开到主页编辑器标签页
+-- 通过主程序暴露的 _G.__DeltaUI_* 把任意内容打开到主页编辑器：
+--   每次调用都会【新建一个代码页面（顶部卡片/tab）】并写入内容，然后自动跳转到主页。
 local function deobfOpenInHouseEditor(name, content)
     name = tostring(name or "untitled")
+    -- 去掉扩展名以外的安全文件名，作为 tab 名（顶部卡片标题）
+    local tabName = name:gsub("%.[^%.]+$", ""):gsub("[^%w_%-%. ]", "_")
+    if tabName == "" then tabName = "deobf_result" end
     content = tostring(content or "")
     local api = _G
     -- 需要主程序暴露：addTab / codeBox / saveCurrentTab / renderTabs
@@ -29,19 +33,33 @@ local function deobfOpenInHouseEditor(name, content)
         warn("[Deobf] HouseEditor bridge not ready")
         return false
     end
-    -- 1) 新建一个空白标签页
+
+    -- 1) 新建一个代码页面（HousePage 顶部卡片/tab）
     api.__DeltaUI_addTab()
-    -- 2) 写入内容：isProgrammaticTextChange 置 false，让 PropertyChanged 触发 saveCurrentTab 落盘到 tabs[currentTab]
+    --    addTab() 内部已做：saveCurrentTab -> 新建 tab -> currentTab=#tabs -> codeBox.Text=占位文本
+    --    之后我们用真实内容覆盖，并把 tab 名称改为文件名
+
+    -- 2) 将真实内容写入当前 tab
+    --    addTab 末尾把 isProgrammaticTextChange 重置为 false，
+    --    所以这里先临时置 true，避免 Text 赋值被当成"用户编辑"触发双重保存/跳动。
     local cb = api.__DeltaUI_codeBox
-    local prev = cb.Text
-    _G.__DeltaUI_isProgrammatic = false  -- 确保保存路径生效
+    _G.__DeltaUI_isProgrammaticTextChange = true
     cb.Text = content
-    -- 兜底：直接调用一次 saveCurrentTab 持久化（防止信号被屏蔽）
+    _G.__DeltaUI_isProgrammaticTextChange = false
+    -- 立即落盘到 tabs[currentTab].content
     pcall(api.__DeltaUI_saveCurrentTab)
+
+    -- 3) 把顶部卡片（tab）的标题设为文件名
+    if api.__DeltaUI_setCurrentTabName then
+        pcall(api.__DeltaUI_setCurrentTabName, tabName)
+    end
+
+    -- 4) 刷新顶部卡片（tab 胶囊）显示
     if api.__DeltaUI_renderTabs then pcall(api.__DeltaUI_renderTabs) end
-    -- 3) 切换到主页
+
+    -- 5) 切换到主页（HousePage）
     if deobfSwitchPage then deobfSwitchPage("house") end
-    if deobfNotify then deobfNotify("已在主页编辑器打开: " .. name, 1) end
+    if deobfNotify then deobfNotify("已在主页新建代码页: " .. tabName, 1) end
     return true
 end
 
@@ -2681,7 +2699,7 @@ local pageDef = {
     title = "反混淆工具",
     icon = "shield-check",
     dataFolder = "deobfuscator",
-    version = "1.1.0",
+    version = "1.0.0",
 }
 
 function pageDef.build(frame, helpers)
@@ -2709,7 +2727,7 @@ function pageDef.build(frame, helpers)
         return
     end
     
-    if _G.__DeltaUI_AddLog then _G.__DeltaUI_AddLog("[反混淆] 页面构建完成 v1.1.0", "info") end
+    if _G.__DeltaUI_AddLog then _G.__DeltaUI_AddLog("[反混淆] 页面构建完成 v1.0.0", "info") end
 end
 
 local function register()

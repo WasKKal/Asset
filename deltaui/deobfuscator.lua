@@ -43,6 +43,7 @@ local function ensureDeps()
     end
     if not AddLog then AddLog = function(msg, lvl) print("[Deobf]", msg) end end
     if deobfDataApi then dataApi = deobfDataApi end
+    -- 从 DeltaPage helpers 获取 UI 工具函数
     if DeltaPage then
         if not _G.create and DeltaPage.create then _G.create = DeltaPage.create end
         if not _G.corner and DeltaPage.corner then _G.corner = DeltaPage.corner end
@@ -59,6 +60,7 @@ local function deobfTween(obj, props, dur)
     svc.TweenService:Create(obj, tw, props):Play()
 end
 
+-- ========== 状态 ==========
 local deobfLeftPanel = nil
 local deobfFileList = nil
 local deobfFileListScroll = nil
@@ -72,7 +74,7 @@ local deobfFileItems = {}
 local deobfFiles = {}
 
 local deobfRightPanel = nil
-local deobfViewMode = "tools"
+local deobfViewMode = "tools" -- "tools" | "editor" | "hooklog"
 local deobfToolsView = nil
 local deobfEditorView = nil
 local deobfHookLogView = nil
@@ -87,15 +89,19 @@ local deobfEditorBackBtn = nil
 local deobfToolButtons = {}
 
 local DEOBF_TOOLS = {
+    { id = "detect_obf", name = "混淆检测", icon = "scan-search", desc = "检测代码使用的混淆器类型", color = "accent2" },
     { id = "hook_loadstring", name = "Hook Loadstring", icon = "link", desc = "拦截并记录所有 loadstring 调用", color = "accent" },
-    { id = "rename_vars", name = "变量重命名", icon = "type", desc = "将混淆变量名替换为可读名称", color = "accent2" },
-    { id = "string_decrypt", name = "字符串解密", icon = "lock-open", desc = "解密加密的字符串常量", color = "green" },
-    { id = "control_flow", name = "控制流还原", icon = "git-branch", desc = "还原被扁平化的控制流", color = "warn" },
+    { id = "rename_vars", name = "变量重命名", icon = "pencil", desc = "将混淆变量名替换为可读名称", color = "accent2" },
+    { id = "string_decrypt", name = "字符串解密", icon = "key-round", desc = "解密加密的字符串常量", color = "green" },
+    { id = "luraph_clean", name = "Luraph 清理", icon = "eraser", desc = "清理 Luraph 特征代码", color = "warn" },
+    { id = "wearedev_clean", name = "WeAreDev 清理", icon = "sparkles", desc = "清理 WeAreDev 混淆特征", color = "warn" },
+    { id = "control_flow", name = "控制流还原", icon = "git-branch", desc = "还原被扁平化的控制流", color = "accent" },
     { id = "gc_clean", name = "垃圾代码清理", icon = "trash-2", desc = "移除无效的死代码和垃圾指令", color = "red" },
     { id = "format", name = "代码格式化", icon = "align-left", desc = "自动缩进和格式化代码", color = "accent" },
-    { id = "analyze", name = "代码分析", icon = "search", desc = "分析代码结构和特征", color = "accent2" },
+    { id = "analyze", name = "代码分析", icon = "search-code", desc = "分析代码结构和特征", color = "accent2" },
 }
 
+-- ========== 文件列表 ==========
 local function deobfLoadFiles()
     if not dataApi then return {} end
     local result = {}
@@ -112,9 +118,6 @@ end
 
 local function deobfRefreshFileList()
     if not deobfFileList then return end
-    for _, child in ipairs(deobfFileList:GetChildren()) do
-        pcall(function() child:Destroy() end)
-    end
     for _, item in pairs(deobfFileItems) do
         pcall(function() item:Destroy() end)
     end
@@ -156,7 +159,7 @@ local function deobfRefreshFileList()
         })
         corner(8, row)
         
-        local icon = GetIcon("file-text", UDim2.new(0, 14, 0, 14), theme.textDim)
+        local icon = GetIcon("file-code", UDim2.new(0, 14, 0, 14), theme.textDim)
         if icon then
             icon.Position = UDim2.new(0, 10, 0.5, -7)
             icon.ZIndex = 6
@@ -241,6 +244,7 @@ local function deobfRefreshFileList()
     end
 end
 
+-- ========== 新建文件 ==========
 local function deobfShowNewFileInput()
     deobfIsCreatingNew = true
     deobfNewFileBtn.Visible = false
@@ -288,6 +292,7 @@ local function deobfCreateNewFile()
     end
 end
 
+-- ========== 视图切换 ==========
 function deobfShowTools()
     deobfViewMode = "tools"
     if deobfToolsView then deobfToolsView.Visible = true end
@@ -310,11 +315,30 @@ function deobfOpenEditor(fname)
     end
 end
 
+function deobfShowHookLog()
+    deobfViewMode = "hooklog"
+    if deobfToolsView then deobfToolsView.Visible = false end
+    if deobfEditorView then deobfEditorView.Visible = false end
+    if deobfHookLogView then deobfHookLogView.Visible = true end
+    deobfRefreshHookLog()
+end
+
+function deobfEditorFromHook(record)
+    if not record then return end
+    deobfViewMode = "editor"
+    deobfViewingHookRecord = record
+    deobfSelectedFile = nil
+    if deobfToolsView then deobfToolsView.Visible = false end
+    if deobfHookLogView then deobfHookLogView.Visible = false end
+    if deobfEditorView then deobfEditorView.Visible = true end
+    if deobfEditorTitle then deobfEditorTitle.Text = "#" .. record.id .. " " .. tostring(record.chunkname or "unknown") end
+    if deobfEditorTextBox then
+        deobfEditorTextBox.Text = tostring(record.source or "")
+    end
+end
+
 local function deobfRefreshHookLog()
     if not deobfHookLogList then return end
-    for _, child in ipairs(deobfHookLogList:GetChildren()) do
-        pcall(function() child:Destroy() end)
-    end
     for _, item in pairs(deobfHookLogItems) do
         pcall(function() item:Destroy() end)
     end
@@ -418,6 +442,7 @@ local function deobfRefreshHookLog()
         })
         timeLabel.Parent = row
         
+        -- 查看按钮
         local viewBtn = create("TextButton", {
             AnchorPoint = Vector2.new(1, 1),
             Position = UDim2.new(1, -60, 1, -6),
@@ -447,6 +472,7 @@ local function deobfRefreshHookLog()
             deobfEditorFromHook(record)
         end)
         
+        -- 执行按钮
         local runBtn = create("TextButton", {
             AnchorPoint = Vector2.new(1, 1),
             Position = UDim2.new(1, -8, 1, -6),
@@ -503,28 +529,6 @@ local function deobfRefreshHookLog()
     end
 end
 
-function deobfShowHookLog()
-    deobfViewMode = "hooklog"
-    if deobfToolsView then deobfToolsView.Visible = false end
-    if deobfEditorView then deobfEditorView.Visible = false end
-    if deobfHookLogView then deobfHookLogView.Visible = true end
-    deobfRefreshHookLog()
-end
-
-function deobfEditorFromHook(record)
-    if not record then return end
-    deobfViewMode = "editor"
-    deobfViewingHookRecord = record
-    deobfSelectedFile = nil
-    if deobfToolsView then deobfToolsView.Visible = false end
-    if deobfHookLogView then deobfHookLogView.Visible = false end
-    if deobfEditorView then deobfEditorView.Visible = true end
-    if deobfEditorTitle then deobfEditorTitle.Text = "#" .. record.id .. " " .. tostring(record.chunkname or "unknown") end
-    if deobfEditorTextBox then
-        deobfEditorTextBox.Text = tostring(record.source or "")
-    end
-end
-
 local function deobfSaveCurrentFile()
     if not dataApi or not deobfEditorTextBox then return end
     
@@ -534,10 +538,9 @@ local function deobfSaveCurrentFile()
             deobfViewingHookRecord.source = deobfEditorTextBox.Text
             deobfSelectedFile = fname
             deobfViewingHookRecord = nil
+            if deobfEditorTitle then deobfEditorTitle.Text = fname end
             AddLog("已保存: " .. fname, "info")
             deobfRefreshFileList()
-            if deobfEditorView then deobfEditorView.Visible = false end
-            deobfShowTools()
         else
             AddLog("保存失败", "warn")
         end
@@ -547,38 +550,385 @@ local function deobfSaveCurrentFile()
     if not deobfSelectedFile then return end
     if dataApi.writeFile(deobfSelectedFile, deobfEditorTextBox.Text) then
         AddLog("已保存: " .. deobfSelectedFile, "info")
-        deobfRefreshFileList()
-        if deobfEditorView then deobfEditorView.Visible = false end
-        deobfShowTools()
     else
         AddLog("保存失败", "warn")
     end
 end
 
+-- ========== 反混淆工具 ==========
+
+-- 混淆检测
+local function deobfDetectObfuscation(code)
+    local results = {}
+    local totalScore = 0
+    
+    -- Luraph 检测
+    local luraphScore = 0
+    if code:match("Luraph") or code:match("luraph") then
+        luraphScore = luraphScore + 30
+        table.insert(results, "Luraph 特征: 找到 'Luraph' 标记")
+    end
+    if code:match("__Luraph") then
+        luraphScore = luraphScore + 20
+        table.insert(results, "Luraph 特征: 找到全局变量 __Luraph")
+    end
+    if code:match("L0_") or code:match("L1_") or code:match("L2_") then
+        luraphScore = luraphScore + 15
+        table.insert(results, "Luraph 特征: 找到 L0_, L1_, L2_ 变量模式")
+    end
+    if luraphScore > 0 then
+        table.insert(results, "Luraph 置信度: " .. math.min(100, luraphScore) .. "%")
+        totalScore = totalScore + luraphScore
+    end
+    
+    -- WeAreDev 检测
+    local wearedevScore = 0
+    if code:match("WeAreDev") or code:match("wearedev") then
+        wearedevScore = wearedevScore + 25
+        table.insert(results, "WeAreDev 特征: 找到 'WeAreDev' 标记")
+    end
+    if code:match("wearedev%.net") or code:match("wearedev%.org") then
+        wearedevScore = wearedevScore + 20
+        table.insert(results, "WeAreDev 特征: 找到 wearedev.net/org 引用")
+    end
+    if code:match("oOoOOo") or code:match("OOoOOo") then
+        wearedevScore = wearedevScore + 15
+        table.insert(results, "WeAreDev 特征: 找到特征性变量名模式")
+    end
+    if wearedevScore > 0 then
+        table.insert(results, "WeAreDev 置信度: " .. math.min(100, wearedevScore) .. "%")
+        totalScore = totalScore + wearedevScore
+    end
+    
+    -- 一般混淆特征
+    local obfCount = 0
+    local patterns = {
+        {"____", "四下划线变量"},
+        {"obfuscated", "obfuscated 标记"},
+        {"_G%[%\"", "全局变量字符串访问"},
+        {"v_%d+", "v_数字变量模式"},
+        {"_%d+_", "下划线数字下划线模式"},
+    }
+    for _, p in ipairs(patterns) do
+        local count = select(2, code:gsub(p[1], ""))
+        if count > 0 then
+            obfCount = obfCount + count
+            table.insert(results, "混淆特征: " .. p[2] .. " (出现 " .. count .. " 次)")
+        end
+    end
+    
+    if obfCount > 10 then
+        totalScore = totalScore + 30
+    elseif obfCount > 5 then
+        totalScore = totalScore + 15
+    elseif obfCount > 0 then
+        totalScore = totalScore + 5
+    end
+    
+    -- 字符串加密检测
+    local strEncPatterns = {
+        {"string%.char%s*%(", "string.char() 加密"},
+        {"loadstring%s*%(%s*loadstring", "双重 loadstring"},
+        {"getfenv%s*%(%s*0%s*%)", "getfenv(0) 沙箱"},
+        {"setfenv%s*%(%s*0%s*%)", "setfenv(0) 沙箱"},
+    }
+    for _, p in ipairs(strEncPatterns) do
+        if code:match(p[1]) then
+            table.insert(results, "字符串加密: " .. p[2])
+            totalScore = totalScore + 10
+        end
+    end
+    
+    -- 反调试检测
+    if code:match("debugger") or code:match("debug%.get") then
+        table.insert(results, "反调试: 检测到调试器检测代码")
+        totalScore = totalScore + 15
+    end
+    
+    -- 垃圾代码检测
+    local emptyLines = select(2, code:gsub("^%s*\n", ""))
+    if emptyLines > 100 then
+        table.insert(results, "垃圾代码: 大量空行 (" .. emptyLines .. ")")
+        totalScore = totalScore + 10
+    end
+    
+    -- 最终判断
+    table.insert(results, "")
+    table.insert(results, "=== 总体评估 ===")
+    if totalScore >= 80 then
+        table.insert(results, "重度混淆 (置信度 " .. math.min(100, totalScore) .. "%)")
+    elseif totalScore >= 50 then
+        table.insert(results, "中度混淆 (置信度 " .. math.min(100, totalScore) .. "%)")
+    elseif totalScore >= 20 then
+        table.insert(results, "轻度混淆 (置信度 " .. math.min(100, totalScore) .. "%)")
+    else
+        table.insert(results, "基本无混淆 (置信度 " .. math.min(100, totalScore) .. "%)")
+    end
+    
+    return results
+end
+
+-- 变量重命名
 local function deobfRenameVars(code)
     local varMap = {}
     local varCount = 0
-    local patterns = {
-        {"[%a_][%w_]*", function(m)
-            if not varMap[m] and not ({["local"]=1,["function"]=1,["end"]=1,["if"]=1,["then"]=1,["else"]=1,["elseif"]=1,["return"]=1,["for"]=1,["while"]=1,["do"]=1,["repeat"]=1,["until"]=1,["break"]=1,["true"]=1,["false"]=1,["nil"]=1,["and"]=1,["or"]=1,["not"]=1,["in"]=1,["print"]=1,["pairs"]=1,["ipairs"]=1,["table"]=1,["string"]=1,["math"]=1,["tostring"]=1,["tonumber"]=1,["type"]=1,["pcall"]=1,["xpcall"]=1,["error"]=1,["require"]=1,["game"]=1,["workspace"]=1,["script"]=1,["_G"]=1,["task"]=1,["wait"]=1,["Instance"]=1,["Vector2"]=1,["Vector3"]=1,["UDim2"]=1,["Color3"]=1,["Enum"]=1,["TweenInfo"]=1})[m] then
-                if #m <= 3 or m:match("^[a-z]$") or m:match("^_[%d]+") or m:match("^obfuscated") then
+    local reserved = {
+        ["local"]=1,["function"]=1,["end"]=1,["if"]=1,["then"]=1,["else"]=1,
+        ["elseif"]=1,["return"]=1,["for"]=1,["while"]=1,["do"]=1,["repeat"]=1,
+        ["until"]=1,["break"]=1,["true"]=1,["false"]=1,["nil"]=1,["and"]=1,
+        ["or"]=1,["not"]=1,["in"]=1,["print"]=1,["pairs"]=1,["ipairs"]=1,
+        ["table"]=1,["string"]=1,["math"]=1,["tostring"]=1,["tonumber"]=1,
+        ["type"]=1,["pcall"]=1,["xpcall"]=1,["error"]=1,["require"]=1,
+        ["game"]=1,["workspace"]=1,["script"]=1,["_G"]=1,["task"]=1,["wait"]=1,
+        ["Instance"]=1,["Vector2"]=1,["Vector3"]=1,["UDim2"]=1,["Color3"]=1,
+        ["Enum"]=1,["TweenInfo"]=1,["CFrame"]=1,["UDim"]=1,["BrickColor"]=1,
+        ["spawn"]=1,["delay"]=1,["random"]=1,["clock"]=1,
+    }
+    
+    -- 匹配短变量名或混淆变量名
+    for var in code:gmatch("[%a_][%w_]*") do
+        if not reserved[var] then
+            if #var <= 3 or var:match("^_$") or var:match("^_[%d]+$") 
+               or var:match("^v_") or var:match("^_v") 
+               or var:match("^O0+") or var:match("^l_")
+               or var:match("^L0_") or var:match("^L1_")
+               or var:match("^____") then
+                if not varMap[var] then
                     varCount = varCount + 1
-                    varMap[m] = "var_" .. string.format("%03d", varCount)
+                    varMap[var] = "v" .. string.format("%03d", varCount)
                 end
             end
-            return m
-        end}
-    }
-    local result = code
-    for _, pair in ipairs(patterns) do
-        result = result:gsub(pair[1], pair[2])
+        end
     end
+    
+    local result = code
     for old, new in pairs(varMap) do
         result = result:gsub("%f[%a_]" .. old .. "%f[^%w_]", new)
     end
     return result, varCount
 end
 
+-- 字符串解密
+local function deobfStringDecrypt(code)
+    local result = code
+    local count = 0
+    
+    -- string.char() 解密
+    result = result:gsub('string%.char%s*%(%s*([%d%s,]+)%s*%)%s*%.%s*(")', function(nums, suffix)
+        local chars = {}
+        for num in nums:gmatch("%d+") do
+            local c = tonumber(num)
+            if c and c >= 0 and c <= 255 then
+                table.insert(chars, string.char(c))
+            end
+        end
+        if #chars > 0 then
+            count = count + 1
+            return '"' .. table.concat(chars) .. '"'
+        end
+        return "string.char(" .. nums .. ")" .. suffix
+    end)
+    
+    -- 字符串连接解密
+    result = result:gsub('"%s*%.\.%s*"', function()
+        count = count + 1
+        return '"'
+    end)
+    
+    -- 十六进制字符串解密
+    result = result:gsub('"([^"]*)"', function(str)
+        local hex, replacements = string.gsub(str, "\\x(%x%x)", function(hex)
+            count = count + 1
+            return string.char(tonumber(hex, 16))
+        end)
+        if replacements > 0 then
+            return '"' .. hex .. '"'
+        end
+        return '"' .. str .. '"'
+    end)
+    
+    -- utf8.char 解密
+    result = result:gsub('utf8%.char%s*%(%s*([%d%s,]+)%s*%)', function(nums)
+        local chars = {}
+        for num in nums:gmatch("%d+") do
+            local c = tonumber(num)
+            if c then
+                table.insert(chars, utf8.char(c))
+            end
+        end
+        if #chars > 0 then
+            count = count + 1
+            return '"' .. table.concat(chars) .. '"'
+        end
+        return "utf8.char(" .. nums .. ")"
+    end)
+    
+    return result, count
+end
+
+-- Luraph 清理
+local function deobfCleanLuraph(code)
+    local result = code
+    local count = 0
+    
+    -- 清理 Luraph 全局清理代码
+    if result:match("__LuraphPrefixCleaned") then
+        count = count + 1
+        result = result:gsub("_G%.__LuraphPrefixCleaned%s*=%s*true", "")
+    end
+    
+    -- 清理 cleanLuraphPrefix 函数
+    result = result:gsub('local%s+function%s+cleanLuraphPrefix%s*%([^)]*%).-end%s*\n', function(m)
+        count = count + 1
+        return ""
+    end)
+    
+    -- 清理 Luraph 错误处理
+    result = result:gsub('_G%.error%s*=%s*function%s*%([^)]*%).-end', function(m)
+        count = count + 1
+        return ""
+    end)
+    
+    -- 清理 Luraph 相关注释
+    result = result:gsub("%-%-[^\n]*[Ll]uraph[^\n]*\n", function(m)
+        count = count + 1
+        return ""
+    end)
+    
+    -- 清理 Luraph 字符串
+    result = result:gsub('"[^"]*Luraph[^"]*"', function(m)
+        count = count + 1
+        return '""'
+    end)
+    
+    return result, count
+end
+
+-- WeAreDev 清理
+local function deobfCleanWeAreDev(code)
+    local result = code
+    local count = 0
+    
+    -- 清理 WeAreDev 相关代码
+    if result:match("WeAreDev") or result:match("wearedev") then
+        -- 清理环境变量混淆
+        result = result:gsub('getgenv%s*%(%s*%)(%s*)[;,]%s*getgenv', "%1;")
+        result = result:gsub('getgenv%s*%(%s*%)(%s*)[;,]%s*%[[^\]]*%]%s*=%s*getgenv', "%1;")
+        
+        -- 清理长变量名混淆模式
+        result = result:gsub('"([^"]*)"%]%s*%[%s*"([^"]*)"%]%s*%[%s*"([^"]*)"%]%s*=%s*"([^"]*)"', function(a, b, c, d)
+            if #a > 20 or #b > 20 or #c > 20 then
+                count = count + 1
+                return "" .. a .. "".. b .. "".. c .."='".. d .."'"
+            end
+            return '"'.. a ..'"]["'.. b ..'"]["'.. c ..'"]="'.. d ..'"'
+        end)
+        
+        count = count + 1
+    end
+    
+    -- 清理 oOoOOo 模式变量
+    result = result:gsub('oOoOOo%s*=', 'local ')
+    
+    -- 清理字符串反转函数
+    result = result:gsub('string%s*%.[%w_]+%s*=%s*function%s*%([^)]*%).-end', function(m)
+        if m:match("reverse") or m:match("sub") then
+            count = count + 1
+            return ""
+        end
+        return m
+    end)
+    
+    return result, count
+end
+
+-- 控制流还原 (简化版)
+local function deobfRestoreControlFlow(code)
+    local result = code
+    local changes = 0
+    
+    -- 简化 goto 语句 (如果有)
+    result = result:gsub("goto%s+(%w+)", function(label)
+        changes = changes + 1
+        return "-- goto " .. label
+    end)
+    
+    -- 简化 switch/case 结构 (检测 goto 模拟的 switch)
+    local switchPattern = "repeat%s*%n%s*local%s+_%w+%s*=%s*(%d+)%s*%n%s*until%s+false%s*%n%s*%-%-%n%s*if%s+_%w+%s*==%s*(%d+)"
+    local switchRepl = "switch(%1) case %2"
+    
+    -- 清理无用的 repeat-until false 结构
+    result = result:gsub("repeat%s*\n%s*until%s+false", function(m)
+        changes = changes + 1
+        return ""
+    end, 1)
+    
+    -- 清理死代码块 (if false then ... end)
+    result = result:gsub("if%s+false%s+then%s*[^\n]*\n%s*[^\n]*\n%s*end", function(m)
+        changes = changes + 1
+        return "-- [dead code removed]"
+    end)
+    
+    return result, changes
+end
+
+-- 垃圾代码清理
+local function deobfGcClean(code)
+    local lines = {}
+    for line in code:gmatch("[^\r\n]+") do
+        table.insert(lines, line)
+    end
+    
+    local result = {}
+    local removed = 0
+    
+    for _, line in ipairs(lines) do
+        local trimmed = line:match("^%s*(.-)%s*$")
+        local skip = false
+        
+        -- 空行保留
+        if trimmed == "" then
+            -- 保留单行空行，最多连续3个
+            local lastLines = {}
+            for i = #result - 2, #result do
+                if i > 0 then table.insert(lastLines, result[i]) end
+            end
+            local emptyCount = 0
+            for _, l in ipairs(lastLines) do
+                if l:match("^%s*$") then emptyCount = emptyCount + 1 end
+            end
+            if emptyCount < 3 then
+                table.insert(result, line)
+            else
+                skip = true
+            end
+        -- nil 赋值清理
+        elseif trimmed:match("^local%s+[%a_][%w_]*%s*=%s*nil%s*$") then
+            skip = true
+            removed = removed + 1
+        elseif trimmed:match("^[%a_][%w_]*%s*=%s*nil%s*$") then
+            if not trimmed:match("^local%s+") then
+                skip = true
+                removed = removed + 1
+            end
+        -- if false then 清理
+        elseif trimmed:match("^if%s+false%s+then$") then
+            skip = true
+            removed = removed + 1
+        -- 注释行清理 (可选)
+        elseif trimmed:match("^%-%-[%s]*$") then
+            -- 保留有意义的注释
+        end
+        
+        if not skip then
+            table.insert(result, line)
+        end
+    end
+    
+    return table.concat(result, "\n"), removed
+end
+
+-- 代码格式化
 local function deobfFormatCode(code)
     local lines = {}
     for line in code:gmatch("[^\r\n]+") do
@@ -594,8 +944,11 @@ local function deobfFormatCode(code)
         if trimmed == "" then
             table.insert(result, "")
         else
-            local startsBlock = trimmed:match("^function") or trimmed:match("^if.*then$") or trimmed:match("^for.*do$") or trimmed:match("^while.*do$") or trimmed:match("^do$") or trimmed:match("^repeat$")
-            local endsBlock = trimmed:match("^end") or trimmed:match("^else") or trimmed:match("^elseif") or trimmed:match("^until")
+            local startsBlock = trimmed:match("^function") or trimmed:match("^if%s+") 
+                or trimmed:match("^for%s+") or trimmed:match("^while%s+") 
+                or trimmed:match("^do%s*$") or trimmed:match("^repeat%s*$")
+            local endsBlock = trimmed:match("^end%s*$") or trimmed:match("^else%s*$") 
+                or trimmed:match("^elseif%s+") or trimmed:match("^until%s+")
             
             if endsBlock and not startsBlock then
                 indent = math.max(0, indent - 1)
@@ -615,12 +968,13 @@ local function deobfFormatCode(code)
     return table.concat(result, "\n")
 end
 
+-- 代码分析
 local function deobfAnalyzeCode(code)
     local stats = {}
     stats.totalLines = select(2, code:gsub("\n", "\n")) + 1
     stats.totalChars = #code
     
-    local keywords = {"function", "local", "if", "for", "while", "repeat", "do", "end", "return", "break"}
+    local keywords = {"function", "local", "if", "for", "while", "repeat", "do", "end", "return", "break", "and", "or", "not"}
     stats.keywordCount = 0
     for _, kw in ipairs(keywords) do
         stats.keywordCount = stats.keywordCount + select(2, code:gsub("%f[%a]" .. kw .. "%f[^%w]", ""))
@@ -628,213 +982,46 @@ local function deobfAnalyzeCode(code)
     
     local varNames = {}
     for var in code:gmatch("local%s+([%a_][%w_]*)") do
-        table.insert(varNames, var)
+        if not varNames[var] then
+            varNames[var] = 1
+        else
+            varNames[var] = varNames[var] + 1
+        end
     end
-    stats.localCount = #varNames
+    stats.localCount = 0
+    for _ in pairs(varNames) do stats.localCount = stats.localCount + 1 end
+    stats.localTotalUses = 0
+    for _, c in pairs(varNames) do stats.localTotalUses = stats.localTotalUses + c end
     
-    local funcCount = select(2, code:gsub("function%s*[%a_%.%:]*[%w_]*%s*%(", ""))
+    local funcCount = select(2, code:gsub("function%s", ""))
     stats.functionCount = funcCount
     
     local strCount = select(2, code:gsub('"[^"]*"', "")) + select(2, code:gsub("'[^']*'", ""))
     stats.stringCount = strCount
     
     local hasObfuscation = false
-    local obMarkers = {"obfuscated", "____", "_G[\"", "L0_", "L1_", "v_", "_v"}
+    local obMarkers = {
+        "obfuscated", "____", "_G[\"", "L0_", "L1_", "L2_", 
+        "v_%d+", "_v%d+", "oOoOOo", "OOoOOo"
+    }
     for _, marker in ipairs(obMarkers) do
-        if code:find(marker, 1, true) then
+        if code:match(marker) then
             hasObfuscation = true
             break
         end
     end
     stats.likelyObfuscated = hasObfuscation
     
+    -- 检测混淆类型
+    stats.obfuscators = {}
+    if code:match("[Ll]uraph") then table.insert(stats.obfuscators, "Luraph") end
+    if code:match("[Ww]earedev") then table.insert(stats.obfuscators, "WeAreDev") end
+    if code:match("obfuscate") then table.insert(stats.obfuscators, "通用混淆") end
+    
     return stats
 end
 
-local function deobfGcClean(code)
-    local lines = {}
-    for line in code:gmatch("[^\r\n]+") do
-        table.insert(lines, line)
-    end
-    
-    local result = {}
-    for _, line in ipairs(lines) do
-        local trimmed = line:match("^%s*(.-)%s*$")
-        local skip = false
-        if trimmed == "" then
-        elseif trimmed:match("^local%s+[%a_][%w_]*%s*=%s*nil%s*$") then
-            skip = true
-        elseif trimmed:match("^[%a_][%w_]*%s*=%s*nil%s*$") then
-            skip = true
-        elseif trimmed:match("^if%s+false%s+then") then
-            skip = true
-        elseif trimmed:match("^local%s+[%a_][%w_]*%s*=%s*function%s*%(%s*%)%s*end%s*$") then
-            skip = true
-        elseif trimmed:match("^[%a_][%w_]*%s*=%s*[%a_][%w_]*%s*$") then
-            local lhs, rhs = trimmed:match("^([%a_][%w_]*)%s*=%s*([%a_][%w_]*)%s*$")
-            if lhs and rhs and lhs == rhs then
-                skip = true
-            end
-        elseif trimmed:match("^return%s+nil%s*$") then
-            skip = true
-        end
-        if not skip then
-            table.insert(result, line)
-        end
-    end
-    
-    local cleaned = table.concat(result, "\n")
-    cleaned = cleaned:gsub('if%s+true%s+then%s+([^\n]+)%s+end', '%1')
-    
-    return cleaned
-end
-
-local function deobfControlFlowRestore(code)
-    local result = code
-    local restored = 0
-    
-    result = result:gsub('if%s+false%s+then.-end\n?', '')
-    if result ~= code then restored = restored + 1 end
-    
-    result = result:gsub('if%s+true%s+then%s*(.-)%s*end', function(inner)
-        restored = restored + 1
-        return inner
-    end)
-    
-    result = result:gsub('if%s+(%d+)%s*==%s*(%d+)%s+then', function(a, b)
-        if tonumber(a) == tonumber(b) then
-            restored = restored + 1
-            return 'if true then'
-        else
-            return 'if false then'
-        end
-    end)
-    
-    result = result:gsub('do%s*(.-)%s*end', function(inner)
-        if inner:match('\n') then return 'do\n' .. inner .. '\nend' end
-        restored = restored + 1
-        return inner
-    end)
-    
-    return result, restored
-end
-
-local function deobfConstantPropagation(code)
-    local lines = {}
-    for line in code:gmatch("[^\r\n]+") do
-        table.insert(lines, line)
-    end
-    
-    local constants = {}
-    local count = 0
-    
-    for _, line in ipairs(lines) do
-        local trimmed = line:match("^%s*(.-)%s*$")
-        local name, strVal = trimmed:match('^local%s+([%a_][%w_]*)%s*=%s*"([^"]*)"$')
-        if name and strVal then
-            constants[name] = '"' .. strVal .. '"'
-        else
-            local numName, numVal = trimmed:match('^local%s+([%a_][%w_]*)%s*=%s*(-?%d+%.?%d*)$')
-            if numName and numVal then
-                constants[numName] = numVal
-            else
-                local boolName, boolVal = trimmed:match('^local%s+([%a_][%w_]*)%s*=%s*(true|false|nil)$')
-                if boolName and boolVal then
-                    constants[boolName] = boolVal
-                end
-            end
-        end
-    end
-    
-    local usedConstants = {}
-    for name, val in pairs(constants) do
-        local used = false
-        for _, line in ipairs(lines) do
-            if line:match('%f[%a_]' .. name .. '%f[^%w_]') and not line:match('^%s*local%s+' .. name .. '%s*=') then
-                used = true
-                break
-            end
-        end
-        if used then
-            usedConstants[name] = val
-        end
-    end
-    
-    local result = {}
-    for _, line in ipairs(lines) do
-        local trimmed = line:match("^%s*(.-)%s*$")
-        local isAssignment = false
-        
-        for name, val in pairs(usedConstants) do
-            if trimmed:match('^local%s+' .. name .. '%s*=') then
-                isAssignment = true
-                break
-            end
-        end
-        
-        if not isAssignment then
-            local newLine = line
-            for name, val in pairs(usedConstants) do
-                local oldLine = newLine
-                newLine = newLine:gsub('%f[%a_]' .. name .. '%f[^%w_]', val)
-                if newLine ~= oldLine then
-                    count = count + 1
-                end
-            end
-            table.insert(result, newLine)
-        else
-            table.insert(result, line)
-        end
-    end
-    
-    return table.concat(result, "\n"), count
-end
-
-local function deobfStringDecryptEnhanced(code)
-    local result = code
-    local count = 0
-    
-    result = result:gsub('string%.char%(([%d,%s]+)%)', function(nums)
-        local chars = {}
-        for num in nums:gmatch("%d+") do
-            table.insert(chars, string.char(tonumber(num)))
-        end
-        count = count + 1
-        return '"' .. table.concat(chars) .. '"'
-    end)
-    
-    result = result:gsub('tonumber%(%s*"([%da-fA-F]+)"%s*,%s*16%s*%)', function(hex)
-        local num = tonumber(hex, 16)
-        if num then
-            count = count + 1
-            return tostring(num)
-        end
-        return 'tonumber("' .. hex .. '", 16)'
-    end)
-    
-    result = result:gsub('(%d+)%s*%+%s*(%d+)', function(a, b)
-        count = count + 1
-        return tostring(tonumber(a) + tonumber(b))
-    end)
-    
-    result = result:gsub('(%d+)%s*%-%s*(%d+)', function(a, b)
-        count = count + 1
-        return tostring(tonumber(a) - tonumber(b))
-    end)
-    
-    result = result:gsub('(%d+)%s*%*%s*(%d+)', function(a, b)
-        count = count + 1
-        return tostring(tonumber(a) * tonumber(b))
-    end)
-    
-    result = result:gsub('"([^"]*)"%s*%.%.%s*"([^"]*)"', function(a, b)
-        count = count + 1
-        return '"' .. a .. b .. '"'
-    end)
-    
-    return result, count
-end
-
+-- Hook Loadstring
 local deobfHookActive = false
 local deobfHookCount = 0
 local deobfHookedLoadstring = nil
@@ -899,6 +1086,27 @@ local function deobfRunTool(toolId)
         return
     end
     
+    if toolId == "detect_obf" then
+        local content = ""
+        if deobfSelectedFile and dataApi then
+            content = dataApi.readFile(deobfSelectedFile) or ""
+        end
+        if content == "" then
+            content = deobfEditorTextBox and deobfEditorTextBox.Text or ""
+        end
+        if content == "" then
+            AddLog("请先选择文件或输入代码", "warn")
+            return
+        end
+        
+        AddLog("=== 混淆检测报告 ===", "info")
+        local results = deobfDetectObfuscation(content)
+        for _, line in ipairs(results) do
+            AddLog(line, "info")
+        end
+        return
+    end
+    
     if not deobfSelectedFile or not dataApi then
         AddLog("请先选择一个文件", "warn")
         return
@@ -912,25 +1120,26 @@ local function deobfRunTool(toolId)
     
     local newContent = content
     local info = ""
+    local count = 0
     
     if toolId == "rename_vars" then
-        local tmpContent, constCount = deobfConstantPropagation(content)
-        newContent, count = deobfRenameVars(tmpContent)
+        newContent, count = deobfRenameVars(content)
         info = "重命名了 " .. count .. " 个变量"
-        if constCount > 0 then
-            info = info .. "，传播了 " .. constCount .. " 个常量"
-        end
     elseif toolId == "string_decrypt" then
-        newContent, count = deobfStringDecryptEnhanced(content)
-        info = "解密了 " .. count .. " 处字符串/常量"
+        newContent, count = deobfStringDecrypt(content)
+        info = "解密了 " .. count .. " 个字符串"
+    elseif toolId == "luraph_clean" then
+        newContent, count = deobfCleanLuraph(content)
+        info = "清理了 " .. count .. " 处 Luraph 特征"
+    elseif toolId == "wearedev_clean" then
+        newContent, count = deobfCleanWeAreDev(content)
+        info = "清理了 " .. count .. " 处 WeAreDev 特征"
     elseif toolId == "control_flow" then
-        newContent, count = deobfControlFlowRestore(content)
+        newContent, count = deobfRestoreControlFlow(content)
         info = "还原了 " .. count .. " 处控制流"
     elseif toolId == "gc_clean" then
-        local tmp1 = deobfConstantPropagation(content)
-        local tmp2 = deobfControlFlowRestore(tmp1)
-        newContent = deobfGcClean(tmp2)
-        info = "已清理垃圾代码"
+        newContent, count = deobfGcClean(content)
+        info = "清理了 " .. count .. " 行垃圾代码"
     elseif toolId == "format" then
         newContent = deobfFormatCode(content)
         info = "代码已格式化"
@@ -943,6 +1152,9 @@ local function deobfRunTool(toolId)
         AddLog("局部变量: " .. stats.localCount, "info")
         AddLog("字符串数量: " .. stats.stringCount, "info")
         AddLog("疑似混淆: " .. tostring(stats.likelyObfuscated), "info")
+        if #stats.obfuscators > 0 then
+            AddLog("检测到的混淆器: " .. table.concat(stats.obfuscators, ", "), "info")
+        end
         return
     end
     
@@ -960,9 +1172,11 @@ local function deobfRunTool(toolId)
     end
 end
 
+-- ========== 构建 UI ==========
 local function buildUI()
     ensureDeps()
     
+    -- 左侧面板
     deobfLeftPanel = create("Frame", {
         Position = UDim2.new(0, 0, 0, 0),
         Size = UDim2.new(0, DEOBF_LEFT_W, 1, 0),
@@ -997,6 +1211,7 @@ local function buildUI()
     })
     leftTitle.Parent = leftHeader
     
+    -- 新建文件按钮
     deobfNewFileBtn = create("TextButton", {
         AnchorPoint = Vector2.new(1, 0.5),
         Position = UDim2.new(1, -12, 0.5, 0),
@@ -1019,6 +1234,7 @@ local function buildUI()
     deobfNewFileBtn.Parent = leftHeader
     deobfNewFileBtn.MouseButton1Click:Connect(deobfShowNewFileInput)
     
+    -- 新建文件输入框
     deobfNewFileInput = create("Frame", {
         Size = UDim2.new(1, -16, 0, 36),
         Position = UDim2.new(0, 8, 0, 52),
@@ -1096,6 +1312,7 @@ local function buildUI()
     cancelBtn.Parent = deobfNewFileInput
     cancelBtn.MouseButton1Click:Connect(deobfHideNewFileInput)
     
+    -- 文件列表滚动区
     deobfFileListScroll = create("ScrollingFrame", {
         Position = UDim2.new(0, 0, 0, 96),
         Size = UDim2.new(1, 0, 1, -108),
@@ -1116,6 +1333,7 @@ local function buildUI()
     })
     deobfFileList.Parent = deobfFileListScroll
     
+    -- 分隔线
     local divV = create("Frame", {
         Position = UDim2.new(0, DEOBF_LEFT_W + 4, 0, 0),
         Size = UDim2.new(0, 1, 1, 0),
@@ -1126,6 +1344,7 @@ local function buildUI()
     })
     divV.Parent = deobfPage
     
+    -- 右侧面板
     local rightX = DEOBF_LEFT_W + 8
     deobfRightPanel = create("Frame", {
         Position = UDim2.new(0, rightX, 0, 0),
@@ -1139,6 +1358,7 @@ local function buildUI()
     stroke(theme.border, 1, deobfRightPanel)
     deobfRightPanel.Parent = deobfPage
     
+    -- ===== 工具视图 =====
     deobfToolsView = create("Frame", {
         Size = UDim2.new(1, 0, 1, 0),
         BackgroundTransparency = 1,
@@ -1292,6 +1512,7 @@ local function buildUI()
     toolsList.Size = UDim2.new(1, 0, 0, toolsContentH)
     toolsScroll.CanvasSize = UDim2.new(0, 0, 0, toolsContentH)
     
+    -- ===== 拦截记录视图 =====
     deobfHookLogView = create("Frame", {
         Size = UDim2.new(1, 0, 1, 0),
         BackgroundTransparency = 1,
@@ -1308,6 +1529,7 @@ local function buildUI()
     })
     hookLogHeader.Parent = deobfHookLogView
     
+    -- 返回按钮
     local hookLogBackBtn = create("TextButton", {
         Position = UDim2.new(0, 12, 0.5, 0),
         AnchorPoint = Vector2.new(0, 0.5),
@@ -1344,6 +1566,7 @@ local function buildUI()
     })
     hookLogTitle.Parent = hookLogHeader
     
+    -- 状态标签
     local hookStatusLabel = create("TextLabel", {
         AnchorPoint = Vector2.new(1, 0.5),
         Position = UDim2.new(1, -16, 0.5, 0),
@@ -1379,6 +1602,7 @@ local function buildUI()
     })
     deobfHookLogList.Parent = deobfHookLogScroll
     
+    -- ===== 编辑器视图 =====
     deobfEditorView = create("Frame", {
         Size = UDim2.new(1, 0, 1, 0),
         BackgroundTransparency = 1,
@@ -1387,6 +1611,7 @@ local function buildUI()
     })
     deobfEditorView.Parent = deobfRightPanel
     
+    -- 编辑器头部
     local editorHeader = create("Frame", {
         Size = UDim2.new(1, 0, 0, 44),
         Position = UDim2.new(0, 0, 0, 0),
@@ -1395,6 +1620,7 @@ local function buildUI()
     })
     editorHeader.Parent = deobfEditorView
     
+    -- 返回按钮
     deobfEditorBackBtn = create("TextButton", {
         Position = UDim2.new(0, 12, 0.5, 0),
         AnchorPoint = Vector2.new(0, 0.5),
@@ -1417,6 +1643,7 @@ local function buildUI()
     deobfEditorBackBtn.Parent = editorHeader
     deobfEditorBackBtn.MouseButton1Click:Connect(deobfShowTools)
     
+    -- 文件名
     deobfEditorTitle = create("TextLabel", {
         Position = UDim2.new(0, 52, 0, 0),
         Size = UDim2.new(1, -120, 0, 44),
@@ -1432,6 +1659,7 @@ local function buildUI()
     })
     deobfEditorTitle.Parent = editorHeader
     
+    -- 保存按钮
     deobfEditorSaveBtn = create("TextButton", {
         AnchorPoint = Vector2.new(1, 0.5),
         Position = UDim2.new(1, -12, 0.5, 0),
@@ -1459,6 +1687,7 @@ local function buildUI()
     deobfEditorSaveBtn.Parent = editorHeader
     deobfEditorSaveBtn.MouseButton1Click:Connect(deobfSaveCurrentFile)
     
+    -- 编辑器文本框
     local editorBg = create("Frame", {
         Position = UDim2.new(0, 12, 0, 52),
         Size = UDim2.new(1, -24, 1, -64),
@@ -1488,6 +1717,7 @@ local function buildUI()
     })
     deobfEditorTextBox.Parent = editorBg
     
+    -- 初始化
     deobfRefreshFileList()
 end
 
@@ -1522,7 +1752,7 @@ function pageDef.build(frame, helpers)
         return
     end
     
-    if _G.__DeltaUI_AddLog then _G.__DeltaUI_AddLog("[反混淆] 页面构建完成", "info") end
+    if _G.__DeltaUI_AddLog then _G.__DeltaUI_AddLog("[反混淆] 页面构建完成 v1.1.0", "info") end
 end
 
 local function register()

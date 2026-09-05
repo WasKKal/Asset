@@ -43,6 +43,15 @@ local function ensureDeps()
     end
     if not AddLog then AddLog = function(msg, lvl) print("[Deobf]", msg) end end
     if deobfDataApi then dataApi = deobfDataApi end
+    -- 从 DeltaPage helpers 获取 UI 工具函数
+    if DeltaPage then
+        if not _G.create and DeltaPage.create then _G.create = DeltaPage.create end
+        if not _G.corner and DeltaPage.corner then _G.corner = DeltaPage.corner end
+        if not _G.stroke and DeltaPage.stroke then _G.stroke = DeltaPage.stroke end
+        if not _G.GetIcon and DeltaPage.GetIcon then _G.GetIcon = DeltaPage.GetIcon end
+        if not _G.safeConnect and DeltaPage.safeConnect then _G.safeConnect = DeltaPage.safeConnect end
+        if not _G.t and DeltaPage.t then _G.t = DeltaPage.t end
+    end
 end
 
 local function deobfTween(obj, props, dur)

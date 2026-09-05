@@ -3203,6 +3203,8 @@ local PRESET_PAGES = {
     },
 }
 
+local presetRefreshFuncs = {}
+
 local presetList = create("Frame", {
     Size = UDim2.new(1, 0, 0, 0),
     BackgroundTransparency = 1,
@@ -3211,6 +3213,12 @@ local presetList = create("Frame", {
 })
 local presetLayout = create("UIListLayout", {SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 6)})
 presetLayout.Parent = presetList
+
+function refreshAllPresetBtns()
+    for _, fn in ipairs(presetRefreshFuncs) do
+        pcall(fn)
+    end
+end
 
 for i, preset in ipairs(PRESET_PAGES) do
     local card = create("Frame", {
@@ -3297,6 +3305,7 @@ for i, preset in ipairs(PRESET_PAGES) do
         end
     end
     refreshPresetBtn()
+    table.insert(presetRefreshFuncs, refreshPresetBtn)
 
     -- 如果需要不安全模式，添加警告图标
     if preset.unsafe then
@@ -4239,6 +4248,7 @@ function registerExternalPage(code, url, defOverride, forceUnsafe)
     end)
 
     pcall(refreshInstalledPagesList)
+    pcall(refreshAllPresetBtns)
     ShowNotification(t("page_installed"), 2)
     return true
 end
@@ -4294,6 +4304,7 @@ function uninstallExternalPage(name)
         applyTabOrder()
     end
     pcall(refreshInstalledPagesList)
+    pcall(refreshAllPresetBtns)
     ShowNotification(t("page_uninstalled"), 1)
     return true
 end
@@ -4345,6 +4356,7 @@ function refreshInstalledPagesList()
         return
     end
     
+    local displayCount = 0
     for i = count, 1, -1 do
         local p = list[i]
         if p and p.name then
@@ -4353,24 +4365,32 @@ function refreshInstalledPagesList()
             for _, pp in ipairs(PRESET_PAGES) do
                 if pp.name == p.name then isPreset = true; break end
             end
-            if isPreset then continue end
-            local row = create("Frame", {Size = UDim2.new(1, 0, 0, 42), BackgroundColor3 = theme.surface, BackgroundTransparency = 0.3, BorderSizePixel = 0, ZIndex = 4})
-            corner(10, row)
-            local nameLabel = create("TextLabel", {Position = UDim2.new(0, 12, 0, 0), Size = UDim2.new(1, -110, 1, 0), BackgroundTransparency = 1, Text = p.title or p.name, TextColor3 = theme.text, TextSize = 13, Font = Enum.Font.SourceSansBold, TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd, ZIndex = 5})
-            nameLabel.Parent = row
-            local unBtn = create("TextButton", {AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.new(1, -12, 0.5, 0), Size = UDim2.new(0, 84, 0, 28), BackgroundColor3 = theme.red, BackgroundTransparency = 0.3, Text = "", BorderSizePixel = 0, ZIndex = 5})
-            corner(8, unBtn)
-            local unText = create("TextLabel", {Size = UDim2.new(1, 0, 1, 0), BackgroundTransparency = 1, Text = t("uninstall"), TextColor3 = Color3.fromRGB(255,255,255), TextSize = 11, Font = Enum.Font.SourceSansBold, ZIndex = 6})
-            unText.Parent = unBtn
-            unBtn.Parent = row
-            unBtn.MouseButton1Click:Connect(function()
-                uninstallExternalPage(p.name)
-            end)
-            row.Parent = pageExtList
+            if not isPreset then
+                displayCount = displayCount + 1
+                local row = create("Frame", {Size = UDim2.new(1, 0, 0, 42), BackgroundColor3 = theme.surface, BackgroundTransparency = 0.3, BorderSizePixel = 0, ZIndex = 4})
+                corner(10, row)
+                local nameLabel = create("TextLabel", {Position = UDim2.new(0, 12, 0, 0), Size = UDim2.new(1, -110, 1, 0), BackgroundTransparency = 1, Text = p.title or p.name, TextColor3 = theme.text, TextSize = 13, Font = Enum.Font.SourceSansBold, TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd, ZIndex = 5})
+                nameLabel.Parent = row
+                local unBtn = create("TextButton", {AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.new(1, -12, 0.5, 0), Size = UDim2.new(0, 84, 0, 28), BackgroundColor3 = theme.red, BackgroundTransparency = 0.3, Text = "", BorderSizePixel = 0, ZIndex = 5})
+                corner(8, unBtn)
+                local unText = create("TextLabel", {Size = UDim2.new(1, 0, 1, 0), BackgroundTransparency = 1, Text = t("uninstall"), TextColor3 = Color3.fromRGB(255,255,255), TextSize = 11, Font = Enum.Font.SourceSansBold, ZIndex = 6})
+                unText.Parent = unBtn
+                unBtn.Parent = row
+                unBtn.MouseButton1Click:Connect(function()
+                    uninstallExternalPage(p.name)
+                end)
+                row.Parent = pageExtList
+            end
         end
     end
     
-    local contentH = count * 48
+    local contentH = displayCount * 48
+    if displayCount == 0 then
+        local empty = create("TextLabel", {Size = UDim2.new(1, 0, 0, 28), BackgroundTransparency = 1, Text = t("no_installed_pages"), TextColor3 = theme.textDim, TextSize = 12, Font = Enum.Font.SourceSans, ZIndex = 5})
+        empty.Parent = pageExtList
+        pageExtList.Size = UDim2.new(1, 0, 0, 28)
+        return
+    end
     pageExtList.Size = UDim2.new(1, 0, 0, math.min(contentH, 300))
     pageExtList.CanvasSize = UDim2.new(0, 0, 0, contentH)
 end

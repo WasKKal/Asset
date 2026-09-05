@@ -933,6 +933,331 @@ local function deobfRestoreControlFlow(code)
     return result, changes
 end
 
+-- ========== WeAreDev 沙箱反混淆引擎 ==========
+
+-- 在沙箱中安全执行 Lua 代码，返回执行结果或 nil + 错误信息
+local function deobfSandboxExec(code, env)
+    local fn, err = loadstring(code)
+    if not fn then return nil, err end
+    setfenv(fn, env or {})
+    local ok, result = pcall(fn)
+    if ok then return result end
+    return nil, result
+end
+
+-- 提取并执行 WeAreDev 常量数组解密逻辑
+-- Prometheus 混淆输出结构:
+--   return(function(...)
+--     local u={"..." ; "..." ; ...}     -- 常量数组
+--     local function G(G)return u[G-OFFSET]end  -- 索引函数
+--     do <shuffle> end                  -- shuffle/rotate
+--     <B table + base64 decoder>        -- 自定义 base64 解码器
+--     <main code>                       -- VM + 业务逻辑
+--   end)(...)
+local function deobfWeAreDevSandboxDeobfuscate(code)
+    local results = {}
+    local count = 0
+    local result_code = code
+
+    -- Step 1: 移除 Watermark
+    result_code = result_code:gsub("%-%-%[%[.-https://wearedevs%.net/obfuscator.-%]%]%s*", "")
+    count = count + 1
+    table.insert(results, "移除 Watermark 标记")
+
+    -- Step 2: 提取常量数组 u 的原始内容
+    -- 匹配: local u={...}
+    local u_match = result_code:match("local%s+u%s*=%s*({.-})")
+    if not u_match then
+        -- 尝试其他变量名
+        u_match = result_code:match("local%s+(%w+)%s*=%s*({[^\n]-})")
+        if u_match then
+            u_match = result_code:match("local%s+" .. u_match .. "%s*=%s*({.-})")
+        end
+    end
+
+    if not u_match then
+        table.insert(results, "警告: 未找到常量数组")
+        return result_code, count, results
+    end
+
+    -- Step 3: 提取 G 函数中的偏移量
+    -- local function G(G)return u[G-(EXPR)]end
+    local g_offset_str = result_code:match("local%s+function%s+G%(G%)return%s+u%[G%-(.-)%]end")
+    local g_offset = 0
+    if g_offset_str then
+        -- 评估偏移表达式
+        local expr = g_offset_str:gsub("%s", "")
+        -- 安全评估: 只包含数字和 +-*/
+        local ok, val = pcall(loadstring("return " .. expr))
+        if ok and type(val) == "number" then
+            g_offset = val
+        end
+    end
+    table.insert(results, "G 函数偏移量: " .. tostring(g_offset))
+
+    -- Step 4: 提取 shuffle/rotate 操作
+    -- 格式: do for G,V in ipairs({{a,b};{c,d};...}) do while V[1]<V[2] do u[...],u[...],... end end end
+    local shuffle_pairs = {}
+    -- 匹配 shuffle 对: {expr1, expr2}
+    for a, b in result_code:gmatch("{([^,}]+),([^}]+)}") do
+        -- 评估表达式
+        local ok_a, val_a = pcall(loadstring("return " .. a:gsub("%s","")))
+        local ok_b, val_b = pcall(loadstring("return " .. b:gsub("%s","")))
+        if ok_a and ok_b and type(val_a) == "number" and type(val_b) == "number" then
+            if val_a < val_b then
+                table.insert(shuffle_pairs, {val_a, val_b})
+            end
+        end
+    end
+    table.insert(results, "Shuffle 对数: " .. #shuffle_pairs)
+
+    -- Step 5: 构造沙箱代码来解码常量数组
+    -- 我们需要在沙箱中执行: local u={...}; <shuffle>; <base64 decode>
+    -- 但不能执行整个混淆代码（包含 VM）
+    -- 策略: 提取从 local u={...} 到 base64 解码循环结束的部分
+
+    -- 提取从 local u= 到 B 表和解码循环的完整初始化代码
+    local init_start = result_code:find("local%s+u%s*=%s*{")
+    if not init_start then
+        table.insert(results, "警告: 未找到常量数组起始位置")
+        return result_code, count, results
+    end
+
+    -- 找到 base64 解码循环的结束位置
+    -- 解码循环格式: for u=1,#G,1 do ... end
+    -- 我们需要找到这段代码的结束位置
+    -- 策略: 找到 "local function G(G)return u[" 之前的部分就是初始化代码
+    local g_func_pos = result_code:find("local%s+function%s+G%(G%)return%s+u%[")
+    local init_end = nil
+
+    if g_func_pos then
+        -- G 函数在 shuffle 之后，我们需要包含 shuffle
+        -- 找到 shuffle do...end 块的结束
+        -- 搜索 "end end" 在 G 函数之前的位置
+        local search_end = g_func_pos
+        local end_end_pos = result_code:find("end end", init_start)
+        if end_end_pos and end_end_pos < search_end then
+            init_end = end_end_pos + 7 -- "end end" 的长度
+        end
+    end
+
+    if not init_end then
+        -- 回退: 尝试找到 base64 解码器部分
+        -- 搜索 "for" 循环后的 "end" 
+        init_end = result_code:find("local%s+function%s+G%(G%)") or #result_code
+    end
+
+    -- 提取初始化代码
+    local init_code = result_code:sub(init_start, init_end)
+
+    -- Step 6: 提取自定义 base64 字母表
+    -- B 表格式: B={P=0;M=5;c=14;["\054"]=51;...}
+    local b_table_code = init_code:match("(B=%b{})")
+    if not b_table_code then
+        table.insert(results, "警告: 未找到 B 表 (自定义 base64 字母表)")
+    end
+
+    -- Step 7: 构造沙箱执行代码
+    -- 沙箱代码: 执行初始化部分，然后输出解码后的常量数组
+    local sandbox_code = [[
+        local math = math
+        local string = string
+        local table = table
+        local ipairs = ipairs
+        local tonumber = tonumber
+        local tostring = tostring
+        local type = type
+        local pairs = pairs
+        local assert = assert
+
+        -- 执行初始化代码
+        ]] .. init_code .. [[
+
+        -- 收集解码后的常量数组
+        local decoded = {}
+        for i = 1, #u do
+            decoded[i] = u[i]
+        end
+
+        -- 也提供 G 函数
+        local function G(x)
+            return u[x - ]] .. tostring(g_offset) .. [[]
+        end
+
+        -- 返回解码结果
+        return decoded, G
+    ]]
+
+    -- Step 8: 在沙箱中执行
+    local sandbox_env = {
+        math = math,
+        string = string,
+        table = table,
+        ipairs = ipairs,
+        tonumber = tonumber,
+        tostring = tostring,
+        type = type,
+        pairs = pairs,
+        assert = assert,
+        print = function() end,
+        error = function() end,
+        pcall = pcall,
+        select = select,
+        rawget = rawget,
+        rawset = rawset,
+        rawequal = rawequal,
+        setmetatable = setmetatable,
+        getmetatable = getmetatable,
+        unpack = unpack or table.unpack,
+    }
+
+    local fn, err = loadstring(sandbox_code)
+    if not fn then
+        table.insert(results, "沙箱编译失败: " .. tostring(err))
+        -- 回退到静态解码
+        return result_code, count, results
+    end
+    setfenv(fn, sandbox_env)
+
+    local ok, decoded, g_func = pcall(fn)
+    if not ok or type(decoded) ~= "table" then
+        table.insert(results, "沙箱执行失败: " .. tostring(decoded))
+        -- 回退到静态解码
+        return result_code, count, results
+    end
+
+    table.insert(results, "成功解码 " .. #decoded .. " 个常量")
+    count = count + #decoded
+
+    -- Step 9: 替换 G(number_expr) 调用为实际字符串值
+    -- 匹配: G(<arithmetic expression>)
+    local g_replacements = 0
+    result_code = result_code:gsub("G%(([-+%d%s%*%/%(%)]+)%)", function(expr)
+        -- 评估算术表达式
+        local clean_expr = expr:gsub("%s", "")
+        local ok_eval, val = pcall(loadstring("return " .. clean_expr))
+        if ok_eval and type(val) == "number" and g_func then
+            local str = g_func(val)
+            if type(str) == "string" then
+                g_replacements = g_replacements + 1
+                -- 转义字符串中的特殊字符
+                local escaped = str:gsub("\\", "\\\\")
+                escaped = escaped:gsub('"', '\\"')
+                escaped = escaped:gsub("\n", "\\n")
+                escaped = escaped:gsub("\r", "\\r")
+                escaped = escaped:gsub("\t", "\\t")
+                return '"' .. escaped .. '"'
+            end
+        end
+        return "G(" .. expr .. ")"
+    end)
+
+    table.insert(results, "替换 G() 调用: " .. g_replacements .. " 处")
+    count = count + g_replacements
+
+    -- Step 10: 评估并替换数字表达式
+    -- 匹配: NNN+-NNN 或 NNN-(-NNN) 等模式
+    local num_replacements = 0
+    result_code = result_code:gsub("%(([-+]?(%d+)%s*([%+%-])%s*%(?([-+]?%d+)%s*%)?%)", function(full, a, op, b)
+        local na, nb = tonumber(a), tonumber(b)
+        if na and nb then
+            local val
+            if op == "+" then val = na + nb
+            elseif op == "-" then val = na - nb
+            end
+            if val then
+                num_replacements = num_replacements + 1
+                return tostring(val)
+            end
+        end
+        return full
+    end)
+
+    -- 递归简化多层嵌套表达式
+    for _ = 1, 5 do
+        local prev = result_code
+        result_code = result_code:gsub("%(([-+]?(%d+)%s*([%+%-])%s*%(?([-+]?%d+)%s*%)?%)", function(full, a, op, b)
+            local na, nb = tonumber(a), tonumber(b)
+            if na and nb then
+                local val
+                if op == "+" then val = na + nb
+                elseif op == "-" then val = na - nb
+                end
+                if val then return tostring(val) end
+            end
+            return full
+        end)
+        if result_code == prev then break end
+    end
+
+    table.insert(results, "还原数字表达式: " .. num_replacements .. " 处")
+    count = count + num_replacements
+
+    -- Step 11: 移除 WrapInFunction 包装
+    -- 移除开头的: return(function(...)
+    result_code = result_code:gsub("^return%(function%(%.%.%.%)", "do\n", 1)
+    -- 移除结尾的: end)(getfenv...end)(...)
+    result_code = result_code:gsub("end%)%(getfenv.-%)end%)%(%%.%.%.%)%s*$", "\nend", 1)
+    -- 更通用的结尾移除
+    result_code = result_code:gsub("end%)%([^)]*%)%s*end%)%(%%.%.%.%)%s*$", "\nend", 1)
+    count = count + 2
+    table.insert(results, "移除 WrapInFunction 包装")
+
+    -- Step 12: 移除常量数组定义和 G 函数定义
+    -- 移除: local u={...} (使用 %b{} 匹配平衡大括号)
+    result_code = result_code:gsub("local%s+u%s*=%s*%b{}%s*", "", 1)
+    -- 移除: local function G(G)return u[G-(EXPR)]end
+    result_code = result_code:gsub("local%s+function%s+G%(G%)return%s+u%[G%-.-%]end%s*", "", 1)
+    table.insert(results, "移除常量数组和 G 函数定义")
+
+    -- Step 13: 移除 shuffle do...end 块
+    -- 格式: do for G,V in ipairs({...}) do while V[..]<V[..] do u[...],u[...],... end end end
+    result_code = result_code:gsub("^do%s+for%s+%w+,%w+%s+in%s+ipairs%(.-%s*do%s+while.-%s+end%s+end%s+end%s*", "", 1)
+    table.insert(results, "移除 shuffle 块")
+
+    -- Step 14: 移除 base64 解码器块
+    -- 格式: do local G=u local V=string.len ... end (在 shuffle 之后)
+    local decoder_start = result_code:find("do local")
+    if decoder_start and decoder_start < 500 then
+        -- 通过 do/end 深度跟踪找到匹配的 end
+        local depth = 0
+        local pos = decoder_start
+        local decoder_end = nil
+        while pos <= #result_code do
+            local ch = result_code:sub(pos, pos + 2)
+            if ch == "do " or ch == "do\n" or ch == "do\t" then
+                depth = depth + 1
+                pos = pos + 2
+            elseif result_code:sub(pos, pos + 3) == "end " or result_code:sub(pos, pos + 3) == "end\n" or result_code:sub(pos, pos + 3) == "end\t" or result_code:sub(pos, pos + 3) == "end)" then
+                depth = depth - 1
+                pos = pos + 3
+                if depth <= 0 then
+                    decoder_end = pos + 1
+                    break
+                end
+            else
+                pos = pos + 1
+            end
+        end
+        if decoder_end then
+            result_code = result_code:sub(1, decoder_start - 1) .. result_code:sub(decoder_end)
+            count = count + 1
+            table.insert(results, "移除 base64 解码器块")
+        end
+    end
+
+    -- Step 15: 标记 VM 代码区域
+    local vm_start = result_code:find("local%s+function%s+[A-Z]%b()")
+    if vm_start then
+        table.insert(results, "检测到 VM 代码区域 (位置 " .. vm_start .. ")")
+    end
+
+    -- Step 14: 格式化
+    table.insert(results, "执行代码格式化")
+
+    return result_code, count, results
+end
+
 -- ========== Prometheus 反混淆功能 ==========
 
 -- 数字表达式还原: 将 NumbersToExpressions 生成的算术表达式还原为数字常量
@@ -1543,7 +1868,7 @@ local function deobfRunTool(toolId)
         return
     end
 
-    -- WeAreDev 完全反混淆
+    -- WeAreDev 完全反混淆 (沙箱引擎)
     if toolId == "wearedev_full" then
         local content = ""
         if deobfSelectedFile and dataApi then
@@ -1556,69 +1881,66 @@ local function deobfRunTool(toolId)
             AddLog("请先选择文件或输入代码", "warn")
             return
         end
-        
-        AddLog("=== WeAreDev 完全反混淆 ===", "info")
+
+        AddLog("=== WeAreDev 沙箱反混淆引擎 ===", "info")
         AddLog("开始处理...", "info")
-        
-        local totalChanges = 0
-        
-        -- Step 1: 检测
-        local _, detection = deobfDetectObfuscation(content)
-        local isWeAreDev = detection.wearedev > 0 or detection.confidence > 20
-        AddLog("检测到 WeAreDev 特征: " .. tostring(isWeAreDev), "info")
-        
-        -- Step 2: 字符串解密
-        local decrypted, strCount = deobfStringDecrypt(content)
-        totalChanges = totalChanges + strCount
-        AddLog("已解密 " .. strCount .. " 个字符串", "info")
-        
-        -- Step 3: WeAreDev 特定清理
-        local cleaned, cleanCount = deobfCleanWeAreDev(decrypted)
-        totalChanges = totalChanges + cleanCount
-        AddLog("已清理 " .. cleanCount .. " 处 WeAreDev 特征", "info")
-        
-        -- Step 4: 表键修复
-        cleaned = cleaned:gsub('([%w_]+)%s*%[%s*%"([^"]+)%"%s*%]%s*=', function(tbl, key)
-            if key:match("^[%a_][%w_]*$") then
-                totalChanges = totalChanges + 1
-                return tbl .. "." .. key .. " ="
-            end
-            return tbl .. '["' .. key .. '"] ='
-        end)
-        cleaned = cleaned:gsub('([%w_]+)%s*%[%s*%"([^"]+)%"%s*%]', function(tbl, key)
-            if key:match("^[%a_][%w_]*$") then
-                totalChanges = totalChanges + 1
-                return tbl .. "." .. key
-            end
-            return tbl .. '["' .. key .. '"]'
-        end)
-        
-        -- Step 5: 变量重命名
-        local renamed, varCount = deobfRenameVars(cleaned)
-        totalChanges = totalChanges + varCount
-        AddLog("已重命名 " .. varCount .. " 个变量", "info")
-        
-        -- Step 6: 垃圾代码清理
-        local cleanResult, gcCount = deobfGcClean(renamed)
-        totalChanges = totalChanges + gcCount
-        AddLog("已清理 " .. gcCount .. " 行垃圾代码", "info")
-        
-        -- Step 7: 格式化
-        local formatted = deobfFormatCode(cleanResult)
-        
+
+        -- Step 1: 沙箱执行反混淆
+        local deobfResult, changeCount, stepResults = deobfWeAreDevSandboxDeobfuscate(content)
+
+        -- 输出沙箱引擎步骤结果
+        for _, stepInfo in ipairs(stepResults) do
+            AddLog("  " .. stepInfo, "info")
+        end
+
+        AddLog("沙箱引擎完成: " .. changeCount .. " 处修改", "info")
+
+        -- Step 2: 对沙箱输出做后处理
+        local totalChanges = changeCount
+
+        -- 数字表达式还原
+        local r2, c2 = deobfNumExprRestore(deobfResult)
+        deobfResult = r2
+        totalChanges = totalChanges + c2
+        if c2 > 0 then AddLog("数字表达式还原: " .. c2 .. " 处", "info") end
+
+        -- 分割字符串合并
+        local r3, c3 = deobfUnsplitStrings(deobfResult)
+        deobfResult = r3
+        totalChanges = totalChanges + c3
+        if c3 > 0 then AddLog("分割字符串合并: " .. c3 .. " 处", "info") end
+
+        -- 变量重命名
+        local r4, c4 = deobfRenameVars(deobfResult)
+        deobfResult = r4
+        totalChanges = totalChanges + c4
+        if c4 > 0 then AddLog("变量重命名: " .. c4 .. " 处", "info") end
+
+        -- 垃圾代码清理
+        local r5, c5 = deobfGcClean(deobfResult)
+        deobfResult = r5
+        totalChanges = totalChanges + c5
+        if c5 > 0 then AddLog("垃圾代码清理: " .. c5 .. " 行", "info") end
+
+        -- 格式化
+        local formatted = deobfFormatCode(deobfResult)
+
         -- 保存结果
         if dataApi and deobfSelectedFile then
             local backupName = deobfSelectedFile:gsub("%.([^%.]+)$", "_deobfuscated.%1")
             dataApi.writeFile(backupName, formatted)
-            
+
             if deobfViewMode == "editor" and deobfEditorTextBox then
                 deobfEditorTextBox.Text = formatted
             end
-            
+
             AddLog("=== 反混淆完成 ===", "info")
             AddLog("总计 " .. totalChanges .. " 处修改", "info")
             AddLog("结果已保存到: " .. backupName, "info")
         else
+            if deobfViewMode == "editor" and deobfEditorTextBox then
+                deobfEditorTextBox.Text = formatted
+            end
             AddLog("=== 反混淆完成 ===", "info")
             AddLog("总计 " .. totalChanges .. " 处修改", "info")
         end
@@ -2285,7 +2607,7 @@ function pageDef.build(frame, helpers)
         return
     end
     
-    if _G.__DeltaUI_AddLog then _G.__DeltaUI_AddLog("[反混淆] 页面构建完成 v1.2.0", "info") end
+    if _G.__DeltaUI_AddLog then _G.__DeltaUI_AddLog("[反混淆] 页面构建完成 v2.0.0", "info") end
 end
 
 local function register()

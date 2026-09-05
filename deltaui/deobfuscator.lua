@@ -1,6 +1,5 @@
 local DEOBFUSCATOR_PAGE_SOURCE = [===[
-deobfPage = frame
-frame.Name = "deobfuscator"
+deobfPage.Name = "deobfuscator"
 
 local svc = nil
 local theme = nil
@@ -43,31 +42,7 @@ local function ensureDeps()
         }
     end
     if not AddLog then AddLog = function(msg, lvl) print("[Deobf]", msg) end end
-end
-
--- ========== 左侧：文件浏览器 ==========
-local deobfLeftPanel = nil
-local deobfFileList = nil
-local deobfFileListScroll = nil
-local deobfNewFileBtn = nil
-local deobfNewFileInput = nil
-local deobfNewFileInputBox = nil
-local deobfNewFileConfirmBtn = nil
-local deobfNewFileCancelBtn = nil
-local deobfLeftHeader = nil
-local deobfIsCreatingNew = false
-
-local deobfSelectedFile = nil
-local deobfFileItems = {}
-
-local function deobfGetPageWidth()
-    local pw = 960
-    pcall(function()
-        if deobfPage and deobfPage.Parent then
-            pw = deobfPage.AbsoluteSize.X
-        end
-    end)
-    return math.max(480, pw)
+    if deobfDataApi then dataApi = deobfDataApi end
 end
 
 local function deobfTween(obj, props, dur)
@@ -75,6 +50,17 @@ local function deobfTween(obj, props, dur)
     local tw = TweenInfo.new(dur, Enum.EasingStyle.Quart, Enum.EasingDirection.Out)
     svc.TweenService:Create(obj, tw, props):Play()
 end
+
+local deobfLeftPanel = nil
+local deobfFileList = nil
+local deobfFileListScroll = nil
+local deobfNewFileBtn = nil
+local deobfNewFileInput = nil
+local deobfNewFileInputBox = nil
+local deobfLeftHeader = nil
+local deobfIsCreatingNew = false
+local deobfSelectedFile = nil
+local deobfFileItems = {}
 
 local function deobfRefreshFileList()
     if not deobfFileList or not dataApi then return end
@@ -156,11 +142,11 @@ local function deobfRefreshFileList()
             row.MouseButton1Click:Connect(function()
                 deobfSelectedFile = fname
                 deobfRefreshFileList()
-                AddLog("选中文件: " .. fname, "info")
+                if AddLog then AddLog("选中文件: " .. fname, "info") end
             end)
             delBtn.MouseButton1Click:Connect(function()
                 if dataApi and dataApi.deleteFile(fname) then
-                    AddLog("已删除: " .. fname, "info")
+                    if AddLog then AddLog("已删除: " .. fname, "info") end
                     if deobfSelectedFile == fname then
                         deobfSelectedFile = nil
                     end
@@ -178,7 +164,7 @@ local function deobfRefreshFileList()
         end
     end
     
-    local contentH = math.max(0, count * 36 + 16)
+    local contentH = math.max(60, count * 36 + 16)
     deobfFileList.Size = UDim2.new(1, 0, 0, contentH)
     if deobfFileListScroll then
         deobfFileListScroll.CanvasSize = UDim2.new(0, 0, 0, contentH)
@@ -223,30 +209,29 @@ local function deobfCreateNewFile()
     if not deobfNewFileInputBox or not dataApi then return end
     local fname = deobfNewFileInputBox.Text
     if not fname or fname == "" then
-        AddLog("请输入文件名", "warn")
+        if AddLog then AddLog("请输入文件名", "warn") end
         return
     end
     if not fname:match("^[%w_%-%s]+%.lua$") and not fname:match("^[%w_%-%s]+%.txt$") then
         if not fname:match("%.") then
             fname = fname .. ".lua"
         else
-            AddLog("文件名格式不正确", "warn")
+            if AddLog then AddLog("文件名格式不正确", "warn") end
             return
         end
     end
     if dataApi.isFile(fname) then
-        AddLog("文件已存在", "warn")
+        if AddLog then AddLog("文件已存在", "warn") end
         return
     end
     if dataApi.writeFile(fname, "") then
-        AddLog("已创建: " .. fname, "info")
+        if AddLog then AddLog("已创建: " .. fname, "info") end
         deobfSelectedFile = fname
         deobfHideNewFileInput()
         deobfRefreshFileList()
     end
 end
 
--- ========== 右侧：工具栏 ==========
 local deobfRightPanel = nil
 local deobfRightContent = nil
 local deobfToolButtons = {}
@@ -262,33 +247,17 @@ local DEOBF_TOOLS = {
 }
 
 local function deobfRunTool(toolId)
-    AddLog("执行工具: " .. toolId, "info")
+    if AddLog then AddLog("执行工具: " .. toolId, "info") end
     if not deobfSelectedFile then
-        AddLog("请先选择一个文件", "warn")
+        if AddLog then AddLog("请先选择一个文件", "warn") end
         return
     end
-    if toolId == "hook_loadstring" then
-        AddLog("Hook Loadstring 功能待实现", "info")
-    elseif toolId == "rename_vars" then
-        AddLog("变量重命名功能待实现", "info")
-    elseif toolId == "string_decrypt" then
-        AddLog("字符串解密功能待实现", "info")
-    elseif toolId == "control_flow" then
-        AddLog("控制流还原功能待实现", "info")
-    elseif toolId == "gc_clean" then
-        AddLog("垃圾代码清理功能待实现", "info")
-    elseif toolId == "format" then
-        AddLog("代码格式化功能待实现", "info")
-    elseif toolId == "analyze" then
-        AddLog("代码分析功能待实现", "info")
-    end
+    if AddLog then AddLog("功能待实现", "info") end
 end
 
--- ========== 构建页面 ==========
 local function buildUI()
     ensureDeps()
     
-    -- 左侧面板
     deobfLeftPanel = create("Frame", {
         Position = UDim2.new(0, 0, 0, 0),
         Size = UDim2.new(0, DEOBF_LEFT_W, 1, 0),
@@ -301,7 +270,6 @@ local function buildUI()
     stroke(theme.border, 1, deobfLeftPanel)
     deobfLeftPanel.Parent = deobfPage
     
-    -- 左侧头部
     deobfLeftHeader = create("Frame", {
         Size = UDim2.new(1, 0, 0, 44),
         Position = UDim2.new(0, 0, 0, 0),
@@ -324,7 +292,6 @@ local function buildUI()
     })
     leftTitle.Parent = deobfLeftHeader
     
-    -- 新建文件按钮
     deobfNewFileBtn = create("TextButton", {
         AnchorPoint = Vector2.new(1, 0.5),
         Position = UDim2.new(1, -12, 0.5, 0),
@@ -347,7 +314,6 @@ local function buildUI()
     deobfNewFileBtn.Parent = deobfLeftHeader
     deobfNewFileBtn.MouseButton1Click:Connect(deobfShowNewFileInput)
     
-    -- 新建文件输入框（初始隐藏）
     deobfNewFileInput = create("Frame", {
         Size = UDim2.new(1, -16, 0, 36),
         Position = UDim2.new(0, 8, 0, 52),
@@ -383,8 +349,7 @@ local function buildUI()
         end
     end)
     
-    -- 确认按钮
-    deobfNewFileConfirmBtn = create("TextButton", {
+    local confirmBtn = create("TextButton", {
         AnchorPoint = Vector2.new(1, 0.5),
         Position = UDim2.new(1, -34, 0.5, 0),
         Size = UDim2.new(0, 24, 0, 24),
@@ -394,19 +359,18 @@ local function buildUI()
         Text = "",
         ZIndex = 7,
     })
-    corner(6, deobfNewFileConfirmBtn)
+    corner(6, confirmBtn)
     local confirmIcon = GetIcon("check", UDim2.new(0, 12, 0, 12), Color3.fromRGB(255,255,255))
     if confirmIcon then
         confirmIcon.AnchorPoint = Vector2.new(0.5, 0.5)
         confirmIcon.Position = UDim2.new(0.5, 0, 0.5, 0)
         confirmIcon.ZIndex = 8
-        confirmIcon.Parent = deobfNewFileConfirmBtn
+        confirmIcon.Parent = confirmBtn
     end
-    deobfNewFileConfirmBtn.Parent = deobfNewFileInput
-    deobfNewFileConfirmBtn.MouseButton1Click:Connect(deobfCreateNewFile)
+    confirmBtn.Parent = deobfNewFileInput
+    confirmBtn.MouseButton1Click:Connect(deobfCreateNewFile)
     
-    -- 取消按钮
-    deobfNewFileCancelBtn = create("TextButton", {
+    local cancelBtn = create("TextButton", {
         AnchorPoint = Vector2.new(1, 0.5),
         Position = UDim2.new(1, -6, 0.5, 0),
         Size = UDim2.new(0, 24, 0, 24),
@@ -416,18 +380,17 @@ local function buildUI()
         Text = "",
         ZIndex = 7,
     })
-    corner(6, deobfNewFileCancelBtn)
+    corner(6, cancelBtn)
     local cancelIcon = GetIcon("x", UDim2.new(0, 12, 0, 12), Color3.fromRGB(255,255,255))
     if cancelIcon then
         cancelIcon.AnchorPoint = Vector2.new(0.5, 0.5)
         cancelIcon.Position = UDim2.new(0.5, 0, 0.5, 0)
         cancelIcon.ZIndex = 8
-        cancelIcon.Parent = deobfNewFileCancelBtn
+        cancelIcon.Parent = cancelBtn
     end
-    deobfNewFileCancelBtn.Parent = deobfNewFileInput
-    deobfNewFileCancelBtn.MouseButton1Click:Connect(deobfHideNewFileInput)
+    cancelBtn.Parent = deobfNewFileInput
+    cancelBtn.MouseButton1Click:Connect(deobfHideNewFileInput)
     
-    -- 文件列表滚动区
     deobfFileListScroll = create("ScrollingFrame", {
         Position = UDim2.new(0, 0, 0, 96),
         Size = UDim2.new(1, 0, 1, -108),
@@ -448,7 +411,6 @@ local function buildUI()
     })
     deobfFileList.Parent = deobfFileListScroll
     
-    -- 分隔线
     local divV = create("Frame", {
         Position = UDim2.new(0, DEOBF_LEFT_W + 4, 0, 0),
         Size = UDim2.new(0, 1, 1, 0),
@@ -459,7 +421,6 @@ local function buildUI()
     })
     divV.Parent = deobfPage
     
-    -- 右侧面板
     local rightX = DEOBF_LEFT_W + 8
     deobfRightPanel = create("Frame", {
         Position = UDim2.new(0, rightX, 0, 0),
@@ -473,7 +434,6 @@ local function buildUI()
     stroke(theme.border, 1, deobfRightPanel)
     deobfRightPanel.Parent = deobfPage
     
-    -- 右侧头部
     local rightHeader = create("Frame", {
         Size = UDim2.new(1, 0, 0, 44),
         Position = UDim2.new(0, 0, 0, 0),
@@ -496,7 +456,6 @@ local function buildUI()
     })
     rightTitle.Parent = rightHeader
     
-    -- 工具栏内容区
     deobfRightContent = create("ScrollingFrame", {
         Position = UDim2.new(0, 0, 0, 52),
         Size = UDim2.new(1, 0, 1, -60),
@@ -517,7 +476,14 @@ local function buildUI()
     })
     rightList.Parent = deobfRightContent
     
-    -- 创建工具按钮
+    local colorMap = {
+        accent = theme.accent,
+        accent2 = theme.accent2,
+        green = theme.green,
+        warn = theme.warn,
+        red = theme.red,
+    }
+    
     for i, tool in ipairs(DEOBF_TOOLS) do
         local row = i - 1
         local btnY = 12 + row * 62
@@ -534,13 +500,6 @@ local function buildUI()
         })
         corner(10, btn)
         
-        local colorMap = {
-            accent = theme.accent,
-            accent2 = theme.accent2,
-            green = theme.green,
-            warn = theme.warn,
-            red = theme.red,
-        }
         local iconColor = colorMap[tool.color] or theme.accent
         
         local iconBg = create("Frame", {
@@ -614,13 +573,11 @@ local function buildUI()
         deobfToolButtons[tool.id] = btn
     end
     
-    -- 调整右侧内容高度
     local toolCount = #DEOBF_TOOLS
     local rightContentH = toolCount * 62 + 24
     rightList.Size = UDim2.new(1, 0, 0, rightContentH)
     deobfRightContent.CanvasSize = UDim2.new(0, 0, 0, rightContentH)
     
-    -- 刷新文件列表
     deobfRefreshFileList()
 end
 
@@ -635,43 +592,7 @@ local pageDef = {
 }
 
 function pageDef.build(frame, helpers)
-    local function ensureDependencies()
-        if not svc then
-            svc = {
-                Players = game:GetService("Players"),
-                UserInputService = game:GetService("UserInputService"),
-                CoreGui = game:GetService("CoreGui"),
-                ReplicatedStorage = game:GetService("ReplicatedStorage"),
-                TweenService = game:GetService("TweenService"),
-                RunService = game:GetService("RunService"),
-                HttpService = game:GetService("HttpService"),
-                TextService = game:GetService("TextService"),
-            }
-        end
-        if not theme then
-            theme = {
-                bg = Color3.fromRGB(7, 9, 15),
-                surface = Color3.fromRGB(18, 22, 34),
-                surfaceLight = Color3.fromRGB(30, 36, 52),
-                accent = Color3.fromRGB(56, 189, 248),
-                accent2 = Color3.fromRGB(139, 92, 246),
-                text = Color3.fromRGB(242, 245, 252),
-                textDim = Color3.fromRGB(150, 160, 184),
-                border = Color3.fromRGB(52, 62, 88),
-                red = Color3.fromRGB(255, 82, 104),
-                green = Color3.fromRGB(57, 214, 146),
-                warn = Color3.fromRGB(255, 196, 66),
-                glow = Color3.fromRGB(56, 189, 248),
-                glow2 = Color3.fromRGB(139, 92, 246),
-                radius = 14,
-                radiusLg = 20,
-            }
-        end
-        if not AddLog then AddLog = function(msg, lvl) print("[Deobf]", msg) end end
-        dataApi = helpers and helpers.data
-    end
-    
-    ensureDependencies()
+    deobfDataApi = helpers and helpers.data
     deobfPage = frame
     frame.Name = "deobfuscator"
 

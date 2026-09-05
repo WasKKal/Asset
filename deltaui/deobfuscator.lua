@@ -134,21 +134,56 @@ local function deobfRefreshFileList()
     local count = #deobfFiles
     
     if count == 0 then
-        local empty = create("TextLabel", {
-            Size = UDim2.new(1, 0, 0, 20),
-            Position = UDim2.new(0, 0, 0, 20),
+        -- 空状态占位：图标 + 主提示 + 辅助说明，整体垂直居中于滚动区
+        local EMPTY_H = 130
+        local emptyFrame = create("Frame", {
+            Size = UDim2.new(1, 0, 0, EMPTY_H),
+            Position = UDim2.new(0, 0, 0, 0),
             BackgroundTransparency = 1,
-            Text = "暂无文件，点击上方新建",
+            ZIndex = 5,
+        })
+        emptyFrame.Parent = deobfFileList
+
+        local emptyIcon = GetIcon("folder", UDim2.new(0, 32, 0, 32), theme.textDim)
+        if emptyIcon then
+            emptyIcon.AnchorPoint = Vector2.new(0.5, 1)
+            emptyIcon.Position = UDim2.new(0.5, 0, 0.5, -14)
+            emptyIcon.ZIndex = 6
+            emptyIcon.Parent = emptyFrame
+        end
+
+        local emptyTitle = create("TextLabel", {
+            Size = UDim2.new(1, -24, 0, 20),
+            Position = UDim2.new(0, 12, 0.5, 6),
+            BackgroundTransparency = 1,
+            Text = "暂无文件",
+            TextColor3 = theme.text,
+            TextSize = 13,
+            Font = Enum.Font.SourceSansBold,
+            TextXAlignment = Enum.TextXAlignment.Center,
+            TextYAlignment = Enum.TextYAlignment.Center,
+            ZIndex = 6,
+        })
+        emptyTitle.Parent = emptyFrame
+
+        local emptyHint = create("TextLabel", {
+            Size = UDim2.new(1, -24, 0, 32),
+            Position = UDim2.new(0, 12, 0.5, 26),
+            BackgroundTransparency = 1,
+            Text = "点击右上角 + 新建文件\n或从右侧工具导入脚本",
             TextColor3 = theme.textDim,
             TextSize = 11,
             Font = Enum.Font.SourceSans,
             TextXAlignment = Enum.TextXAlignment.Center,
-            ZIndex = 5,
+            TextYAlignment = Enum.TextYAlignment.Top,
+            ZIndex = 6,
         })
-        empty.Parent = deobfFileList
-        deobfFileList.Size = UDim2.new(1, 0, 0, 60)
+        emptyHint.Parent = emptyFrame
+
+        -- 空状态不限制列表高度，让 ScrollingFrame 自动适配视口
+        deobfFileList.Size = UDim2.new(1, 0, 0, EMPTY_H)
         if deobfFileListScroll then
-            deobfFileListScroll.CanvasSize = UDim2.new(0, 0, 0, 60)
+            deobfFileListScroll.CanvasSize = UDim2.new(0, 0, 0, EMPTY_H)
         end
         return
     end

@@ -60,13 +60,19 @@ local deobfNewFileInput = nil
 local deobfNewFileInputBox = nil
 local deobfIsCreatingNew = false
 local deobfSelectedFile = nil
+local deobfViewingHookRecord = nil
 local deobfFileItems = {}
 local deobfFiles = {}
 
 local deobfRightPanel = nil
-local deobfViewMode = "tools" -- "tools" | "editor"
+local deobfViewMode = "tools" -- "tools" | "editor" | "hooklog"
 local deobfToolsView = nil
 local deobfEditorView = nil
+local deobfHookLogView = nil
+local deobfHookLogList = nil
+local deobfHookLogScroll = nil
+local deobfHookLogItems = {}
+local deobfHookRecords = {}
 local deobfEditorTextBox = nil
 local deobfEditorTitle = nil
 local deobfEditorSaveBtn = nil
@@ -279,12 +285,16 @@ function deobfShowTools()
     deobfViewMode = "tools"
     if deobfToolsView then deobfToolsView.Visible = true end
     if deobfEditorView then deobfEditorView.Visible = false end
+    if deobfHookLogView then deobfHookLogView.Visible = false end
 end
 
 function deobfOpenEditor(fname)
     deobfViewMode = "editor"
+    deobfSelectedFile = fname
+    deobfViewingHookRecord = nil
     if deobfToolsView then deobfToolsView.Visible = false end
     if deobfEditorView then deobfEditorView.Visible = true end
+    if deobfHookLogView then deobfHookLogView.Visible = false end
     if deobfEditorTitle then deobfEditorTitle.Text = fname end
     
     if dataApi and deobfEditorTextBox then
@@ -293,8 +303,239 @@ function deobfOpenEditor(fname)
     end
 end
 
+function deobfShowHookLog()
+    deobfViewMode = "hooklog"
+    if deobfToolsView then deobfToolsView.Visible = false end
+    if deobfEditorView then deobfEditorView.Visible = false end
+    if deobfHookLogView then deobfHookLogView.Visible = true end
+    deobfRefreshHookLog()
+end
+
+function deobfEditorFromHook(record)
+    if not record then return end
+    deobfViewMode = "editor"
+    deobfViewingHookRecord = record
+    deobfSelectedFile = nil
+    if deobfToolsView then deobfToolsView.Visible = false end
+    if deobfHookLogView then deobfHookLogView.Visible = false end
+    if deobfEditorView then deobfEditorView.Visible = true end
+    if deobfEditorTitle then deobfEditorTitle.Text = "#" .. record.id .. " " .. tostring(record.chunkname or "unknown") end
+    if deobfEditorTextBox then
+        deobfEditorTextBox.Text = tostring(record.source or "")
+    end
+end
+
+local function deobfRefreshHookLog()
+    if not deobfHookLogList then return end
+    for _, item in pairs(deobfHookLogItems) do
+        pcall(function() item:Destroy() end)
+    end
+    deobfHookLogItems = {}
+    
+    local count = #deobfHookRecords
+    
+    if count == 0 then
+        local empty = create("TextLabel", {
+            Size = UDim2.new(1, 0, 0, 40),
+            Position = UDim2.new(0, 0, 0, 30),
+            BackgroundTransparency = 1,
+            Text = "暂无拦截记录\n启动 Hook Loadstring 后自动记录",
+            TextColor3 = theme.textDim,
+            TextSize = 11,
+            Font = Enum.Font.SourceSans,
+            TextXAlignment = Enum.TextXAlignment.Center,
+            TextYAlignment = Enum.TextYAlignment.Center,
+            ZIndex = 5,
+        })
+        empty.Parent = deobfHookLogList
+        deobfHookLogList.Size = UDim2.new(1, 0, 0, 120)
+        if deobfHookLogScroll then
+            deobfHookLogScroll.CanvasSize = UDim2.new(0, 0, 0, 120)
+        end
+        return
+    end
+    
+    for i = count, 1, -1 do
+        local record = deobfHookRecords[i]
+        local idx = count - i + 1
+        local rowY = 12 + (idx - 1) * 64
+        
+        local row = create("TextButton", {
+            Size = UDim2.new(1, -24, 0, 56),
+            Position = UDim2.new(0, 12, 0, rowY),
+            BackgroundColor3 = theme.surface,
+            BackgroundTransparency = 0.4,
+            BorderSizePixel = 0,
+            Text = "",
+            AutoButtonColor = false,
+            ZIndex = 5,
+        })
+        corner(10, row)
+        
+        local idLabel = create("TextLabel", {
+            Position = UDim2.new(0, 12, 0, 8),
+            Size = UDim2.new(0, 40, 0, 18),
+            BackgroundTransparency = 1,
+            Text = "#" .. record.id,
+            TextColor3 = theme.accent,
+            TextSize = 12,
+            Font = Enum.Font.SourceSansBold,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            TextYAlignment = Enum.TextYAlignment.Center,
+            ZIndex = 6,
+        })
+        idLabel.Parent = row
+        
+        local nameLabel = create("TextLabel", {
+            Position = UDim2.new(0, 56, 0, 8),
+            Size = UDim2.new(1, -120, 0, 18),
+            BackgroundTransparency = 1,
+            Text = tostring(record.chunkname or "unknown"),
+            TextColor3 = theme.text,
+            TextSize = 12,
+            Font = Enum.Font.SourceSans,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            TextYAlignment = Enum.TextYAlignment.Center,
+            TextTruncate = Enum.TextTruncate.AtEnd,
+            ZIndex = 6,
+        })
+        nameLabel.Parent = row
+        
+        local sizeLabel = create("TextLabel", {
+            AnchorPoint = Vector2.new(1, 0),
+            Position = UDim2.new(1, -12, 0, 8),
+            Size = UDim2.new(0, 60, 0, 18),
+            BackgroundTransparency = 1,
+            Text = tostring(#record.source) .. " B",
+            TextColor3 = theme.textDim,
+            TextSize = 11,
+            Font = Enum.Font.SourceSans,
+            TextXAlignment = Enum.TextXAlignment.Right,
+            TextYAlignment = Enum.TextYAlignment.Center,
+            ZIndex = 6,
+        })
+        sizeLabel.Parent = row
+        
+        local timeLabel = create("TextLabel", {
+            Position = UDim2.new(0, 12, 0, 30),
+            Size = UDim2.new(1, -24, 0, 16),
+            BackgroundTransparency = 1,
+            Text = record.time or "",
+            TextColor3 = theme.textDim,
+            TextSize = 10,
+            Font = Enum.Font.SourceSans,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            TextYAlignment = Enum.TextYAlignment.Center,
+            ZIndex = 6,
+        })
+        timeLabel.Parent = row
+        
+        -- 查看按钮
+        local viewBtn = create("TextButton", {
+            AnchorPoint = Vector2.new(1, 1),
+            Position = UDim2.new(1, -60, 1, -6),
+            Size = UDim2.new(0, 48, 0, 22),
+            BackgroundColor3 = theme.accent,
+            BackgroundTransparency = 0.3,
+            BorderSizePixel = 0,
+            Text = "",
+            AutoButtonColor = false,
+            ZIndex = 7,
+        })
+        corner(6, viewBtn)
+        local viewLabel = create("TextLabel", {
+            Size = UDim2.new(1, 0, 1, 0),
+            BackgroundTransparency = 1,
+            Text = "查看",
+            TextColor3 = Color3.fromRGB(255,255,255),
+            TextSize = 10,
+            Font = Enum.Font.SourceSansBold,
+            TextXAlignment = Enum.TextXAlignment.Center,
+            TextYAlignment = Enum.TextYAlignment.Center,
+            ZIndex = 8,
+        })
+        viewLabel.Parent = viewBtn
+        viewBtn.Parent = row
+        viewBtn.MouseButton1Click:Connect(function()
+            deobfEditorFromHook(record)
+        end)
+        
+        -- 执行按钮
+        local runBtn = create("TextButton", {
+            AnchorPoint = Vector2.new(1, 1),
+            Position = UDim2.new(1, -8, 1, -6),
+            Size = UDim2.new(0, 48, 0, 22),
+            BackgroundColor3 = theme.green,
+            BackgroundTransparency = 0.3,
+            BorderSizePixel = 0,
+            Text = "",
+            AutoButtonColor = false,
+            ZIndex = 7,
+        })
+        corner(6, runBtn)
+        local runLabel = create("TextLabel", {
+            Size = UDim2.new(1, 0, 1, 0),
+            BackgroundTransparency = 1,
+            Text = "执行",
+            TextColor3 = Color3.fromRGB(255,255,255),
+            TextSize = 10,
+            Font = Enum.Font.SourceSansBold,
+            TextXAlignment = Enum.TextXAlignment.Center,
+            TextYAlignment = Enum.TextYAlignment.Center,
+            ZIndex = 8,
+        })
+        runLabel.Parent = runBtn
+        runBtn.Parent = row
+        runBtn.MouseButton1Click:Connect(function()
+            local fn, err = loadstring(record.source, "@replay_" .. record.id)
+            if fn then
+                pcall(fn)
+                AddLog("已重新执行 #" .. record.id, "info")
+            else
+                AddLog("执行失败: " .. tostring(err), "warn")
+            end
+        end)
+        
+        row.MouseEnter:Connect(function()
+            deobfTween(row, {BackgroundColor3 = theme.accent, BackgroundTransparency = 0.85}, 0.15)
+        end)
+        row.MouseLeave:Connect(function()
+            deobfTween(row, {BackgroundColor3 = theme.surface, BackgroundTransparency = 0.4}, 0.15)
+        end)
+        row.MouseButton1Click:Connect(function()
+            deobfEditorFromHook(record)
+        end)
+        
+        row.Parent = deobfHookLogList
+        deobfHookLogItems[record.id] = row
+    end
+    
+    local contentH = count * 64 + 24
+    deobfHookLogList.Size = UDim2.new(1, 0, 0, contentH)
+    if deobfHookLogScroll then
+        deobfHookLogScroll.CanvasSize = UDim2.new(0, 0, 0, contentH)
+    end
+end
+
 local function deobfSaveCurrentFile()
-    if not deobfSelectedFile or not dataApi or not deobfEditorTextBox then return end
+    if not dataApi or not deobfEditorTextBox then return end
+    
+    if deobfViewingHookRecord then
+        local fname = "hooked_" .. deobfViewingHookRecord.id .. ".lua"
+        if dataApi.writeFile(fname, deobfEditorTextBox.Text) then
+            deobfViewingHookRecord.source = deobfEditorTextBox.Text
+            deobfSelectedFile = fname
+            deobfViewingHookRecord = nil
+            if deobfEditorTitle then deobfEditorTitle.Text = fname end
+            AddLog("已保存: " .. fname, "info")
+            deobfRefreshFileList()
+        else
+            AddLog("保存失败", "warn")
+        end
+        return
+    end
+    
+    if not deobfSelectedFile then return end
     if dataApi.writeFile(deobfSelectedFile, deobfEditorTextBox.Text) then
         AddLog("已保存: " .. deobfSelectedFile, "info")
     else
@@ -477,11 +718,23 @@ local function deobfHookLoadstring()
     local original = loadstring
     loadstring = function(src, chunkname)
         deobfHookCount = deobfHookCount + 1
-        AddLog("[Loadstring #" .. deobfHookCount .. "] " .. tostring(chunkname or "unknown") .. " (" .. #tostring(src) .. " bytes)", "info")
+        local srcStr = tostring(src)
+        local cn = tostring(chunkname or "unknown")
+        local now = os.date("%H:%M:%S")
+        AddLog("[Loadstring #" .. deobfHookCount .. "] " .. cn .. " (" .. #srcStr .. " bytes)", "info")
+        table.insert(deobfHookRecords, {
+            id = deobfHookCount,
+            source = srcStr,
+            chunkname = cn,
+            time = now,
+            size = #srcStr,
+        })
+        if deobfViewMode == "hooklog" then
+            task.spawn(deobfRefreshHookLog)
+        end
         if dataApi then
             local fname = "hooked_" .. deobfHookCount .. ".lua"
-            dataApi.writeFile(fname, tostring(src))
-            AddLog("已保存到: " .. fname, "info")
+            dataApi.writeFile(fname, srcStr)
         end
         return original(src, chunkname)
     end
@@ -494,6 +747,15 @@ local function deobfHookLoadstring()
 end
 
 local function deobfRunTool(toolId)
+    if toolId == "hook_loadstring" then
+        local wasActive = deobfHookActive
+        deobfHookLoadstring()
+        if not wasActive then
+            deobfShowHookLog()
+        end
+        return
+    end
+    
     if not deobfSelectedFile or not dataApi then
         AddLog("请先选择一个文件", "warn")
         return
@@ -508,10 +770,7 @@ local function deobfRunTool(toolId)
     local newContent = content
     local info = ""
     
-    if toolId == "hook_loadstring" then
-        deobfHookLoadstring()
-        return
-    elseif toolId == "rename_vars" then
+    if toolId == "rename_vars" then
         newContent, count = deobfRenameVars(content)
         info = "重命名了 " .. count .. " 个变量"
     elseif toolId == "string_decrypt" then
@@ -892,6 +1151,96 @@ local function buildUI()
     local toolsContentH = toolCount * 62 + 24
     toolsList.Size = UDim2.new(1, 0, 0, toolsContentH)
     toolsScroll.CanvasSize = UDim2.new(0, 0, 0, toolsContentH)
+    
+    -- ===== 拦截记录视图 =====
+    deobfHookLogView = create("Frame", {
+        Size = UDim2.new(1, 0, 1, 0),
+        BackgroundTransparency = 1,
+        ZIndex = 4,
+        Visible = false,
+    })
+    deobfHookLogView.Parent = deobfRightPanel
+    
+    local hookLogHeader = create("Frame", {
+        Size = UDim2.new(1, 0, 0, 44),
+        Position = UDim2.new(0, 0, 0, 0),
+        BackgroundTransparency = 1,
+        ZIndex = 5,
+    })
+    hookLogHeader.Parent = deobfHookLogView
+    
+    -- 返回按钮
+    local hookLogBackBtn = create("TextButton", {
+        Position = UDim2.new(0, 12, 0.5, 0),
+        AnchorPoint = Vector2.new(0, 0.5),
+        Size = UDim2.new(0, 32, 0, 32),
+        BackgroundColor3 = theme.surface,
+        BackgroundTransparency = 0.3,
+        BorderSizePixel = 0,
+        Text = "",
+        AutoButtonColor = false,
+        ZIndex = 6,
+    })
+    corner(8, hookLogBackBtn)
+    local hookBackIcon = GetIcon("chevron-left", UDim2.new(0, 14, 0, 14), theme.text)
+    if hookBackIcon then
+        hookBackIcon.AnchorPoint = Vector2.new(0.5, 0.5)
+        hookBackIcon.Position = UDim2.new(0.5, 0, 0.5, 0)
+        hookBackIcon.ZIndex = 7
+        hookBackIcon.Parent = hookLogBackBtn
+    end
+    hookLogBackBtn.Parent = hookLogHeader
+    hookLogBackBtn.MouseButton1Click:Connect(deobfShowTools)
+    
+    local hookLogTitle = create("TextLabel", {
+        Position = UDim2.new(0, 52, 0, 0),
+        Size = UDim2.new(1, -120, 0, 44),
+        BackgroundTransparency = 1,
+        Text = "拦截记录",
+        TextColor3 = theme.text,
+        TextSize = 13,
+        Font = Enum.Font.SourceSansBold,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        TextYAlignment = Enum.TextYAlignment.Center,
+        ZIndex = 6,
+    })
+    hookLogTitle.Parent = hookLogHeader
+    
+    -- 状态标签
+    local hookStatusLabel = create("TextLabel", {
+        AnchorPoint = Vector2.new(1, 0.5),
+        Position = UDim2.new(1, -16, 0.5, 0),
+        Size = UDim2.new(0, 80, 0, 24),
+        BackgroundTransparency = 1,
+        Text = "监听中",
+        TextColor3 = theme.green,
+        TextSize = 11,
+        Font = Enum.Font.SourceSansBold,
+        TextXAlignment = Enum.TextXAlignment.Right,
+        TextYAlignment = Enum.TextYAlignment.Center,
+        ZIndex = 6,
+    })
+    hookStatusLabel.Parent = hookLogHeader
+    
+    deobfHookLogScroll = create("ScrollingFrame", {
+        Position = UDim2.new(0, 0, 0, 52),
+        Size = UDim2.new(1, 0, 1, -60),
+        BackgroundTransparency = 1,
+        BorderSizePixel = 0,
+        ScrollBarThickness = 3,
+        ScrollBarImageColor3 = theme.textDim,
+        CanvasSize = UDim2.new(0, 0, 0, 0),
+        ClipsDescendants = true,
+        ZIndex = 5,
+    })
+    deobfHookLogScroll.Parent = deobfHookLogView
+    
+    deobfHookLogList = create("Frame", {
+        Size = UDim2.new(1, 0, 0, 0),
+        BackgroundTransparency = 1,
+        ZIndex = 6,
+    })
+    deobfHookLogList.Parent = deobfHookLogScroll
     
     -- ===== 编辑器视图 =====
     deobfEditorView = create("Frame", {

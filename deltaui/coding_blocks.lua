@@ -5009,6 +5009,7 @@ end)
 
 -- 兼容层
 local function ensureDependencies()
+    warn("[CodingBlocks] [1/5] 初始化依赖...")
     if not svc then
         svc = {
             Players = game:GetService("Players"),
@@ -5020,6 +5021,9 @@ local function ensureDependencies()
             Stats = game:GetService("Stats"),
             HttpService = game:GetService("HttpService"),
         }
+        warn("[CodingBlocks] svc 已创建（兼容模式）")
+    else
+        warn("[CodingBlocks] svc 已存在")
     end
     if not theme then
         theme = {
@@ -5039,12 +5043,16 @@ local function ensureDependencies()
             radius = 14,
             radiusLg = 20,
         }
+        warn("[CodingBlocks] theme 已创建（兼容模式）")
+    else
+        warn("[CodingBlocks] theme 已存在")
     end
     if not obStoredObjects then obStoredObjects = {} end
     if not obStoredObjTexts then obStoredObjTexts = function() return {} end end
     if not buildSpaceActive then buildSpaceActive = false end
     if not AddLog then AddLog = function(msg, lvl) print("[Coding]", msg) end end
     if not currentPage then currentPage = "" end
+    warn("[CodingBlocks] [1/5] 依赖初始化完成")
 end
 
 local pageDef = {
@@ -5054,33 +5062,54 @@ local pageDef = {
 }
 
 function pageDef.build(frame, helpers)
+    warn("[CodingBlocks] [2/5] build 函数开始执行，frame = ", tostring(frame))
+    warn("[CodingBlocks] frame.Parent = ", tostring(frame and frame.Parent))
+    warn("[CodingBlocks] helpers = ", tostring(helpers))
+
     ensureDependencies()
     codingPage = frame
     frame.Name = "coding_blocks"
+    warn("[CodingBlocks] [3/5] codingPage 已赋值，开始 loadstring 编译...")
+    warn("[CodingBlocks] CODING_PAGE_SOURCE 长度 = ", #CODING_PAGE_SOURCE)
 
     local fn, err = loadstring(CODING_PAGE_SOURCE, "@coding_blocks")
     if not fn then
-        warn("[CodingBlocks] 编译失败: " .. tostring(err))
+        warn("[CodingBlocks] [ERROR] loadstring 编译失败: " .. tostring(err))
         return
     end
+    warn("[CodingBlocks] [4/5] loadstring 编译成功，开始执行...")
 
     local ok, runErr = pcall(fn)
     if not ok then
-        warn("[CodingBlocks] 初始化失败: " .. tostring(runErr))
+        warn("[CodingBlocks] [ERROR] 代码执行失败: " .. tostring(runErr))
+        if debug and debug.traceback then
+            warn("[CodingBlocks] [ERROR] 调用栈: " .. debug.traceback())
+        end
+        return
     end
+
+    warn("[CodingBlocks] [5/5] 初始化成功！codingPage = ", tostring(codingPage))
+    warn("[CodingBlocks] codingPage 子元素数量: ", tostring(#frame:GetChildren()))
 end
 
 local function register()
+    warn("[CodingBlocks] 开始注册页面...")
+    warn("[CodingBlocks] DeltaRegisterPage = ", tostring(DeltaRegisterPage))
+    warn("[CodingBlocks] _G.DeltaRegisterPage = ", tostring(_G and _G.DeltaRegisterPage))
     if DeltaRegisterPage then
         DeltaRegisterPage(pageDef)
+        warn("[CodingBlocks] 通过 DeltaRegisterPage 注册成功")
         return true
     end
     if _G and _G.DeltaRegisterPage then
         _G.DeltaRegisterPage(pageDef)
+        warn("[CodingBlocks] 通过 _G.DeltaRegisterPage 注册成功")
         return true
     end
+    warn("[CodingBlocks] [ERROR] 未找到 DeltaRegisterPage，注册失败")
     return false
 end
 
-register()
+local regOk = register()
+warn("[CodingBlocks] 注册结果: ", tostring(regOk))
 return pageDef

@@ -3914,15 +3914,17 @@ function registerExternalPage(code, url, defOverride, forceUnsafe)
 
     local chunk = loadstring(code, "@external_page")
     if not chunk then
+        warn("[DeltaUI PageInstall] [FAIL] loadstring 编译失败，URL: " .. tostring(url))
         pcall(function() frame:Destroy() end)
         _G.DeltaPage = prevPage
         ShowNotification(t("page_install_failed"), 3)
         return false
     end
-
+    warn("[DeltaUI PageInstall] [1/4] loadstring 编译成功，safeMode = ", tostring(safeMode), " forceUnsafe = ", tostring(forceUnsafe))
     
     local risky = scanPageSource(code)
     if #risky > 0 then
+        warn("[DeltaUI PageInstall] 检测到风险代码: " .. table.concat(risky, ", "))
         if safeMode then
             pcall(function() frame:Destroy() end)
             _G.DeltaPage = prevPage
@@ -3953,11 +3955,16 @@ function registerExternalPage(code, url, defOverride, forceUnsafe)
     end
 
     if not ok then
+        warn("[DeltaUI PageInstall] [FAIL] 脚本执行错误: " .. tostring(ret))
+        if debug and debug.traceback then
+            warn("[DeltaUI PageInstall] 调用栈: " .. debug.traceback())
+        end
         pcall(function() frame:Destroy() end)
         _G.DeltaPage = prevPage
         ShowNotification(t("page_install_failed"), 3)
         return false
     end
+    warn("[DeltaUI PageInstall] [2/4] 脚本执行成功，captured = ", tostring(captured ~= nil), " ret.build = ", tostring(type(ret) == "table" and ret.build or "nil"))
 
     local def = buildPageDef(ret, captured, defOverride, url)
     local name = def.name
@@ -3998,10 +4005,12 @@ function registerExternalPage(code, url, defOverride, forceUnsafe)
     if not safeMode then _G.DeltaPage = helpers end
     local builtOk = true
     if type(def.build) == "function" then
+        warn("[DeltaUI PageInstall] [3/4] 开始执行 build 函数，def.name = " .. tostring(def.name))
         builtOk = pcall(def.build, frame, helpers)
     end
 
     if not builtOk then
+        warn("[DeltaUI PageInstall] [FAIL] build 函数执行失败")
         pcall(function() frame:Destroy() end)
         pages[name] = nil
         if navButtons[name] then pcall(function() navButtons[name]:Destroy() end); navButtons[name] = nil end
@@ -4013,6 +4022,7 @@ function registerExternalPage(code, url, defOverride, forceUnsafe)
         ShowNotification(t("page_install_failed"), 3)
         return false
     end
+    warn("[DeltaUI PageInstall] [4/4] 页面安装成功！name = " .. tostring(def.name))
 
     if customTabMode then
         updateCustomButtonPositions(false)

@@ -601,6 +601,8 @@ local translations = {
     page_presets_desc = {en = "One-click install official recommended pages", zh = "一键安装官方推荐页面", ko = "공식 추천 페이지 원클릭 설치", ja = "公式推奨ページをワンクリックでインストール"},
     preset_coding = {en = "Coding Blocks", zh = "积木编程", ko = "블록 코딩", ja = "ブロックコーディング"},
     preset_coding_desc = {en = "Visual block-based Lua coding environment", zh = "可视化积木式Lua编程环境", ko = "비주얼 블록 기반 Lua 코딩 환경", ja = "ビジュアルブロック式Luaコーディング環境"},
+    preset_deobfuscator = {en = "Deobfuscator", zh = "反混淆工具", ko = "디옵퓨스케이터", ja = "難読化解除ツール"},
+    preset_deobfuscator_desc = {en = "Lua code deobfuscation and analysis tool", zh = "Lua代码反混淆与分析工具", ko = "Lua 코드 디옵퓨스케이션 및 분석 도구", ja = "Luaコード難読化解除・分析ツール"},
 }
 
 
@@ -3191,6 +3193,14 @@ local PRESET_PAGES = {
         url = "https://cdn.jsdelivr.net/gh/WasKKal/Asset@master/deltaui/coding_blocks.lua",
         unsafe = true,
     },
+    {
+        name = "deobfuscator",
+        titleKey = "preset_deobfuscator",
+        descKey = "preset_deobfuscator_desc",
+        icon = "shield-check",
+        url = "https://cdn.jsdelivr.net/gh/WasKKal/Asset@master/deltaui/deobfuscator.lua",
+        unsafe = true,
+    },
 }
 
 local presetList = create("Frame", {
@@ -3742,10 +3752,174 @@ local function buildPageDef(ret, captured, defOverride, url)
         def.icon = (defOverride and defOverride.icon) or "sparkles"
     end
     def.url = url
+    
+    -- 数据文件夹名（可自定义，默认等于页面名）
+    if type(def.dataFolder) ~= "string" or def.dataFolder == "" then
+        def.dataFolder = name
+    end
+    def.dataFolder = __safeFilterName(def.dataFolder)
+    
     return def
 end
 
 
+-- ========== PageData 数据隔离系统 ==========
+local PAGE_DATA_ROOT = "DeltaUI/PageData"
+
+local function ensurePageDataRoot()
+    pcall(function()
+        if not isfolder(PAGE_DATA_ROOT) then
+            makefolder(PAGE_DATA_ROOT)
+        end
+    end)
+end
+
+local function makePageDataApi(pageName, dataFolder, isOfficial)
+    ensurePageDataRoot()
+    
+    local api = {}
+    local folderName = dataFolder or pageName
+    
+    local function getPagePath(subPath)
+        -- 安全过滤：防止路径穿越
+        subPath = subPath or ""
+        subPath = subPath:gsub("%.%.", "")
+        subPath = subPath:gsub("^[/\\]+", "")
+        if subPath ~= "" and not subPath:match("^[%w_%-%./\\]+$") then
+            error("[PageData] Invalid path: " .. tostring(subPath), 2)
+        end
+        return PAGE_DATA_ROOT .. "/" .. folderName .. "/" .. subPath
+    end
+    
+    -- 读取文件
+    api.readFile = function(path)
+        local ok, result = pcall(function()
+            local fullPath = getPagePath(path)
+            if isfile(fullPath) then
+                return readfile(fullPath)
+            end
+            return nil
+        end)
+        if ok then return result end
+        return nil
+    end
+    
+    -- 写入文件
+    api.writeFile = function(path, content)
+        local ok, result = pcall(function()
+            local fullPath = getPagePath(path)
+            -- 确保文件夹存在
+            local dir = fullPath:match("^(.*[/\\])[^/\\]*$")
+            if dir then
+                local parts = {}
+                for part in string.gmatch(dir:sub(#PAGE_DATA_ROOT + 2), "[^/\\]+") do
+                    table.insert(parts, part)
+                end
+                local current = PAGE_DATA_ROOT
+                for _, part in ipairs(parts) do
+                    current = current .. "/" .. part
+                    if not isfolder(current) then
+                        makefolder(current)
+                    end
+                end
+            end
+            writefile(fullPath, tostring(content or ""))
+            return true
+        end)
+        return ok
+    end
+    
+    -- 删除文件
+    api.deleteFile = function(path)
+        local ok, result = pcall(function()
+            local fullPath = getPagePath(path)
+            if isfile(fullPath) then
+                delfile(fullPath)
+                return true
+            end
+            return false
+        end)
+        return ok and result
+    end
+    
+    -- 检查文件是否存在
+    api.isFile = function(path)
+        local ok, result = pcall(function()
+            return isfile(getPagePath(path))
+        end)
+        return ok and result
+    end
+    
+    -- 检查文件夹是否存在
+    api.isFolder = function(path)
+        local ok, result = pcall(function()
+            return isfolder(getPagePath(path))
+        end)
+        return ok and result
+    end
+    
+    -- 创建文件夹
+    api.makeFolder = function(path)
+        local ok, result = pcall(function()
+            local fullPath = getPagePath(path)
+            if not isfolder(fullPath) then
+                makefolder(fullPath)
+                return true
+            end
+            return false
+        end)
+        return ok and result
+    end
+    
+    -- 列出文件夹内容
+    api.listFiles = function(path)
+        local ok, result = pcall(function()
+            local fullPath = getPagePath(path)
+            if isfolder(fullPath) then
+                return listfiles(fullPath)
+            end
+            return {}
+        end)
+        if ok then return result or {} end
+        return {}
+    end
+    
+    -- 获取数据文件夹根路径（只读信息）
+    api.getFolderName = function()
+        return folderName
+    end
+    
+    -- 官方页面专属：访问其他页面的数据
+    if isOfficial then
+        api.readOtherFile = function(otherFolder, path)
+            otherFolder = __safeFilterName(otherFolder or "")
+            if otherFolder == "" then return nil end
+            local ok, result = pcall(function()
+                local fullPath = PAGE_DATA_ROOT .. "/" .. otherFolder .. "/" .. (path or "")
+                if isfile(fullPath) then
+                    return readfile(fullPath)
+                end
+                return nil
+            end)
+            if ok then return result end
+            return nil
+        end
+        
+        api.listAllFolders = function()
+            local ok, result = pcall(function()
+                return listfiles(PAGE_DATA_ROOT)
+            end)
+            if ok then return result or {} end
+            return {}
+        end
+        
+        api.isOfficial = true
+    else
+        api.isOfficial = false
+    end
+    
+    return api
+end
 
 
 local PAGE_GUI_ALLOWED = {
@@ -3994,6 +4168,9 @@ function registerExternalPage(code, url, defOverride, forceUnsafe)
     end
     frame.Name = name
     pages[name] = frame
+    
+    -- 初始化 PageData API
+    helpers.data = makePageDataApi(name, def.dataFolder, not not forceUnsafe)
 
     
     local btn = create("TextButton", {Size = UDim2.new(0, 32, 0, 32), Position = UDim2.new(0, 6, 0, 6), BackgroundTransparency = 1, BorderSizePixel = 0, Text = "", ZIndex = 15})

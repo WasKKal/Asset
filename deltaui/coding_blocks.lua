@@ -5007,18 +5007,8 @@ codingSettingsExitBtn.MouseButton1Click:Connect(function()
 end)
 ]===]
 
-local function debugLog(msg, level)
-    level = level or "info"
-    if AddLog then
-        AddLog("[积木调试] " .. msg, level)
-    else
-        warn("[CodingBlocks] " .. msg)
-    end
-end
-
 -- 兼容层
 local function ensureDependencies()
-    debugLog("[1/5] 初始化依赖...")
     if not svc then
         svc = {
             Players = game:GetService("Players"),
@@ -5030,9 +5020,6 @@ local function ensureDependencies()
             Stats = game:GetService("Stats"),
             HttpService = game:GetService("HttpService"),
         }
-        debugLog("svc 已创建（兼容模式）")
-    else
-        debugLog("svc 已存在")
     end
     if not theme then
         theme = {
@@ -5052,16 +5039,12 @@ local function ensureDependencies()
             radius = 14,
             radiusLg = 20,
         }
-        debugLog("theme 已创建（兼容模式）")
-    else
-        debugLog("theme 已存在")
     end
     if not obStoredObjects then obStoredObjects = {} end
     if not obStoredObjTexts then obStoredObjTexts = function() return {} end end
     if not buildSpaceActive then buildSpaceActive = false end
     if not AddLog then AddLog = function(msg, lvl) print("[Coding]", msg) end end
     if not currentPage then currentPage = "" end
-    debugLog("[1/5] 依赖初始化完成")
 end
 
 local pageDef = {
@@ -5071,54 +5054,32 @@ local pageDef = {
 }
 
 function pageDef.build(frame, helpers)
-    debugLog("[2/5] build 函数开始执行，frame = " .. tostring(frame))
-    debugLog("frame.Parent = " .. tostring(frame and frame.Parent))
-    debugLog("helpers = " .. tostring(helpers))
-
     ensureDependencies()
     codingPage = frame
     frame.Name = "coding_blocks"
-    debugLog("[3/5] codingPage 已赋值，开始 loadstring 编译...")
-    debugLog("CODING_PAGE_SOURCE 长度 = " .. tostring(#CODING_PAGE_SOURCE))
 
     local fn, err = loadstring(CODING_PAGE_SOURCE, "@coding_blocks")
     if not fn then
-        debugLog("[ERROR] loadstring 编译失败: " .. tostring(err), "warn")
         return
     end
-    debugLog("[4/5] loadstring 编译成功，开始执行...")
 
     local ok, runErr = pcall(fn)
     if not ok then
-        debugLog("[ERROR] 代码执行失败: " .. tostring(runErr), "warn")
-        if debug and debug.traceback then
-            debugLog("[ERROR] 调用栈: " .. debug.traceback(), "warn")
-        end
         return
     end
-
-    debugLog("[5/5] 初始化成功！codingPage = " .. tostring(codingPage))
-    debugLog("codingPage 子元素数量: " .. tostring(#frame:GetChildren()))
 end
 
 local function register()
-    debugLog("开始注册页面...")
-    debugLog("DeltaRegisterPage = " .. tostring(DeltaRegisterPage))
-    debugLog("_G.DeltaRegisterPage = " .. tostring(_G and _G.DeltaRegisterPage))
     if DeltaRegisterPage then
         DeltaRegisterPage(pageDef)
-        debugLog("通过 DeltaRegisterPage 注册成功")
         return true
     end
     if _G and _G.DeltaRegisterPage then
         _G.DeltaRegisterPage(pageDef)
-        debugLog("通过 _G.DeltaRegisterPage 注册成功")
         return true
     end
-    debugLog("[ERROR] 未找到 DeltaRegisterPage，注册失败", "warn")
     return false
 end
 
 local regOk = register()
-debugLog("注册结果: " .. tostring(regOk))
 return pageDef

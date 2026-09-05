@@ -3259,7 +3259,7 @@ for i, preset in ipairs(PRESET_PAGES) do
     })
     descLbl.Parent = card
 
-    local installBtn = makeGradientBtn(card, UDim2.new(0, 88, 0, 30), Vector2.new(1, 0.5), UDim2.new(1, -10, 0.5, 0), t("install_page"))
+    local installBtn = makeGradientBtn(card, UDim2.new(0, 72, 0, 30), Vector2.new(1, 0.5), UDim2.new(1, -10, 0.5, 0), "安装")
     safeConnect(installBtn, "MouseButton1Click", function()
         installExternalPageFromURL(preset.url, preset.unsafe)
     end)

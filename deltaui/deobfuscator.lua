@@ -59,7 +59,6 @@ local function deobfTween(obj, props, dur)
     svc.TweenService:Create(obj, tw, props):Play()
 end
 
--- ========== 状态 ==========
 local deobfLeftPanel = nil
 local deobfFileList = nil
 local deobfFileListScroll = nil
@@ -90,14 +89,13 @@ local deobfToolButtons = {}
 local DEOBF_TOOLS = {
     { id = "hook_loadstring", name = "Hook Loadstring", icon = "link", desc = "拦截并记录所有 loadstring 调用", color = "accent" },
     { id = "rename_vars", name = "变量重命名", icon = "type", desc = "将混淆变量名替换为可读名称", color = "accent2" },
-    { id = "string_decrypt", name = "字符串解密", icon = "unlock", desc = "解密加密的字符串常量", color = "green" },
+    { id = "string_decrypt", name = "字符串解密", icon = "lock-open", desc = "解密加密的字符串常量", color = "green" },
     { id = "control_flow", name = "控制流还原", icon = "git-branch", desc = "还原被扁平化的控制流", color = "warn" },
-    { id = "gc_clean", name = "垃圾代码清理", icon = "trash", desc = "移除无效的死代码和垃圾指令", color = "red" },
+    { id = "gc_clean", name = "垃圾代码清理", icon = "trash-2", desc = "移除无效的死代码和垃圾指令", color = "red" },
     { id = "format", name = "代码格式化", icon = "align-left", desc = "自动缩进和格式化代码", color = "accent" },
     { id = "analyze", name = "代码分析", icon = "search", desc = "分析代码结构和特征", color = "accent2" },
 }
 
--- ========== 文件列表 ==========
 local function deobfLoadFiles()
     if not dataApi then return {} end
     local result = {}
@@ -243,7 +241,6 @@ local function deobfRefreshFileList()
     end
 end
 
--- ========== 新建文件 ==========
 local function deobfShowNewFileInput()
     deobfIsCreatingNew = true
     deobfNewFileBtn.Visible = false
@@ -291,7 +288,6 @@ local function deobfCreateNewFile()
     end
 end
 
--- ========== 视图切换 ==========
 function deobfShowTools()
     deobfViewMode = "tools"
     if deobfToolsView then deobfToolsView.Visible = true end
@@ -559,7 +555,6 @@ local function deobfSaveCurrentFile()
     end
 end
 
--- ========== 反混淆工具 ==========
 local function deobfRenameVars(code)
     local varMap = {}
     local varCount = 0
@@ -667,12 +662,20 @@ local function deobfGcClean(code)
         local trimmed = line:match("^%s*(.-)%s*$")
         local skip = false
         if trimmed == "" then
-            -- 空行保留
         elseif trimmed:match("^local%s+[%a_][%w_]*%s*=%s*nil%s*$") then
             skip = true
         elseif trimmed:match("^[%a_][%w_]*%s*=%s*nil%s*$") then
             skip = true
         elseif trimmed:match("^if%s+false%s+then") then
+            skip = true
+        elseif trimmed:match("^local%s+[%a_][%w_]*%s*=%s*function%s*%(%s*%)%s*end%s*$") then
+            skip = true
+        elseif trimmed:match("^[%a_][%w_]*%s*=%s*[%a_][%w_]*%s*$") then
+            local lhs, rhs = trimmed:match("^([%a_][%w_]*)%s*=%s*([%a_][%w_]*)%s*$")
+            if lhs and rhs and lhs == rhs then
+                skip = true
+            end
+        elseif trimmed:match("^return%s+nil%s*$") then
             skip = true
         end
         if not skip then
@@ -680,10 +683,114 @@ local function deobfGcClean(code)
         end
     end
     
-    return table.concat(result, "\n")
+    local cleaned = table.concat(result, "\n")
+    cleaned = cleaned:gsub('if%s+true%s+then%s+([^\n]+)%s+end', '%1')
+    
+    return cleaned
 end
 
-local function deobfStringDecrypt(code)
+local function deobfControlFlowRestore(code)
+    local result = code
+    local restored = 0
+    
+    result = result:gsub('if%s+false%s+then.-end\n?', '')
+    if result ~= code then restored = restored + 1 end
+    
+    result = result:gsub('if%s+true%s+then%s*(.-)%s*end', function(inner)
+        restored = restored + 1
+        return inner
+    end)
+    
+    result = result:gsub('if%s+(%d+)%s*==%s*(%d+)%s+then', function(a, b)
+        if tonumber(a) == tonumber(b) then
+            restored = restored + 1
+            return 'if true then'
+        else
+            return 'if false then'
+        end
+    end)
+    
+    result = result:gsub('do%s*(.-)%s*end', function(inner)
+        if inner:match('\n') then return 'do\n' .. inner .. '\nend' end
+        restored = restored + 1
+        return inner
+    end)
+    
+    return result, restored
+end
+
+local function deobfConstantPropagation(code)
+    local lines = {}
+    for line in code:gmatch("[^\r\n]+") do
+        table.insert(lines, line)
+    end
+    
+    local constants = {}
+    local count = 0
+    
+    for _, line in ipairs(lines) do
+        local trimmed = line:match("^%s*(.-)%s*$")
+        local name, strVal = trimmed:match('^local%s+([%a_][%w_]*)%s*=%s*"([^"]*)"$')
+        if name and strVal then
+            constants[name] = '"' .. strVal .. '"'
+        else
+            local numName, numVal = trimmed:match('^local%s+([%a_][%w_]*)%s*=%s*(-?%d+%.?%d*)$')
+            if numName and numVal then
+                constants[numName] = numVal
+            else
+                local boolName, boolVal = trimmed:match('^local%s+([%a_][%w_]*)%s*=%s*(true|false|nil)$')
+                if boolName and boolVal then
+                    constants[boolName] = boolVal
+                end
+            end
+        end
+    end
+    
+    local usedConstants = {}
+    for name, val in pairs(constants) do
+        local used = false
+        for _, line in ipairs(lines) do
+            if line:match('%f[%a_]' .. name .. '%f[^%w_]') and not line:match('^%s*local%s+' .. name .. '%s*=') then
+                used = true
+                break
+            end
+        end
+        if used then
+            usedConstants[name] = val
+        end
+    end
+    
+    local result = {}
+    for _, line in ipairs(lines) do
+        local trimmed = line:match("^%s*(.-)%s*$")
+        local isAssignment = false
+        
+        for name, val in pairs(usedConstants) do
+            if trimmed:match('^local%s+' .. name .. '%s*=') then
+                isAssignment = true
+                break
+            end
+        end
+        
+        if not isAssignment then
+            local newLine = line
+            for name, val in pairs(usedConstants) do
+                local oldLine = newLine
+                newLine = newLine:gsub('%f[%a_]' .. name .. '%f[^%w_]', val)
+                if newLine ~= oldLine then
+                    count = count + 1
+                end
+            end
+            table.insert(result, newLine)
+        else
+            table.insert(result, line)
+        end
+    end
+    
+    return table.concat(result, "\n"), count
+end
+
+local function deobfStringDecryptEnhanced(code)
     local result = code
     local count = 0
     
@@ -696,8 +803,33 @@ local function deobfStringDecrypt(code)
         return '"' .. table.concat(chars) .. '"'
     end)
     
-    result = result:gsub("(%d+)%s*%.%.%s*(%d+)", function(a, b)
+    result = result:gsub('tonumber%(%s*"([%da-fA-F]+)"%s*,%s*16%s*%)', function(hex)
+        local num = tonumber(hex, 16)
+        if num then
+            count = count + 1
+            return tostring(num)
+        end
+        return 'tonumber("' .. hex .. '", 16)'
+    end)
+    
+    result = result:gsub('(%d+)%s*%+%s*(%d+)', function(a, b)
+        count = count + 1
         return tostring(tonumber(a) + tonumber(b))
+    end)
+    
+    result = result:gsub('(%d+)%s*%-%s*(%d+)', function(a, b)
+        count = count + 1
+        return tostring(tonumber(a) - tonumber(b))
+    end)
+    
+    result = result:gsub('(%d+)%s*%*%s*(%d+)', function(a, b)
+        count = count + 1
+        return tostring(tonumber(a) * tonumber(b))
+    end)
+    
+    result = result:gsub('"([^"]*)"%s*%.%.%s*"([^"]*)"', function(a, b)
+        count = count + 1
+        return '"' .. a .. b .. '"'
     end)
     
     return result, count
@@ -782,16 +914,22 @@ local function deobfRunTool(toolId)
     local info = ""
     
     if toolId == "rename_vars" then
-        newContent, count = deobfRenameVars(content)
+        local tmpContent, constCount = deobfConstantPropagation(content)
+        newContent, count = deobfRenameVars(tmpContent)
         info = "重命名了 " .. count .. " 个变量"
+        if constCount > 0 then
+            info = info .. "，传播了 " .. constCount .. " 个常量"
+        end
     elseif toolId == "string_decrypt" then
-        newContent, count = deobfStringDecrypt(content)
-        info = "解密了 " .. count .. " 个字符串"
+        newContent, count = deobfStringDecryptEnhanced(content)
+        info = "解密了 " .. count .. " 处字符串/常量"
     elseif toolId == "control_flow" then
-        AddLog("控制流还原功能开发中", "info")
-        return
+        newContent, count = deobfControlFlowRestore(content)
+        info = "还原了 " .. count .. " 处控制流"
     elseif toolId == "gc_clean" then
-        newContent = deobfGcClean(content)
+        local tmp1 = deobfConstantPropagation(content)
+        local tmp2 = deobfControlFlowRestore(tmp1)
+        newContent = deobfGcClean(tmp2)
         info = "已清理垃圾代码"
     elseif toolId == "format" then
         newContent = deobfFormatCode(content)
@@ -822,7 +960,6 @@ local function deobfRunTool(toolId)
     end
 end
 
--- ========== 构建 UI ==========
 local function buildUI()
     ensureDeps()
     
@@ -1362,7 +1499,7 @@ local pageDef = {
     title = "反混淆工具",
     icon = "shield-check",
     dataFolder = "deobfuscator",
-    version = "1.0.3",
+    version = "1.1.0",
 }
 
 function pageDef.build(frame, helpers)

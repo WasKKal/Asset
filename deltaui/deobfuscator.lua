@@ -1378,6 +1378,7 @@ local pageDef = {
     title = "反混淆工具",
     icon = "shield-check",
     dataFolder = "deobfuscator",
+    version = "1.0.1",
 }
 
 function pageDef.build(frame, helpers)
@@ -1387,13 +1388,20 @@ function pageDef.build(frame, helpers)
 
     local fn, err = loadstring(DEOBFUSCATOR_PAGE_SOURCE, "@deobfuscator")
     if not fn then
+        if helpers and helpers.ShowNotification then helpers.ShowNotification("Deobf: loadstring失败 " .. tostring(err), 4) end
+        warn("[Deobf] loadstring failed:", err)
         return
     end
 
     local ok, runErr = pcall(fn)
     if not ok then
+        if helpers and helpers.ShowNotification then helpers.ShowNotification("Deobf: 运行错误 " .. tostring(runErr), 4) end
+        warn("[Deobf] runtime error:", runErr)
+        if _G.__DeltaUI_AddLog then _G.__DeltaUI_AddLog("[反混淆] 构建失败: " .. tostring(runErr), "error") end
         return
     end
+    
+    if _G.__DeltaUI_AddLog then _G.__DeltaUI_AddLog("[反混淆] 页面构建完成", "info") end
 end
 
 local function register()

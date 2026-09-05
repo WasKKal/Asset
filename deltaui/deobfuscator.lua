@@ -988,7 +988,104 @@ local function deobfWeAreDevSandboxDeobfuscate(code)
         -- 评估偏移表达式
         local expr = g_offset_str:gsub("%s", "")
         -- 安全评估: 只包含数字和 +-*/
-        local ok, val = pcall(loadstring("return " .. expr))
+local function safeEvalNumber(expr)
+    -- 兼容 Lua 5.1 / Luau：安全求值数字/位运算表达式。
+    -- 返回 number 表示成功；nil 表示无法静态求值（调用方保留原始代码）。
+    -- 修复 bEjbN-@deobfuscator:998 报 "Expected identifier when parsing expression, got '~'"：
+    -- 含 ~ & | 的表达式不再直接交给宿主的 loadstring。
+    if type(expr) ~= "string" then return nil end
+    -- 去除所有空白，使 "10 & 3"、"~ 1" 等也能被纯 Lua 回退求值器正确 tokenize
+    local compact = expr:gsub("%s+", "")
+    if compact == "" then return nil end
+    local asNum = tonumber(compact)
+    if asNum then return asNum end
+    if compact:match("^[0-9%+%-%*/%(%)%.]+$") then
+        local fn, err = loadstring("return " .. compact)
+        if fn then
+            local ok, val = pcall(fn)
+            if ok and type(val) == "number" then return val end
+        end
+    end
+    local floor = math.floor
+    local function toB(x) return floor(tonumber(x) or 0) % 0x100000000 end
+    local function bnot(x) return 0xFFFFFFFF - toB(x) end
+    local function band(x, y)
+        x, y = toB(x), toB(y); local r, b = 0, 1
+        for i = 0, 31 do
+            if x % 2 == 1 and y % 2 == 1 then r = r + b end
+            x = floor(x / 2); y = floor(y / 2); b = b * 2
+        end
+        return r
+    end
+    local function bor(x, y)
+        x, y = toB(x), toB(y); local r, b = 0, 1
+        for i = 0, 31 do
+            if x % 2 == 1 or y % 2 == 1 then r = r + b end
+            x = floor(x / 2); y = floor(y / 2); b = b * 2
+        end
+        return r
+    end
+    local function bxor(x, y)
+        x, y = toB(x), toB(y); local r, b = 0, 1
+        for i = 0, 31 do
+            if x % 2 ~= y % 2 then r = r + b end
+            x = floor(x / 2); y = floor(y / 2); b = b * 2
+        end
+        return r
+    end
+    -- 纯 Lua 5.1 / Luau 递归下降求值器（用本地表 F 存放互相递归函数，避免前向引用，
+    -- 兼容 Lua 5.1 与严格宿主；不使用 ~ & | 运算符，避免 Lua 5.1 编译错误）。
+    local p = 1
+    local len = #compact
+    local function peek() return compact:sub(p, p) end
+    local F = {}
+    function F.parseFact()
+        local t = peek()
+        if t == "" then return nil end
+        if t == "~" then p = p + 1; return bnot(F.parseFact() or 0) end
+        if t == "-" then p = p + 1; return -(F.parseFact() or 0) end
+        if t == "+" then p = p + 1; return F.parseFact() or 0 end
+        if t == "(" then
+            p = p + 1
+            local v = F.parseExpr()
+            if p <= len and peek() == ")" then p = p + 1 end
+            return v
+        end
+        if t:match("[0-9]") then
+            local s = p
+            while p <= len and compact:sub(p, p):match("[0-9%.]") do p = p + 1 end
+            return tonumber(compact:sub(s, p - 1)) or 0
+        end
+        return nil
+    end
+    function F.parseTerm()
+        local val = F.parseFact()
+        while p <= len do
+            local t = peek()
+            if t == "*" then p = p + 1; val = (val or 0) * (F.parseFact() or 0)
+            elseif t == "/" then p = p + 1; val = (val or 0) / (F.parseFact() or 0)
+            else break end
+        end
+        return val
+    end
+    function F.parseExpr()
+        local val = F.parseTerm()
+        while p <= len do
+            local t = peek()
+            if t == "+" then p = p + 1; val = (val or 0) + (F.parseTerm() or 0)
+            elseif t == "-" then p = p + 1; val = (val or 0) - (F.parseTerm() or 0)
+            elseif t == "~" then p = p + 1; val = bxor(val or 0, F.parseTerm() or 0)
+            elseif t == "&" then p = p + 1; val = band(val or 0, F.parseTerm() or 0)
+            elseif t == "|" then p = p + 1; val = bor(val or 0, F.parseTerm() or 0)
+            else break end
+        end
+        return val
+    end
+    local ok, val = pcall(parseExpr)
+    if ok and type(val) == "number" and p >= len then return val end
+    return nil
+end
+        local ok, val = pcall(function() return safeEvalNumber(expr) end)
         if ok and type(val) == "number" then
             g_offset = val
         end
@@ -1001,8 +1098,8 @@ local function deobfWeAreDevSandboxDeobfuscate(code)
     -- 匹配 shuffle 对: {expr1, expr2}
     for a, b in result_code:gmatch("{([^,}]+),([^}]+)}") do
         -- 评估表达式
-        local ok_a, val_a = pcall(loadstring("return " .. a:gsub("%s","")))
-        local ok_b, val_b = pcall(loadstring("return " .. b:gsub("%s","")))
+        local ok_a, val_a = pcall(function() return safeEvalNumber(a:gsub("%s","")) end)
+        local ok_b, val_b = pcall(function() return safeEvalNumber(b:gsub("%s","")) end)
         if ok_a and ok_b and type(val_a) == "number" and type(val_b) == "number" then
             if val_a < val_b then
                 table.insert(shuffle_pairs, {val_a, val_b})
@@ -1135,7 +1232,7 @@ local function deobfWeAreDevSandboxDeobfuscate(code)
     result_code = result_code:gsub("G%(([-+%d%s%*%/%(%)]+)%)", function(expr)
         -- 评估算术表达式
         local clean_expr = expr:gsub("%s", "")
-        local ok_eval, val = pcall(loadstring("return " .. clean_expr))
+        local ok_eval, val = pcall(function() return safeEvalNumber(clean_expr) end)
         if ok_eval and type(val) == "number" and g_func then
             local str = g_func(val)
             if type(str) == "string" then
@@ -2584,7 +2681,7 @@ local pageDef = {
     title = "反混淆工具",
     icon = "shield-check",
     dataFolder = "deobfuscator",
-    version = "1.1.0",
+    version = "1.0.0",
 }
 
 function pageDef.build(frame, helpers)
@@ -2607,7 +2704,7 @@ function pageDef.build(frame, helpers)
         return
     end
     
-    if _G.__DeltaUI_AddLog then _G.__DeltaUI_AddLog("[反混淆] 页面构建完成 v2.0.0", "info") end
+    if _G.__DeltaUI_AddLog then _G.__DeltaUI_AddLog("[反混淆] 页面构建完成 v1.0.0", "info") end
 end
 
 local function register()

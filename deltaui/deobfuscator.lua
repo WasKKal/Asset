@@ -1073,7 +1073,7 @@ local function deobfUnwrapFunction(code)
     -- 匹配: return (function(...) <body> end)(...)
     -- 也匹配: local <var> = (function(...) <body> end)(...)
     local function unwrapPattern(prefix, suffix)
-        local pattern = prefix .. '%(s*function%s*%(%.%.%.%)%s*(.-)%s*end%)%s*%(%.%.%.%)' .. suffix
+        local pattern = prefix .. '%(%s*function%s*%(%.%.%.%)%s*(.-)%s*end%)%s*%(%.%.%.%)' .. suffix
         return pattern
     end
 
@@ -1092,7 +1092,7 @@ local function deobfUnwrapFunction(code)
     end
 
     -- 解除 local var = (function(...) body end)(...) 模式
-    result = result:gsub('local%s+([%w_]+)%s*=%s*%(s*function%s*%(%s*%)%s*\n', function(varname)
+    result = result:gsub('local%s+([%w_]+)%s*=%s*%(%s*function%s*%(%s*%)%s*\n', function(varname)
         count = count + 1
         return "do\n"
     end)

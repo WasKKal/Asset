@@ -90,6 +90,7 @@ local deobfToolButtons = {}
 
 local DEOBF_TOOLS = {
     { id = "detect_obf", name = "混淆检测", icon = "scan-search", desc = "检测代码使用的混淆器类型", color = "accent2" },
+    { id = "wearedev_full", name = "WeAreDev 完全反混淆", icon = "wand-sparkles", desc = "一键完全反混淆 WeAreDev 脚本", color = "green" },
     { id = "hook_loadstring", name = "Hook Loadstring", icon = "link", desc = "拦截并记录所有 loadstring 调用", color = "accent" },
     { id = "rename_vars", name = "变量重命名", icon = "pencil", desc = "将混淆变量名替换为可读名称", color = "accent2" },
     { id = "string_decrypt", name = "字符串解密", icon = "key-round", desc = "解密加密的字符串常量", color = "green" },
@@ -1103,6 +1104,90 @@ local function deobfRunTool(toolId)
         local results = deobfDetectObfuscation(content)
         for _, line in ipairs(results) do
             AddLog(line, "info")
+        end
+        return
+    end
+    
+    -- WeAreDev 完全反混淆
+    if toolId == "wearedev_full" then
+        local content = ""
+        if deobfSelectedFile and dataApi then
+            content = dataApi.readFile(deobfSelectedFile) or ""
+        end
+        if content == "" then
+            content = deobfEditorTextBox and deobfEditorTextBox.Text or ""
+        end
+        if content == "" then
+            AddLog("请先选择文件或输入代码", "warn")
+            return
+        end
+        
+        AddLog("=== WeAreDev 完全反混淆 ===", "info")
+        AddLog("开始处理...", "info")
+        
+        local totalChanges = 0
+        
+        -- Step 1: 检测
+        local detection = deobfDetectObfuscation(content)
+        local isWeAreDev = detection.confidence > 20 and detection.confidence < 100
+        if detection.confidence >= 100 or detection.confidence >= 50 then
+            isWeAreDev = true
+        end
+        
+        -- Step 2: 字符串解密
+        local decrypted, strCount = deobfStringDecrypt(content)
+        totalChanges = totalChanges + strCount
+        AddLog("已解密 " .. strCount .. " 个字符串", "info")
+        
+        -- Step 3: WeAreDev 特定清理
+        local cleaned, cleanCount = deobfCleanWeAreDev(decrypted)
+        totalChanges = totalChanges + cleanCount
+        AddLog("已清理 " .. cleanCount .. " 处 WeAreDev 特征", "info")
+        
+        -- Step 4: 表键修复
+        cleaned = cleaned:gsub('([%w_]+)%s*%[%s*%"([^"]+)%"%s*%]%s*=', function(tbl, key)
+            if key:match("^[%a_][%w_]*$") then
+                totalChanges = totalChanges + 1
+                return tbl .. "." .. key .. " ="
+            end
+            return tbl .. '["' .. key .. '"] ='
+        end)
+        cleaned = cleaned:gsub('([%w_]+)%s*%[%s*%"([^"]+)%"%s*%]', function(tbl, key)
+            if key:match("^[%a_][%w_]*$") then
+                totalChanges = totalChanges + 1
+                return tbl .. "." .. key
+            end
+            return tbl .. '["' .. key .. '"]'
+        end)
+        
+        -- Step 5: 变量重命名
+        local renamed, varCount = deobfRenameVars(cleaned)
+        totalChanges = totalChanges + varCount
+        AddLog("已重命名 " .. varCount .. " 个变量", "info")
+        
+        -- Step 6: 垃圾代码清理
+        local cleanResult, gcCount = deobfGcClean(renamed)
+        totalChanges = totalChanges + gcCount
+        AddLog("已清理 " .. gcCount .. " 行垃圾代码", "info")
+        
+        -- Step 7: 格式化
+        local formatted = deobfFormatCode(cleanResult)
+        
+        -- 保存结果
+        if dataApi and deobfSelectedFile then
+            local backupName = deobfSelectedFile:gsub("%.([^%.]+)$", "_deobfuscated.%1")
+            dataApi.writeFile(backupName, formatted)
+            
+            if deobfViewMode == "editor" and deobfEditorTextBox then
+                deobfEditorTextBox.Text = formatted
+            end
+            
+            AddLog("=== 反混淆完成 ===", "info")
+            AddLog("总计 " .. totalChanges .. " 处修改", "info")
+            AddLog("结果已保存到: " .. backupName, "info")
+        else
+            AddLog("=== 反混淆完成 ===", "info")
+            AddLog("总计 " .. totalChanges .. " 处修改", "info")
         end
         return
     end

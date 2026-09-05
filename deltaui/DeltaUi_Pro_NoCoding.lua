@@ -1038,10 +1038,10 @@ if cloudSearchIcon then
     cloudSearchIcon.Position = UDim2.new(0, 10, 0.5, -7)
     cloudSearchIcon.Parent = cloudSearchBox
 end
-cloudSearchInput = create("TextBox", {Position = UDim2.new(0, 30, 0, 0), Size = UDim2.new(1, -40, 1, 0), BackgroundTransparency = 1, Text = "", PlaceholderText = t("search_cloud_placeholder"), PlaceholderColor3 = theme.textDim, TextColor3 = theme.text, TextSize = 12, Font = Enum.Font.SourceSans, TextXAlignment = Enum.TextXAlignment.Left, TextYAlignment = Enum.TextYAlignment.Center, ClearTextOnFocus = false, ZIndex = 4})
+cloudSearchInput = create("TextBox", {Position = UDim2.new(0, 30, 0, 0), Size = UDim2.new(1, -40, 1, 0), BackgroundTransparency = 1, Text = "", PlaceholderText = "", PlaceholderColor3 = theme.textDim, TextColor3 = theme.text, TextSize = 12, Font = Enum.Font.SourceSans, TextXAlignment = Enum.TextXAlignment.Left, TextYAlignment = Enum.TextYAlignment.Center, ClearTextOnFocus = false, ZIndex = 4})
 cloudSearchInput.Parent = cloudSearchBox
 create("UIPadding", {PaddingLeft = UDim.new(0, 5)}).Parent = cloudSearchInput
-table.insert(settingsData.uiRefs, {element = cloudSearchInput, key = "search_cloud_placeholder"})
+-- table.insert(settingsData.uiRefs, {element = cloudSearchInput, key = "search_cloud_placeholder"})
 cloudRefreshBtn = create("TextButton", {Position = UDim2.new(1, -38, 0, 8), Size = UDim2.new(0, 32, 0, 32), BackgroundColor3 = theme.surface, BackgroundTransparency = 0.25, BorderSizePixel = 0, Text = "", ZIndex = 3})
 corner(8, cloudRefreshBtn)
 stroke(theme.border, 1, cloudRefreshBtn)
@@ -3259,10 +3259,34 @@ for i, preset in ipairs(PRESET_PAGES) do
     })
     descLbl.Parent = card
 
-    local installBtn = makeGradientBtn(card, UDim2.new(0, 72, 0, 30), Vector2.new(1, 0.5), UDim2.new(1, -10, 0.5, 0), "安装")
-    safeConnect(installBtn, "MouseButton1Click", function()
-        installExternalPageFromURL(preset.url, preset.unsafe)
-    end)
+    local currentBtn = nil
+
+    local function refreshPresetBtn()
+        if currentBtn then currentBtn:Destroy() end
+        local installed = pages[preset.name] ~= nil
+        if installed then
+            local btn = create("TextButton", {AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.new(1, -10, 0.5, 0), Size = UDim2.new(0, 72, 0, 30), BackgroundColor3 = theme.red, BackgroundTransparency = 0.3, Text = "", BorderSizePixel = 0, ZIndex = 5})
+            corner(8, btn)
+            local btnText = create("TextLabel", {Size = UDim2.new(1, 0, 1, 0), BackgroundTransparency = 1, Text = "卸载", TextColor3 = Color3.fromRGB(255,255,255), TextSize = 12, Font = Enum.Font.SourceSansBold, ZIndex = 6})
+            btnText.Parent = btn
+            safeConnect(btn, "MouseButton1Click", function()
+                uninstallExternalPage(preset.name)
+                task.wait(0.2)
+                refreshPresetBtn()
+            end)
+            btn.Parent = card
+            currentBtn = btn
+        else
+            local btn = makeGradientBtn(card, UDim2.new(0, 72, 0, 30), Vector2.new(1, 0.5), UDim2.new(1, -10, 0.5, 0), "安装")
+            safeConnect(btn, "MouseButton1Click", function()
+                installExternalPageFromURL(preset.url, preset.unsafe)
+                task.wait(0.3)
+                refreshPresetBtn()
+            end)
+            currentBtn = btn
+        end
+    end
+    refreshPresetBtn()
 
     -- 如果需要不安全模式，添加警告图标
     if preset.unsafe then
@@ -3914,17 +3938,14 @@ function registerExternalPage(code, url, defOverride, forceUnsafe)
 
     local chunk = loadstring(code, "@external_page")
     if not chunk then
-        AddLog("[页面安装] [FAIL] loadstring 编译失败，URL: " .. tostring(url), "warn")
         pcall(function() frame:Destroy() end)
         _G.DeltaPage = prevPage
         ShowNotification(t("page_install_failed"), 3)
         return false
     end
-    AddLog("[页面安装] [1/4] loadstring 编译成功，safeMode = " .. tostring(safeMode) .. " forceUnsafe = " .. tostring(forceUnsafe), "info")
     
     local risky = scanPageSource(code)
     if #risky > 0 then
-        AddLog("[页面安装] 检测到风险代码: " .. table.concat(risky, ", "), "warn")
         if safeMode then
             pcall(function() frame:Destroy() end)
             _G.DeltaPage = prevPage
@@ -3955,16 +3976,13 @@ function registerExternalPage(code, url, defOverride, forceUnsafe)
     end
 
     if not ok then
-        AddLog("[页面安装] [FAIL] 脚本执行错误: " .. tostring(ret), "warn")
         if debug and debug.traceback then
-            AddLog("[页面安装] 调用栈: " .. debug.traceback(), "info")
         end
         pcall(function() frame:Destroy() end)
         _G.DeltaPage = prevPage
         ShowNotification(t("page_install_failed"), 3)
         return false
     end
-    AddLog("[页面安装] [2/4] 脚本执行成功，captured = " .. tostring(captured ~= nil) .. " ret.build = " .. tostring(type(ret) == "table" and ret.build or "nil"), "info")
 
     local def = buildPageDef(ret, captured, defOverride, url)
     local name = def.name
@@ -4005,12 +4023,10 @@ function registerExternalPage(code, url, defOverride, forceUnsafe)
     if not safeMode then _G.DeltaPage = helpers end
     local builtOk = true
     if type(def.build) == "function" then
-        AddLog("[页面安装] [3/4] 开始执行 build 函数，def.name = " .. tostring(def.name), "info")
         builtOk = pcall(def.build, frame, helpers)
     end
 
     if not builtOk then
-        AddLog("[页面安装] [FAIL] build 函数执行失败", "warn")
         pcall(function() frame:Destroy() end)
         pages[name] = nil
         if navButtons[name] then pcall(function() navButtons[name]:Destroy() end); navButtons[name] = nil end
@@ -4022,7 +4038,6 @@ function registerExternalPage(code, url, defOverride, forceUnsafe)
         ShowNotification(t("page_install_failed"), 3)
         return false
     end
-    AddLog("[页面安装] [4/4] 页面安装成功！name = " .. tostring(def.name), "info")
 
     if customTabMode then
         updateCustomButtonPositions(false)
@@ -4156,6 +4171,12 @@ function refreshInstalledPagesList()
     for i = count, 1, -1 do
         local p = list[i]
         if p and p.name then
+            -- 跳过官方预设页面（在预设栏中管理）
+            local isPreset = false
+            for _, pp in ipairs(PRESET_PAGES) do
+                if pp.name == p.name then isPreset = true; break end
+            end
+            if isPreset then continue end
             local row = create("Frame", {Size = UDim2.new(1, 0, 0, 42), BackgroundColor3 = theme.surface, BackgroundTransparency = 0.3, BorderSizePixel = 0, ZIndex = 4})
             corner(10, row)
             local nameLabel = create("TextLabel", {Position = UDim2.new(0, 12, 0, 0), Size = UDim2.new(1, -110, 1, 0), BackgroundTransparency = 1, Text = p.title or p.name, TextColor3 = theme.text, TextSize = 13, Font = Enum.Font.SourceSansBold, TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd, ZIndex = 5})

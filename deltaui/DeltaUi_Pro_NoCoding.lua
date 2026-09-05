@@ -4906,7 +4906,7 @@ topBar.Parent = main
 navBg = create("Frame", {
     AnchorPoint = Vector2.new(0, 0.5),
     Position = UDim2.new(0, 10, 0.5, 0),
-    Size = UDim2.new(0, 44, 0, 242),
+    Size = UDim2.new(0, 44, 0, 244),
     BackgroundColor3 = theme.surfaceLight,
     BackgroundTransparency = 0.5,
     BorderSizePixel = 0,
@@ -4916,17 +4916,18 @@ corner(22, navBg)
 stroke(theme.border, 1, navBg)
 navBg.Parent = main
 logoutBtn = create("TextButton", {
-    AnchorPoint = Vector2.new(0.5, 1),
-    Position = UDim2.new(0.5, 0, 1, -6),
-    Size = UDim2.new(0, 32, 0, 32),
-    BackgroundColor3 = theme.surface,
-    BackgroundTransparency = 0.3,
+    AnchorPoint = Vector2.new(0, 0.5),
+    Position = UDim2.new(0, 10, 0.5, 152),
+    Size = UDim2.new(0, 44, 0, 44),
+    BackgroundColor3 = theme.surfaceLight,
+    BackgroundTransparency = 0.5,
     BorderSizePixel = 0,
     Text = "",
-    ZIndex = 12
+    ZIndex = 11
 })
-corner(10, logoutBtn)
-logoutBtn.Parent = navBg
+corner(22, logoutBtn)
+stroke(theme.border, 1, logoutBtn)
+logoutBtn.Parent = main
 logoutIcon = GetIcon("minimize", UDim2.new(0, 16, 0, 16), theme.text)
 if logoutIcon then
     logoutIcon.Position = UDim2.new(0.5, -8, 0.5, -8)
@@ -5808,6 +5809,21 @@ function applyTabIcons()
     end
 end
 
+function updateLogoutBtnPos(animate)
+    animate = animate ~= false
+    local navH = navBg.Size.Y.Offset
+    local btnH = logoutBtn.Size.Y.Offset
+    local gap = 8
+    local offsetY = navH / 2 + gap + btnH / 2
+    if animate then
+        svc.TweenService:Create(logoutBtn, TweenInfo.new(0.25, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+            Position = UDim2.new(0, 10, 0.5, offsetY)
+        }):Play()
+    else
+        logoutBtn.Position = UDim2.new(0, 10, 0.5, offsetY)
+    end
+end
+
 function applyTabOrder()
     if customTabMode then return end
     for _, btn in pairs(navButtons) do
@@ -5823,8 +5839,9 @@ function applyTabOrder()
         end
     end
     if n > 0 then
-        local targetH = (btnYPositions[n] or (6 + (n - 1) * 40)) + 38 + 38
+        local targetH = (btnYPositions[n] or (6 + (n - 1) * 40)) + 38
         navBg.Size = UDim2.new(0, 44, 0, targetH)
+        updateLogoutBtnPos()
     end
     if currentPage and navButtons[currentPage] then
         navIndicator.Position = getIndicatorCenterPos(navButtons[currentPage])
@@ -5862,20 +5879,17 @@ function updateCustomButtonPositions(animate, skipNavBgSize)
     end
     if customTabMode and n > 0 and not skipNavBgSize then
         
-        local targetH = (n - 1) * spacing + btnSize + btnOffset * 2 + btnSize + 12
+        local targetH = (n - 1) * spacing + btnSize + btnOffset * 2
         if animate then
             cancelNavBgTween()
             navBgTween = svc.TweenService:Create(navBg, TweenInfo.new(0.25, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
                 Size = UDim2.new(0, navBg.Size.X.Offset, 0, targetH)
             })
             navBgTween:Play()
-            svc.TweenService:Create(logoutBtn, TweenInfo.new(0.25, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
-                Size = UDim2.new(0, btnSize, 0, btnSize)
-            }):Play()
         else
             navBg.Size = UDim2.new(0, navBg.Size.X.Offset, 0, targetH)
-            logoutBtn.Size = UDim2.new(0, btnSize, 0, btnSize)
         end
+        updateLogoutBtnPos(animate)
     end
 
     if customTabMode and currentPage and navButtons[currentPage] then

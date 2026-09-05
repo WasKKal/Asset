@@ -3199,7 +3199,7 @@ local PRESET_PAGES = {
         titleKey = "preset_deobfuscator",
         descKey = "preset_deobfuscator_desc",
         icon = "shield-check",
-        url = "https://cdn.jsdelivr.net/gh/WasKKal/Asset@latest/deltaui/deobfuscator.lua",
+        url = "https://cdn.jsdelivr.net/gh/WasKKal/Asset@baa49b26/deltaui/deobfuscator.lua",
         unsafe = true,
         version = "1.0.0",
     },

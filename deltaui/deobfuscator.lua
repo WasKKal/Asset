@@ -178,7 +178,6 @@ local DEOBF_TOOLS = {
     { id = "rename_vars", name = "变量重命名", icon = "pencil", desc = "将混淆变量名替换为可读名称", color = "accent2" },
     { id = "string_decrypt", name = "字符串解密", icon = "key-round", desc = "解密加密的字符串常量", color = "green" },
     { id = "luraph_clean", name = "Luraph 清理", icon = "eraser", desc = "清理 Luraph 特征代码", color = "warn" },
-    { id = "wearedev_clean", name = "WeAreDev 清理", icon = "sparkles", desc = "清理 WeAreDev 混淆特征", color = "warn" },
     { id = "control_flow", name = "控制流还原", icon = "git-branch", desc = "还原被扁平化的控制流", color = "accent" },
     { id = "gc_clean", name = "垃圾代码清理", icon = "trash-2", desc = "移除无效的死代码和垃圾指令", color = "red" },
     { id = "prometheus_full", name = "Prometheus 完全反混淆", icon = "wand-2", desc = "一键完全反混淆 Prometheus 脚本", color = "green" },
@@ -399,8 +398,11 @@ local function deobfRefreshFileList()
 end
 
 -- ========== 新建文件 ==========
+local deobfCreatingFile = false
+
 local function deobfShowNewFileInput()
     deobfIsCreatingNew = true
+    deobfCreatingFile = false
     deobfNewFileBtn.Visible = false
     deobfNewFileInput.Visible = true
     if deobfNewFileInputBox then
@@ -412,36 +414,84 @@ local function deobfShowNewFileInput()
     end
 end
 
-local function deobfHideNewFileInput()
+-- 收起输入框（带渐隐动画），reset=true 时清空输入
+local function deobfHideNewFileInput(reset)
     deobfIsCreatingNew = false
-    deobfNewFileBtn.Visible = true
-    deobfNewFileInput.Visible = false
+    deobfCreatingFile = false
+    if reset and deobfNewFileInputBox then
+        deobfNewFileInputBox.Text = ""
+    end
+    -- 渐隐输入框：透明度 → 1 + 宽度收缩，结束后隐藏；与展开动画对称
+    if deobfNewFileInput then
+        local input = deobfNewFileInput
+        deobfTween(input, {
+            BackgroundTransparency = 1,
+            Size = UDim2.new(0, 0, 0, 36),
+            Position = UDim2.new(1, -16, 0, 52),
+        }, 0.2)
+        task.spawn(function()
+            task.wait(0.2)
+            if not deobfIsCreatingNew then
+                input.Visible = false
+                input.BackgroundTransparency = 0.3
+                input.Size = UDim2.new(1, -16, 0, 36)
+                input.Position = UDim2.new(0, 8, 0, 52)
+            end
+        end)
+    end
+    -- 加号按钮渐显
+    if deobfNewFileBtn then
+        deobfNewFileBtn.Visible = true
+        deobfNewFileBtn.BackgroundTransparency = 0.3
+    end
 end
 
 local function deobfCreateNewFile()
-    if not deobfNewFileInputBox or not dataApi then return end
-    local fname = deobfNewFileInputBox.Text
-    if not fname or fname == "" then
-        AddLog("请输入文件名", "warn")
+    if deobfCreatingFile then return end
+    if not deobfNewFileInputBox then
+        deobfHideNewFileInput(true)
         return
     end
-    if not fname:match("^[%w_%-%s]+%.lua$") and not fname:match("^[%w_%-%s]+%.txt$") then
+    local raw = (deobfNewFileInputBox.Text or ""):match("^%s*(.-)%s*$") or ""
+    if raw == "" then
+        AddLog("请输入文件名", "warn")
+        deobfNotify("请输入文件名", 2)
+        pcall(function() deobfNewFileInputBox:CaptureFocus() end)
+        return
+    end
+    local fname = raw
+    if not fname:match("%.lua$") and not fname:match("%.txt$") then
         if not fname:match("%.") then
             fname = fname .. ".lua"
         else
             AddLog("文件名格式不正确", "warn")
+            deobfNotify("文件名格式不正确", 2)
             return
         end
     end
-    if dataApi.isFile(fname) then
-        AddLog("文件已存在", "warn")
+    if not dataApi then
+        AddLog("存储不可用，无法创建文件", "warn")
+        deobfNotify("存储不可用", 2)
+        deobfHideNewFileInput(true)
         return
     end
-    if dataApi.writeFile(fname, "") then
+    if dataApi.isFile and dataApi.isFile(fname) then
+        AddLog("文件已存在: " .. fname, "warn")
+        deobfNotify("文件已存在", 2)
+        return
+    end
+    deobfCreatingFile = true
+    local ok = pcall(function() return dataApi.writeFile(fname, "") end)
+    if ok and deobfSelectedFile ~= fname then
         AddLog("已创建: " .. fname .. "（长按文件即可编辑）", "info")
+        deobfNotify("已创建 " .. fname, 1)
         deobfSelectedFile = fname
-        deobfHideNewFileInput()
+        deobfHideNewFileInput(false)
         deobfRefreshFileList()
+    else
+        deobfCreatingFile = false
+        AddLog("创建失败: " .. fname, "warn")
+        deobfNotify("创建失败", 2)
     end
 end
 
@@ -982,23 +1032,6 @@ local function deobfCleanLuraph(code)
     return result, count
 end
 
--- WeAreDev 清理
-local function deobfCleanWeAreDev(code)
-    local result = code
-    local count = 0
-    
-    -- 清理 WeAreDev 相关代码
-    if result:match("WeAreDev") or result:match("wearedev") then
-        -- 清理环境变量混淆
-        result = result:gsub('getgenv%s*%(%s*%)(%s*)[;,]%s*getgenv', "%1;")
-        result = result:gsub('getgenv%s*%(%s*%)(%s*)[;,]%s*%[[^\]]*%]%s*=%s*getgenv', "%1;")
-        
-        -- 清理长变量名混淆模式
-        result = result:gsub('"([^"]*)"%]%s*%[%s*"([^"]*)"%]%s*%[%s*"([^"]*)"%]%s*=%s*"([^"]*)"', function(a, b, c, d)
-            if #a > 20 or #b > 20 or #c > 20 then
-                count = count + 1
-                return "" .. a .. "".. b .. "".. c .."='".. d .."'"
-            end
             return '"'.. a ..'"]["'.. b ..'"]["'.. c ..'"]="'.. d ..'"'
         end)
         
@@ -2197,9 +2230,6 @@ local function deobfRunTool(toolId)
     elseif toolId == "luraph_clean" then
         newContent, count = deobfCleanLuraph(content)
         info = "清理了 " .. count .. " 处 Luraph 特征"
-    elseif toolId == "wearedev_clean" then
-        newContent, count = deobfCleanWeAreDev(content)
-        info = "清理了 " .. count .. " 处 WeAreDev 特征"
     elseif toolId == "control_flow" then
         newContent, count = deobfRestoreControlFlow(content)
         info = "还原了 " .. count .. " 处控制流"
@@ -2367,9 +2397,14 @@ local function buildUI()
         confirmIcon.AnchorPoint = Vector2.new(0.5, 0.5)
         confirmIcon.Position = UDim2.new(0.5, 0, 0.5, 0)
         confirmIcon.ZIndex = 8
+        confirmIcon.Active = false
         confirmIcon.Parent = confirmBtn
     end
     confirmBtn.Parent = deobfNewFileInput
+    confirmBtn.AutoButtonColor = true
+    confirmBtn.Activated:Connect(function()
+        deobfCreateNewFile()
+    end)
     confirmBtn.MouseButton1Click:Connect(deobfCreateNewFile)
     
     local cancelBtn = create("TextButton", {
@@ -2380,6 +2415,7 @@ local function buildUI()
         BackgroundTransparency = 0.3,
         BorderSizePixel = 0,
         Text = "",
+        AutoButtonColor = true,
         ZIndex = 7,
     })
     corner(6, cancelBtn)
@@ -2388,10 +2424,16 @@ local function buildUI()
         cancelIcon.AnchorPoint = Vector2.new(0.5, 0.5)
         cancelIcon.Position = UDim2.new(0.5, 0, 0.5, 0)
         cancelIcon.ZIndex = 8
+        cancelIcon.Active = false
         cancelIcon.Parent = cancelBtn
     end
     cancelBtn.Parent = deobfNewFileInput
-    cancelBtn.MouseButton1Click:Connect(deobfHideNewFileInput)
+    cancelBtn.Activated:Connect(function()
+        deobfHideNewFileInput(true)
+    end)
+    cancelBtn.MouseButton1Click:Connect(function()
+        deobfHideNewFileInput(true)
+    end)
     
     -- 文件列表滚动区
     deobfFileListScroll = create("ScrollingFrame", {

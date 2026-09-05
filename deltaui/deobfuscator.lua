@@ -43,7 +43,6 @@ local function ensureDeps()
     end
     if not AddLog then AddLog = function(msg, lvl) print("[Deobf]", msg) end end
     if deobfDataApi then dataApi = deobfDataApi end
-    -- 从 DeltaPage helpers 获取 UI 工具函数
     if DeltaPage then
         if not _G.create and DeltaPage.create then _G.create = DeltaPage.create end
         if not _G.corner and DeltaPage.corner then _G.corner = DeltaPage.corner end
@@ -74,7 +73,7 @@ local deobfFileItems = {}
 local deobfFiles = {}
 
 local deobfRightPanel = nil
-local deobfViewMode = "tools" -- "tools" | "editor" | "hooklog"
+local deobfViewMode = "tools"
 local deobfToolsView = nil
 local deobfEditorView = nil
 local deobfHookLogView = nil
@@ -115,6 +114,9 @@ end
 
 local function deobfRefreshFileList()
     if not deobfFileList then return end
+    for _, child in ipairs(deobfFileList:GetChildren()) do
+        pcall(function() child:Destroy() end)
+    end
     for _, item in pairs(deobfFileItems) do
         pcall(function() item:Destroy() end)
     end
@@ -312,30 +314,11 @@ function deobfOpenEditor(fname)
     end
 end
 
-function deobfShowHookLog()
-    deobfViewMode = "hooklog"
-    if deobfToolsView then deobfToolsView.Visible = false end
-    if deobfEditorView then deobfEditorView.Visible = false end
-    if deobfHookLogView then deobfHookLogView.Visible = true end
-    deobfRefreshHookLog()
-end
-
-function deobfEditorFromHook(record)
-    if not record then return end
-    deobfViewMode = "editor"
-    deobfViewingHookRecord = record
-    deobfSelectedFile = nil
-    if deobfToolsView then deobfToolsView.Visible = false end
-    if deobfHookLogView then deobfHookLogView.Visible = false end
-    if deobfEditorView then deobfEditorView.Visible = true end
-    if deobfEditorTitle then deobfEditorTitle.Text = "#" .. record.id .. " " .. tostring(record.chunkname or "unknown") end
-    if deobfEditorTextBox then
-        deobfEditorTextBox.Text = tostring(record.source or "")
-    end
-end
-
 local function deobfRefreshHookLog()
     if not deobfHookLogList then return end
+    for _, child in ipairs(deobfHookLogList:GetChildren()) do
+        pcall(function() child:Destroy() end)
+    end
     for _, item in pairs(deobfHookLogItems) do
         pcall(function() item:Destroy() end)
     end
@@ -439,7 +422,6 @@ local function deobfRefreshHookLog()
         })
         timeLabel.Parent = row
         
-        -- 查看按钮
         local viewBtn = create("TextButton", {
             AnchorPoint = Vector2.new(1, 1),
             Position = UDim2.new(1, -60, 1, -6),
@@ -469,7 +451,6 @@ local function deobfRefreshHookLog()
             deobfEditorFromHook(record)
         end)
         
-        -- 执行按钮
         local runBtn = create("TextButton", {
             AnchorPoint = Vector2.new(1, 1),
             Position = UDim2.new(1, -8, 1, -6),
@@ -526,6 +507,28 @@ local function deobfRefreshHookLog()
     end
 end
 
+function deobfShowHookLog()
+    deobfViewMode = "hooklog"
+    if deobfToolsView then deobfToolsView.Visible = false end
+    if deobfEditorView then deobfEditorView.Visible = false end
+    if deobfHookLogView then deobfHookLogView.Visible = true end
+    deobfRefreshHookLog()
+end
+
+function deobfEditorFromHook(record)
+    if not record then return end
+    deobfViewMode = "editor"
+    deobfViewingHookRecord = record
+    deobfSelectedFile = nil
+    if deobfToolsView then deobfToolsView.Visible = false end
+    if deobfHookLogView then deobfHookLogView.Visible = false end
+    if deobfEditorView then deobfEditorView.Visible = true end
+    if deobfEditorTitle then deobfEditorTitle.Text = "#" .. record.id .. " " .. tostring(record.chunkname or "unknown") end
+    if deobfEditorTextBox then
+        deobfEditorTextBox.Text = tostring(record.source or "")
+    end
+end
+
 local function deobfSaveCurrentFile()
     if not dataApi or not deobfEditorTextBox then return end
     
@@ -535,9 +538,10 @@ local function deobfSaveCurrentFile()
             deobfViewingHookRecord.source = deobfEditorTextBox.Text
             deobfSelectedFile = fname
             deobfViewingHookRecord = nil
-            if deobfEditorTitle then deobfEditorTitle.Text = fname end
             AddLog("已保存: " .. fname, "info")
             deobfRefreshFileList()
+            if deobfEditorView then deobfEditorView.Visible = false end
+            deobfShowTools()
         else
             AddLog("保存失败", "warn")
         end
@@ -547,6 +551,9 @@ local function deobfSaveCurrentFile()
     if not deobfSelectedFile then return end
     if dataApi.writeFile(deobfSelectedFile, deobfEditorTextBox.Text) then
         AddLog("已保存: " .. deobfSelectedFile, "info")
+        deobfRefreshFileList()
+        if deobfEditorView then deobfEditorView.Visible = false end
+        deobfShowTools()
     else
         AddLog("保存失败", "warn")
     end
@@ -819,7 +826,6 @@ end
 local function buildUI()
     ensureDeps()
     
-    -- 左侧面板
     deobfLeftPanel = create("Frame", {
         Position = UDim2.new(0, 0, 0, 0),
         Size = UDim2.new(0, DEOBF_LEFT_W, 1, 0),
@@ -832,7 +838,6 @@ local function buildUI()
     stroke(theme.border, 1, deobfLeftPanel)
     deobfLeftPanel.Parent = deobfPage
     
-    -- 左侧头部
     local leftHeader = create("Frame", {
         Size = UDim2.new(1, 0, 0, 44),
         Position = UDim2.new(0, 0, 0, 0),
@@ -855,7 +860,6 @@ local function buildUI()
     })
     leftTitle.Parent = leftHeader
     
-    -- 新建文件按钮
     deobfNewFileBtn = create("TextButton", {
         AnchorPoint = Vector2.new(1, 0.5),
         Position = UDim2.new(1, -12, 0.5, 0),
@@ -878,7 +882,6 @@ local function buildUI()
     deobfNewFileBtn.Parent = leftHeader
     deobfNewFileBtn.MouseButton1Click:Connect(deobfShowNewFileInput)
     
-    -- 新建文件输入框
     deobfNewFileInput = create("Frame", {
         Size = UDim2.new(1, -16, 0, 36),
         Position = UDim2.new(0, 8, 0, 52),
@@ -956,7 +959,6 @@ local function buildUI()
     cancelBtn.Parent = deobfNewFileInput
     cancelBtn.MouseButton1Click:Connect(deobfHideNewFileInput)
     
-    -- 文件列表滚动区
     deobfFileListScroll = create("ScrollingFrame", {
         Position = UDim2.new(0, 0, 0, 96),
         Size = UDim2.new(1, 0, 1, -108),
@@ -977,7 +979,6 @@ local function buildUI()
     })
     deobfFileList.Parent = deobfFileListScroll
     
-    -- 分隔线
     local divV = create("Frame", {
         Position = UDim2.new(0, DEOBF_LEFT_W + 4, 0, 0),
         Size = UDim2.new(0, 1, 1, 0),
@@ -988,7 +989,6 @@ local function buildUI()
     })
     divV.Parent = deobfPage
     
-    -- 右侧面板
     local rightX = DEOBF_LEFT_W + 8
     deobfRightPanel = create("Frame", {
         Position = UDim2.new(0, rightX, 0, 0),
@@ -1002,7 +1002,6 @@ local function buildUI()
     stroke(theme.border, 1, deobfRightPanel)
     deobfRightPanel.Parent = deobfPage
     
-    -- ===== 工具视图 =====
     deobfToolsView = create("Frame", {
         Size = UDim2.new(1, 0, 1, 0),
         BackgroundTransparency = 1,
@@ -1156,7 +1155,6 @@ local function buildUI()
     toolsList.Size = UDim2.new(1, 0, 0, toolsContentH)
     toolsScroll.CanvasSize = UDim2.new(0, 0, 0, toolsContentH)
     
-    -- ===== 拦截记录视图 =====
     deobfHookLogView = create("Frame", {
         Size = UDim2.new(1, 0, 1, 0),
         BackgroundTransparency = 1,
@@ -1173,7 +1171,6 @@ local function buildUI()
     })
     hookLogHeader.Parent = deobfHookLogView
     
-    -- 返回按钮
     local hookLogBackBtn = create("TextButton", {
         Position = UDim2.new(0, 12, 0.5, 0),
         AnchorPoint = Vector2.new(0, 0.5),
@@ -1210,7 +1207,6 @@ local function buildUI()
     })
     hookLogTitle.Parent = hookLogHeader
     
-    -- 状态标签
     local hookStatusLabel = create("TextLabel", {
         AnchorPoint = Vector2.new(1, 0.5),
         Position = UDim2.new(1, -16, 0.5, 0),
@@ -1246,7 +1242,6 @@ local function buildUI()
     })
     deobfHookLogList.Parent = deobfHookLogScroll
     
-    -- ===== 编辑器视图 =====
     deobfEditorView = create("Frame", {
         Size = UDim2.new(1, 0, 1, 0),
         BackgroundTransparency = 1,
@@ -1255,7 +1250,6 @@ local function buildUI()
     })
     deobfEditorView.Parent = deobfRightPanel
     
-    -- 编辑器头部
     local editorHeader = create("Frame", {
         Size = UDim2.new(1, 0, 0, 44),
         Position = UDim2.new(0, 0, 0, 0),
@@ -1264,7 +1258,6 @@ local function buildUI()
     })
     editorHeader.Parent = deobfEditorView
     
-    -- 返回按钮
     deobfEditorBackBtn = create("TextButton", {
         Position = UDim2.new(0, 12, 0.5, 0),
         AnchorPoint = Vector2.new(0, 0.5),
@@ -1287,7 +1280,6 @@ local function buildUI()
     deobfEditorBackBtn.Parent = editorHeader
     deobfEditorBackBtn.MouseButton1Click:Connect(deobfShowTools)
     
-    -- 文件名
     deobfEditorTitle = create("TextLabel", {
         Position = UDim2.new(0, 52, 0, 0),
         Size = UDim2.new(1, -120, 0, 44),
@@ -1303,7 +1295,6 @@ local function buildUI()
     })
     deobfEditorTitle.Parent = editorHeader
     
-    -- 保存按钮
     deobfEditorSaveBtn = create("TextButton", {
         AnchorPoint = Vector2.new(1, 0.5),
         Position = UDim2.new(1, -12, 0.5, 0),
@@ -1331,7 +1322,6 @@ local function buildUI()
     deobfEditorSaveBtn.Parent = editorHeader
     deobfEditorSaveBtn.MouseButton1Click:Connect(deobfSaveCurrentFile)
     
-    -- 编辑器文本框
     local editorBg = create("Frame", {
         Position = UDim2.new(0, 12, 0, 52),
         Size = UDim2.new(1, -24, 1, -64),
@@ -1361,7 +1351,6 @@ local function buildUI()
     })
     deobfEditorTextBox.Parent = editorBg
     
-    -- 初始化
     deobfRefreshFileList()
 end
 
@@ -1373,7 +1362,7 @@ local pageDef = {
     title = "反混淆工具",
     icon = "shield-check",
     dataFolder = "deobfuscator",
-    version = "1.0.2",
+    version = "1.0.3",
 }
 
 function pageDef.build(frame, helpers)

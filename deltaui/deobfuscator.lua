@@ -1010,6 +1010,299 @@ local function deobfSandboxExec(code, env)
     return nil, result
 end
 
+-- ============================================================
+-- WeAreDev v1.0.0 深度反混淆（Luau 版）
+-- 静态等价变换管线：数字化简 -> S表提取 -> 转义展开 -> p表解码 -> W()内联
+-- 不执行 VM，只做文本级等价变换，保证产物语法与语义等价。
+-- 依赖：无第三方库，仅标准库（string/table/tonumber/tostring）
+-- ============================================================
+
+local DEOBF_ARITH_LIMIT = 5000000
+
+-- 扫描所有 "..." 字符串字面量，返回内部内容数组（正确处理 \\ 与 \" 转义）
+local function deobfScanStrings(s)
+	local inners = {}
+	local i = 1
+	local n = #s
+	while i <= n do
+		local b = s:byte(i)
+		if b == 34 then -- "
+			local j = i + 1
+			while j <= n do
+				local c = s:byte(j)
+				if c == 92 then -- \ 跳过转义对
+					j = j + 2
+				elseif c == 34 then
+					break
+				else
+					j = j + 1
+				end
+			end
+			local innerEnd = math.min(j, n + 1) - 1
+			table.insert(inners, s:sub(i + 1, innerEnd))
+			i = j + 1
+		else
+			i = i + 1
+		end
+	end
+	return inners
+end
+
+-- 字符串字面量替换为 \0S{n}\0 占位符，返回 (new_s, inners)
+local function deobfProtectStrings(s)
+	local inners = {}
+	local out = {}
+	local i = 1
+	local n = #s
+	local last = 1
+	while i <= n do
+		local b = s:byte(i)
+		if b == 34 then
+			local j = i + 1
+			while j <= n do
+				local c = s:byte(j)
+				if c == 92 then
+					j = j + 2
+				elseif c == 34 then
+					break
+				else
+					j = j + 1
+				end
+			end
+			local innerEnd = math.min(j, n + 1) - 1
+			table.insert(inners, s:sub(i + 1, innerEnd))
+			table.insert(out, s:sub(last, i - 1))
+			table.insert(out, '\0S' .. (#inners - 1) .. '\0')
+			i = j + 1
+			last = i
+		else
+			i = i + 1
+		end
+	end
+	table.insert(out, s:sub(last))
+	return table.concat(out), inners
+end
+
+-- 算术替换（带前后边界处理）
+-- pattern 必须包含 4 个位置捕获: ()前 ()数字1 数字2 ()后
+local function deobfArithReplace(s, pattern, compute, countRef)
+	return s:gsub(pattern, function(pos1, a, b, pos2)
+		local num = compute(tonumber(a), tonumber(b))
+		local result
+		if num == math.floor(num) and math.abs(num) < 1000000000000000 then
+			result = string.format('%.0f', num)
+		else
+			result = tostring(num)
+		end
+		countRef.value = countRef.value + 1
+		-- 前边界: 前一字符是标识符字符且结果以数字开头 -> 补空格
+		local prefix = ''
+		if pos1 > 1 then
+			local before = s:sub(pos1 - 1, pos1 - 1)
+			if before:match('^[%w_]$') and result:match('^%d') then
+				prefix = ' '
+			end
+		end
+		-- 后边界: 后一字符是字母且非指数 -> 补空格
+		local suffix = ''
+		if pos2 <= #s then
+			local after = s:sub(pos2, pos2)
+			if after:match('^[A-Za-z_]$') then
+				local isExp = (after == 'e' or after == 'E')
+					and s:sub(pos2, pos2 + 3):match('^[eE][+-]?%d') ~= nil
+				if not isExp then suffix = ' ' end
+			end
+		end
+		return prefix .. result .. suffix
+	end)
+end
+
+-- 数字化简：7 条算术规则循环（字符串保护，避免误伤字符串字面量）
+local function deobfSimplifyArith(s)
+	local protected, strings = deobfProtectStrings(s)
+	s = protected
+	local countRef = { value = 0 }
+	local prev
+	repeat
+		prev = s
+		s = deobfArithReplace(s, '()%-([%d]+)%s*%-%s*%(%-([%d]+)%)()', function(a, b) return b - a end, countRef)
+		s = deobfArithReplace(s, '()([%d]+)%s*%-%s*%(%-([%d]+)%)()', function(a, b) return a + b end, countRef)
+		s = deobfArithReplace(s, '()([%d]+)%s*%+%-%s*([%d]+)()', function(a, b) return a - b end, countRef)
+		s = deobfArithReplace(s, '()%-([%d]+)%s*%+%s*([%d]+)()', function(a, b) return b - a end, countRef)
+		s = deobfArithReplace(s, '()%-([%d]+)%s*%-%s*([%d]+)()', function(a, b) return -(a + b) end, countRef)
+		s = deobfArithReplace(s, '()([%d]+)%s*%+%s*([%d]+)()', function(a, b) return a + b end, countRef)
+		s = deobfArithReplace(s, '()([%d]+)%s*%-%s*([%d]+)()', function(a, b) return a - b end, countRef)
+	until s == prev or countRef.value >= DEOBF_ARITH_LIMIT
+	s = s:gsub('\0S(%d+)\0', function(idx) return '"' .. strings[tonumber(idx) + 1] .. '"' end)
+	return s, countRef.value
+end
+
+-- 转义展开：字符串内的 \ddd (2-3位十进制) 展开为实际字符
+-- 先保护 \\ 双反斜杠，再展开，最后恢复
+local function deobfExpandEscapes(s)
+	local placeholder = '\1\2'
+	local count = 0
+	s = s:gsub('\\\\\\\\', placeholder)
+	s = s:gsub('\\(%d%d%d?)', function(num)
+		if #num < 2 then return '\\' .. num end
+		local code = tonumber(num)
+		if code and code >= 32 and code <= 126 then
+			count = count + 1
+			return string.char(code)
+		end
+		return '\\' .. num
+	end)
+	s = s:gsub(placeholder, '\\\\')
+	return s, count
+end
+
+-- S 表提取：local S={...} for p= 之间的 64 键自定义 base64 字母表
+local function deobfExtractSMap(s)
+	local body = s:match('local%s+S%s*=%s*{([^}]*)}%s*for%s+p%s*=%s*')
+	if not body then return nil end
+	local S = {}
+	-- ["key"]=num 形式
+	for key, num in body:gmatch('%[%"([^"]*)"%]%s*=%s*(%d+)') do
+		local decoded = key:gsub('\\(%d%d%d?)', function(d)
+			local code = tonumber(d)
+			if code then return string.char(code) end
+			return d
+		end)
+		S[decoded] = tonumber(num)
+	end
+	-- identifier=num 形式
+	for name, num in body:gmatch('([%a_][%w_]*)%s*=%s*(%d+)') do
+		S[name] = tonumber(num)
+	end
+	local n = 0
+	for _ in pairs(S) do n = n + 1 end
+	if n == 64 then return S end
+	return nil
+end
+
+-- 自定义 base64 解码（S 表字母表）
+local function deobfDecodeCustom(b64, S)
+	local out = {}
+	local buf = 0
+	local bits = 0
+	for i = 1, #b64 do
+		local c = b64:sub(i, i)
+		if c == '=' then break end
+		local v = S[c]
+		if v == nil then return nil end
+		buf = (buf << 6) | v
+		bits = bits + 6
+		if bits >= 8 then
+			bits = bits - 8
+			table.insert(out, string.char((buf >> bits) & 0xff))
+		end
+	end
+	return table.concat(out)
+end
+
+-- 转义输出：生成 Lua 字符串字面量安全形式（统一 3 位十进制转义）
+local function deobfLuaEscape(str)
+	local out = {}
+	for i = 1, #str do
+		local c = str:byte(i)
+		if c == 34 then
+			table.insert(out, '\\"')
+		elseif c == 92 then
+			table.insert(out, '\\\\')
+		elseif c == 10 then
+			table.insert(out, '\\n')
+		elseif c == 13 then
+			table.insert(out, '\\r')
+		elseif c == 9 then
+			table.insert(out, '\\t')
+		elseif c == 123 or c == 125 then
+			table.insert(out, '\\' .. string.format('%03d', c))
+		elseif c >= 32 and c <= 126 then
+			table.insert(out, str:sub(i, i))
+		else
+			table.insert(out, '\\' .. string.format('%03d', c))
+		end
+	end
+	return table.concat(out)
+end
+
+-- p 表解码：local p={base64转义项...} 解码为常量池字符串
+local function deobfDecodePTable(s, S)
+	local count = 0
+	local prev
+	repeat
+		prev = s
+		s = s:gsub('()local%s+p%s*=%s*{([^{}]*)}()', function(pos1, body, pos2)
+			local items = deobfScanStrings(body)
+			if #items < 2 then
+				return s:sub(pos1, pos2 - 1)
+			end
+			local out = {}
+			for _, it in ipairs(items) do
+				local inner = it:gsub('\\(%d%d%d?)', function(d)
+					local code = tonumber(d)
+					if code and code >= 32 and code <= 126 then return string.char(code) end
+					return '\\' .. d
+				end)
+				local dec = deobfDecodeCustom(inner, S)
+				if dec == nil then
+					return s:sub(pos1, pos2 - 1)
+				end
+				table.insert(out, '"' .. deobfLuaEscape(dec) .. '"')
+				count = count + 1
+			end
+			return 'local p={' .. table.concat(out, ',') .. '}'
+		end)
+	until s == prev or count >= 100000
+	return s, count
+end
+
+-- W() 内联：将 W(数字) 调用替换为 p 表对应项字面量
+local function deobfInlineW(s)
+	local param, off = s:match('local%s+function%s+W%s*%(%s*([%w_]+)%s*%)%s*return%s+p%s*%[%s*%1%s*%-%s*%(%s*(%d+)%s*%)%s*%]%s*end')
+	if not param then
+		param, off = s:match('local%s+function%s+W%s*%(%s*([%w_]+)%s*%)%s*return%s+p%s*%[%s*%1%s*%-%s*(%d+)%s*%]%s*end')
+	end
+	if not param then return s, 0 end
+	local offset = tonumber(off)
+	local pBody = s:match('local%s+p%s*=%s*{([^{}]*)}')
+	if not pBody then return s, 0 end
+	local pVals = deobfScanStrings(pBody)
+	local count = 0
+	s = s:gsub('()%f[%w]W%s*%(%s*(%d+)%s*%)()', function(pos1, idx, pos2)
+		local realIdx = tonumber(idx) - offset
+		-- 注意：JS 原型用 0-based 数组，Lua 表 1-based，需 +1
+		local val = pVals[realIdx + 1]
+		if val then
+			count = count + 1
+			return '"' .. val .. '"'
+		end
+		return s:sub(pos1, pos2 - 1)
+	end)
+	return s, count
+end
+
+-- 主入口：WeAreDev v1.0.0 深度反混淆
+-- 返回 result, stats, ok（ok=false 表示未识别为 WeAreDev v1.0.0，result 原样返回）
+local function deobfWeAreDevDeep(code)
+	local result = code
+	local stats = { arith = 0, escapes = 0, decoded = 0, winline = 0 }
+	-- Step 1: 数字化简
+	result, stats.arith = deobfSimplifyArith(result)
+	-- Step 2: S 表提取
+	local S = deobfExtractSMap(result)
+	if not S then
+		return result, stats, false
+	end
+	-- Step 3: 转义展开
+	result, stats.escapes = deobfExpandEscapes(result)
+	-- Step 4: p 表解码
+	result, stats.decoded = deobfDecodePTable(result, S)
+	-- Step 5: W 内联
+	result, stats.winline = deobfInlineW(result)
+	return result, stats, true
+end
+
 local function deobfWeAreDevSandboxDeobfuscate(code)
     local results = {}
     local count = 0
@@ -1932,6 +2225,15 @@ local function deobfRunTool(toolId)
         AddLog("沙箱引擎完成: " .. changeCount .. " 处修改", "info")
 
         local totalChanges = changeCount
+
+        local deepResult, deepStats, deepOk = deobfWeAreDevDeep(deobfResult)
+        if deepOk then
+            deobfResult = deepResult
+            totalChanges = totalChanges + deepStats.arith + deepStats.escapes + deepStats.decoded + deepStats.winline
+            AddLog("深度反混淆(v1.0.0): 数字化简 " .. deepStats.arith .. " 处, 转义展开 " .. deepStats.escapes .. " 处, p表解码 " .. deepStats.decoded .. " 项, W内联 " .. deepStats.winline .. " 处", "info")
+        else
+            AddLog("深度反混淆(v1.0.0): 未识别 S/p/W 结构，跳过", "warn")
+        end
 
         local r2, c2 = deobfNumExprRestore(deobfResult)
         deobfResult = r2

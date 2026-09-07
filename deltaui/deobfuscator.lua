@@ -7,7 +7,7 @@ DeltaPageInfo = {
     title = "反混淆工具",
     icon = "shield-check",
     dataFolder = "deobfuscator",
-    version = "1.0.0",
+    version = "1.1.0",
 }
 local pageInfo = DeltaPageInfo
 
@@ -47,11 +47,26 @@ end
 local function deobfIsTypeColon(code, colonPos)
     local before = code:sub(1, colonPos - 1):match("%s*(%S+)%s*$")
     if not before then return false end
-    if before:match("^[%a_][%w_]*$") then
-        if before == "local" or before == "function" or before == "for" or before == "in" then
-            return false
+    -- 1) 末尾是标识符：变量/参数/字段名（含函数名紧贴参数 f(a、逗号 ,b、索引 [k、表 {f 等形态）
+    local lastWord = before:match("([%a_][%w_]*)$")
+    if lastWord then
+        local prefix = before:sub(1, #before - #lastWord)
+        local lastChar = prefix:sub(-1)
+        if lastChar == "" then
+            -- before 本身就是一个标识符
+            if lastWord == "local" or lastWord == "function" or lastWord == "for" or lastWord == "in" or lastWord == "return" then
+                return false
+            end
+            return true
         end
-        return true
+        -- 前导字符为 ( [ { , 或空白：属于参数/字段/索引后的类型注解
+        if lastChar:match("[%(%[%{%s,]") then
+            if lastWord == "local" or lastWord == "function" or lastWord == "for" or lastWord == "in" or lastWord == "return" then
+                return false
+            end
+            return true
+        end
+        return false
     end
     return before == ")" or before == "," or before == "(" or before == "[" or before == "{"
 end
@@ -2949,42 +2964,49 @@ function pageDef.build(frame, helpers)
     -- 编译反混淆器页面本体。Luraph 残留损坏有两种典型形态：
     --   (a) 类型注解数字占位 -> “Expected type, got 'N'”（本 issue 为 '6'）
     --   (b) for-in 循环变量被重赋值 -> “attempt to assign to const variable 'VAR'”
-    -- 任一形态导致 loadstring 失败时，依次尝试对应清理，再重新编译。
+    -- 任一形态导致 loadstring 失败时，迭代执行对应清理（可叠加、多轮），再重新编译。
     local function tryCompile(src)
         return loadstring(src, "@deobfuscator")
     end
 
     local fn, err = tryCompile(DEOBFUSCATOR_PAGE_SOURCE)
     if not fn and err then
-        local e = tostring(err)
         local src = DEOBFUSCATOR_PAGE_SOURCE
+        local e = tostring(err)
 
-        -- (a) 损坏的类型注解
-        if e:find("Expected type", 1, true) then
-            local cleaned = deobfSanitizeTypeAnnotations(src)
-            if cleaned ~= src then
-                local fn2 = tryCompile(cleaned)
-                if fn2 then
-                    fn, err, src = fn2, nil, cleaned
-                    if _G.__DeltaUI_AddLog then
-                        _G.__DeltaUI_AddLog("[反混淆] 已自动修复损坏的类型注解并重新编译", "info")
-                    end
+        for _attempt = 1, 3 do
+            local cur = src
+            local changed = false
+
+            -- (a) 损坏的类型注解
+            if e:find("Expected type", 1, true) then
+                local cleaned = deobfSanitizeTypeAnnotations(cur)
+                if cleaned ~= cur then
+                    cur = cleaned
+                    changed = true
                 end
             end
-        end
 
-        -- (b) for-in 循环变量 const 冲突（可叠加在 (a) 之后）
-        if not fn and (e:find("const variable", 1, true) or e:find("Expected type", 1, true)) then
-            local fixed = deobfFixForInConstAssign(src)
-            if fixed ~= src then
-                local fn3 = tryCompile(fixed)
-                if fn3 then
-                    fn, err = fn3, nil
-                    if _G.__DeltaUI_AddLog then
-                        _G.__DeltaUI_AddLog("[反混淆] 已自动修复 for-in 循环变量 const 冲突并重新编译", "info")
-                    end
+            -- (b) for-in 循环变量 const 冲突（可与 (a) 叠加）
+            if e:find("const variable", 1, true) or e:find("Expected type", 1, true) then
+                local fixed = deobfFixForInConstAssign(cur)
+                if fixed ~= cur then
+                    cur = fixed
+                    changed = true
                 end
             end
+
+            if not changed then break end
+            src = cur
+            local fn2, err2 = tryCompile(src)
+            if fn2 then
+                fn, err = fn2, nil
+                if _G.__DeltaUI_AddLog then
+                    _G.__DeltaUI_AddLog("[反混淆] 已自动清理 Luraph 残留损坏并重新编译", "info")
+                end
+                break
+            end
+            e = tostring(err2 or "")
         end
     end
     if not fn then

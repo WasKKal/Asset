@@ -253,6 +253,8 @@ local function ensureDeps()
     if not AddLog then AddLog = function(msg, lvl) print("[Deobf]", msg) end end
     if not deobfNotify then deobfNotify = function(msg, lvl) AddLog(msg, (lvl == 1) and "info" or "warn") end end
     if deobfDataApi then dataApi = deobfDataApi end
+    if DeltaPage and DeltaPage.switchPage then deobfSwitchPage = DeltaPage.switchPage end
+    if not deobfSwitchPage and _G.__DeltaUI_switchPage then deobfSwitchPage = _G.__DeltaUI_switchPage end
     if DeltaPage then
         if not _G.create and DeltaPage.create then _G.create = DeltaPage.create end
         if not _G.corner and DeltaPage.corner then _G.corner = DeltaPage.corner end
@@ -609,13 +611,26 @@ local function deobfCreateNewFile()
             deobfHideNewFileInput(true)
             return
         end
-        if dataApi.isFile and dataApi.isFile(fname) then
+        local exists = false
+        local existsOk, existsErr = pcall(function()
+            if dataApi.isFile then exists = dataApi.isFile(fname) end
+        end)
+        if not existsOk then
+            AddLog("检查文件存在性出错: " .. tostring(existsErr), "warn")
+        end
+        if exists then
             AddLog("文件已存在: " .. fname, "warn")
             deobfNotify("文件已存在", 2)
             deobfHideNewFileInput(true)
             return
         end
-        local writeOk = pcall(function() return dataApi.writeFile(fname, "") end)
+        local writeOk, writeErr = pcall(function() return dataApi.writeFile(fname, "") end)
+        if not writeOk then
+            AddLog("写入文件出错: " .. tostring(writeErr), "warn")
+            deobfNotify("写入失败: " .. tostring(writeErr):sub(1, 30), 2)
+            deobfHideNewFileInput(true)
+            return
+        end
         if writeOk and deobfSelectedFile ~= fname then
             AddLog("已创建: " .. fname .. "（长按文件即可编辑）", "info")
             deobfNotify("已创建 " .. fname, 1)
@@ -2605,8 +2620,8 @@ local function buildUI()
     end)
 
     deobfFileListScroll = create("ScrollingFrame", {
-        Position = UDim2.new(0, 0, 0, 96),
-        Size = UDim2.new(1, 0, 1, -108),
+        Position = UDim2.new(0, 0, 0, 48),
+        Size = UDim2.new(1, 0, 1, -60),
         BackgroundTransparency = 1,
         BorderSizePixel = 0,
         ScrollBarThickness = 3,

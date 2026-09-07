@@ -523,25 +523,38 @@ local function deobfShowNewFileInput()
     deobfCreatingFile = false
     if deobfNewFileBtn then
         deobfNewFileBtn.Visible = true
-        deobfTween(deobfNewFileBtn, {
+        local twInfo = TweenInfo.new(0.2, Enum.EasingStyle.Quart, Enum.EasingDirection.Out)
+        svc.TweenService:Create(deobfNewFileBtn, twInfo, {
             BackgroundTransparency = 1,
             Size = UDim2.new(0, 0, 0, 28),
-        }, 0.2)
+            Rotation = 90,
+        }):Play()
     end
     if deobfLeftTitle then
-        deobfTween(deobfLeftTitle, {TextTransparency = 1}, 0.15)
+        local twInfo = TweenInfo.new(0.2, Enum.EasingStyle.Quart, Enum.EasingDirection.Out)
+        svc.TweenService:Create(deobfLeftTitle, twInfo, {
+            TextTransparency = 1,
+            Position = UDim2.new(0, -20, 0, 0),
+        }):Play()
     end
     if deobfNewFileInput then
-        deobfNewFileInput.Visible = true
-        deobfNewFileInput.BackgroundTransparency = 1
-        deobfTween(deobfNewFileInput, {
-            BackgroundTransparency = 0.3,
-        }, 0.2)
+        local input = deobfNewFileInput
+        input.Visible = true
+        input.BackgroundTransparency = 1
+        input.Position = UDim2.new(1, 0, 0.5, 0)
+        input.Size = UDim2.new(0, 0, 0, 32)
+        task.wait()
+        local twInfo = TweenInfo.new(0.28, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
+        svc.TweenService:Create(input, twInfo, {
+            BackgroundTransparency = 0.15,
+            Position = UDim2.new(0, 12, 0.5, 0),
+            Size = UDim2.new(1, -56, 0, 32),
+        }):Play()
     end
     if deobfNewFileInputBox then
         deobfNewFileInputBox.Text = ""
         task.spawn(function()
-            task.wait(0.15)
+            task.wait(0.2)
             pcall(function() deobfNewFileInputBox:CaptureFocus() end)
         end)
     end
@@ -555,28 +568,40 @@ local function deobfHideNewFileInput(reset)
     end
     if deobfNewFileBtn then
         deobfNewFileBtn.Visible = true
-        deobfTween(deobfNewFileBtn, {
+        local twInfo = TweenInfo.new(0.2, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
+        svc.TweenService:Create(deobfNewFileBtn, twInfo, {
             BackgroundTransparency = 0.3,
             Size = UDim2.new(0, 32, 0, 28),
-        }, 0.2)
+            Rotation = 0,
+        }):Play()
     end
     if deobfLeftTitle then
-        deobfTween(deobfLeftTitle, {TextTransparency = 0}, 0.2)
+        local twInfo = TweenInfo.new(0.2, Enum.EasingStyle.Quart, Enum.EasingDirection.Out)
+        svc.TweenService:Create(deobfLeftTitle, twInfo, {
+            TextTransparency = 0,
+            Position = UDim2.new(0, 14, 0, 0),
+        }):Play()
     end
     if deobfNewFileInput then
         local input = deobfNewFileInput
-        deobfTween(input, {
+        local twInfo = TweenInfo.new(0.18, Enum.EasingStyle.Quart, Enum.EasingDirection.In)
+        svc.TweenService:Create(input, twInfo, {
             BackgroundTransparency = 1,
-        }, 0.2)
+            Position = UDim2.new(1, 0, 0.5, 0),
+            Size = UDim2.new(0, 0, 0, 32),
+        }):Play()
         task.spawn(function()
             task.wait(0.2)
             if not deobfIsCreatingNew then
                 input.Visible = false
                 input.BackgroundTransparency = 1
+                input.Position = UDim2.new(0, 12, 0.5, 0)
+                input.Size = UDim2.new(1, -56, 0, 32)
             end
         end)
     end
 end
+
 
 local function deobfCreateNewFile()
     if deobfCreatingFile then return end
@@ -2530,28 +2555,29 @@ local function buildUI()
     deobfNewFileBtn.MouseButton1Click:Connect(deobfShowNewFileInput)
 
     deobfNewFileInput = create("Frame", {
-        Size = UDim2.new(1, -64, 0, 28),
-        Position = UDim2.new(0, 14, 0.5, 0),
+        Size = UDim2.new(1, -56, 0, 32),
+        Position = UDim2.new(0, 12, 0.5, 0),
         AnchorPoint = Vector2.new(0, 0.5),
         BackgroundColor3 = theme.surface,
         BackgroundTransparency = 1,
         BorderSizePixel = 0,
         ZIndex = 6,
         Visible = false,
+        ClipsDescendants = true,
     })
-    corner(8, deobfNewFileInput)
+    corner(12, deobfNewFileInput)
     stroke(theme.accent, 1, deobfNewFileInput)
     deobfNewFileInput.Parent = leftHeader
 
     deobfNewFileInputBox = create("TextBox", {
-        Position = UDim2.new(0, 10, 0, 0),
+        Position = UDim2.new(0, 12, 0, 0),
         Size = UDim2.new(1, -76, 1, 0),
         BackgroundTransparency = 1,
         Text = "",
         PlaceholderText = "输入文件名...",
         PlaceholderColor3 = theme.textDim,
         TextColor3 = theme.text,
-        TextSize = 12,
+        TextSize = 13,
         Font = Enum.Font.SourceSans,
         TextXAlignment = Enum.TextXAlignment.Left,
         TextYAlignment = Enum.TextYAlignment.Center,
@@ -2567,16 +2593,16 @@ local function buildUI()
 
     local confirmBtn = create("TextButton", {
         AnchorPoint = Vector2.new(1, 0.5),
-        Position = UDim2.new(1, -34, 0.5, 0),
-        Size = UDim2.new(0, 24, 0, 24),
+        Position = UDim2.new(1, -40, 0.5, 0),
+        Size = UDim2.new(0, 26, 0, 26),
         BackgroundColor3 = theme.green,
-        BackgroundTransparency = 0.3,
+        BackgroundTransparency = 0.2,
         BorderSizePixel = 0,
         Text = "",
         ZIndex = 7,
     })
-    corner(6, confirmBtn)
-    local confirmIcon = GetIcon("check", UDim2.new(0, 12, 0, 12), Color3.fromRGB(255,255,255))
+    corner(8, confirmBtn)
+    local confirmIcon = GetIcon("check", UDim2.new(0, 14, 0, 14), Color3.fromRGB(255,255,255))
     if confirmIcon then
         confirmIcon.AnchorPoint = Vector2.new(0.5, 0.5)
         confirmIcon.Position = UDim2.new(0.5, 0, 0.5, 0)
@@ -2593,17 +2619,17 @@ local function buildUI()
 
     local cancelBtn = create("TextButton", {
         AnchorPoint = Vector2.new(1, 0.5),
-        Position = UDim2.new(1, -6, 0.5, 0),
-        Size = UDim2.new(0, 24, 0, 24),
-        BackgroundColor3 = theme.red,
-        BackgroundTransparency = 0.3,
+        Position = UDim2.new(1, -8, 0.5, 0),
+        Size = UDim2.new(0, 26, 0, 26),
+        BackgroundColor3 = theme.text,
+        BackgroundTransparency = 0.85,
         BorderSizePixel = 0,
         Text = "",
         AutoButtonColor = true,
         ZIndex = 7,
     })
-    corner(6, cancelBtn)
-    local cancelIcon = GetIcon("x", UDim2.new(0, 12, 0, 12), Color3.fromRGB(255,255,255))
+    corner(8, cancelBtn)
+    local cancelIcon = GetIcon("x", UDim2.new(0, 14, 0, 14), theme.text)
     if cancelIcon then
         cancelIcon.AnchorPoint = Vector2.new(0.5, 0.5)
         cancelIcon.Position = UDim2.new(0.5, 0, 0.5, 0)
@@ -2613,9 +2639,6 @@ local function buildUI()
     end
     cancelBtn.Parent = deobfNewFileInput
     cancelBtn.Activated:Connect(function()
-        deobfHideNewFileInput(true)
-    end)
-    cancelBtn.MouseButton1Click:Connect(function()
         deobfHideNewFileInput(true)
     end)
 

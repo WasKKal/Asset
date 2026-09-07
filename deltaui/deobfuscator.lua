@@ -1,7 +1,3 @@
--- 页面信息：DeltaUI 从这里读取 name/title/icon/version/dataFolder（不再依赖顶部注释标识）
--- 要求：顶格书写、扁平表、值为字符串；不要嵌套表，值里不要出现 } 或 "
--- name 之外的字段以这里为准；混淆后若声明被改写，运行时仍可通过该全局变量取回
--- 注意：不要在此声明 unsafe，是否沙箱运行只由 DeltaUI 侧决定
 DeltaPageInfo = {
     name = "deobfuscator",
     title = "反混淆工具",
@@ -11,17 +7,6 @@ DeltaPageInfo = {
 }
 local pageInfo = DeltaPageInfo
 
---[[
-    修复 Luraph 反混淆产生的损坏 Luau 类型注解。
-    现象：反混淆还原后的源码中，类型注解位置残留了“类型表索引”数字
-    （例如 `local x: 6`、`(): 6`、`<6>`、`as 6`），导致 loadstring 报
-    “Expected type, got 'N'”（本 issue 为 '6'，行号约 1118）。
-    这些注解对运行时无实际作用，此处仅做“再解析前”的保守清理：
-      - 去掉参数/变量/返回值位置的数字类型注解  `: <digit>` / `): <digit>`
-      - 去掉 `as <digit>`
-      - 去掉泛型 `<...>` 中看起来是损坏的数字占位符
-    只在编译失败（提示类型相关）时作为兜底重试使用，避免误伤正常代码。
-]]
 local function deobfSplitLines(src)
     local t = {}
     local pos = 1
@@ -41,25 +26,22 @@ local function deobfSplitLines(src)
     return t
 end
 
--- 判断 `:`（位于 colonPos）是否处于“类型注解”上下文：
---   - 前面是标识符（变量/参数/字段名），且不是运算符/关键字
---   - 或前面是 `)`（返回值 `): T`）、`,` `(` `[` `{`
 local function deobfIsTypeColon(code, colonPos)
     local before = code:sub(1, colonPos - 1):match("%s*(%S+)%s*$")
     if not before then return false end
-    -- 1) 末尾是标识符：变量/参数/字段名（含函数名紧贴参数 f(a、逗号 ,b、索引 [k、表 {f 等形态）
+
     local lastWord = before:match("([%a_][%w_]*)$")
     if lastWord then
         local prefix = before:sub(1, #before - #lastWord)
         local lastChar = prefix:sub(-1)
         if lastChar == "" then
-            -- before 本身就是一个标识符
+
             if lastWord == "local" or lastWord == "function" or lastWord == "for" or lastWord == "in" or lastWord == "return" then
                 return false
             end
             return true
         end
-        -- 前导字符为 ( [ { , 或空白：属于参数/字段/索引后的类型注解
+
         if lastChar:match("[%(%[%{%s,]") then
             if lastWord == "local" or lastWord == "function" or lastWord == "for" or lastWord == "in" or lastWord == "return" then
                 return false
@@ -76,11 +58,11 @@ local function deobfSanitizeTypeAnnotations(src)
     local out = {}
     for _, line in ipairs(deobfSplitLines(src)) do
         local s = line
-        -- 1) 返回值注解 `): <digit>` -> `)`（仅数字占位，运行时无效）
-        --    注意：故意不匹配字母开头的类型名，避免误伤方法调用 `obj):method(` 之类；
-        --    真实类型注解由下方规则 2 的“数字占位”逻辑统一处理（本 issue 损坏形态就是数字）。
+
+
+
         s = s:gsub("%)%s*:%s*%d[%d%.]*", ")")
-        -- 2) 仅作用于“类型注解位置”的数字占位 `: <digit>`
+
         s = s:gsub(":%s*%d[%d%.]*", function(m)
             local colonPos = s:find(m, 1, true)
             if colonPos and deobfIsTypeColon(s, colonPos) then
@@ -88,24 +70,15 @@ local function deobfSanitizeTypeAnnotations(src)
             end
             return m
         end)
-        -- 3) `as <digit>` 类型断言占位（用捕获保留前导字符，避免误删 `xas`、`has` 等）
+
         s = s:gsub("([^%w_])as%s+%d[%d%.]*", "%1")
-        -- 4) 泛型里的数字占位 `<digit, ...>` -> `<>`
+
         s = s:gsub("<%s*%d[%d%.]*[%s%d%,%.]*>", "<>")
         table.insert(out, s)
     end
     return table.concat(out, "\n")
 end
 
---[[
-    Luraph 反混淆产物中常见第二类损坏：
-    `for VAR in EXPR do ... VAR = ... end`
-    Luau 把 for-in 循环变量视为 const，循环体内对其赋值会抛
-    “attempt to assign to const variable 'VAR'”（本 issue 为 'item'，行号约 1751）。
-    修复思路：把循环变量改名成 `_`，并在循环首行插入 `local VAR = _`，
-    使循环体内的赋值作用在新 local 上，不再触碰 const 循环变量；语义完全等价。
-    仅在“循环体内确实存在对 VAR 赋值”时才改写，避免无谓变更。
---]]
 local function deobfFixForInConstAssign(src)
     if type(src) ~= "string" then return src end
     local lines = {}
@@ -857,7 +830,6 @@ local function deobfRefreshHookLog()
     end
 end
 
-
 local function deobfDetectObfuscation(code)
     local results = {}
     local totalScore = 0
@@ -1164,28 +1136,19 @@ local function deobfRestoreControlFlow(code)
     return result, changes
 end
 
-
--- ============================================================
--- WeAreDev v1.0.0 深度反混淆（Luau 版）
--- 静态等价变换管线：数字化简 -> S表提取 -> 转义展开 -> p表解码 -> W()内联
--- 不执行 VM，只做文本级等价变换，保证产物语法与语义等价。
--- 依赖：无第三方库，仅标准库（string/table/tonumber/tostring）
--- ============================================================
-
 local DEOBF_ARITH_LIMIT = 5000000
 
--- 扫描所有 "..." 字符串字面量，返回内部内容数组（正确处理 \\ 与 \" 转义）
 local function deobfScanStrings(s)
 	local inners = {}
 	local i = 1
 	local n = #s
 	while i <= n do
 		local b = s:byte(i)
-		if b == 34 then -- "
+		if b == 34 then
 			local j = i + 1
 			while j <= n do
 				local c = s:byte(j)
-				if c == 92 then -- \ 跳过转义对
+				if c == 92 then
 					j = j + 2
 				elseif c == 34 then
 					break
@@ -1203,7 +1166,6 @@ local function deobfScanStrings(s)
 	return inners
 end
 
--- 字符串字面量替换为 \0S{n}\0 占位符，返回 (new_s, inners)
 local function deobfProtectStrings(s)
 	local inners = {}
 	local out = {}
@@ -1238,8 +1200,6 @@ local function deobfProtectStrings(s)
 	return table.concat(out), inners
 end
 
--- 算术替换（带前后边界处理）
--- pattern 必须包含 4 个位置捕获: ()前 ()数字1 数字2 ()后
 local function deobfArithReplace(s, pattern, compute, countRef)
 	return s:gsub(pattern, function(pos1, a, b, pos2)
 		local num = compute(tonumber(a), tonumber(b))
@@ -1250,7 +1210,7 @@ local function deobfArithReplace(s, pattern, compute, countRef)
 			result = tostring(num)
 		end
 		countRef.value = countRef.value + 1
-		-- 前边界: 前一字符是标识符字符且结果以数字开头 -> 补空格
+
 		local prefix = ''
 		if pos1 > 1 then
 			local before = s:sub(pos1 - 1, pos1 - 1)
@@ -1258,7 +1218,7 @@ local function deobfArithReplace(s, pattern, compute, countRef)
 				prefix = ' '
 			end
 		end
-		-- 后边界: 后一字符是字母且非指数 -> 补空格
+
 		local suffix = ''
 		if pos2 <= #s then
 			local after = s:sub(pos2, pos2)
@@ -1272,14 +1232,6 @@ local function deobfArithReplace(s, pattern, compute, countRef)
 	end)
 end
 
--- 数字化简：7 条算术规则循环（字符串保护，避免误伤字符串字面量）
-
--- 转义展开：字符串内的 \ddd (2-3位十进制) 展开为实际字符
--- 先保护 \\ 双反斜杠，再展开，最后恢复
-
--- S 表提取：local S={...} for p= 之间的 64 键自定义 base64 字母表
-
--- 自定义 base64 解码（S 表字母表）
 local function deobfDecodeCustom(b64, S)
 	local out = {}
 	local buf = 0
@@ -1299,7 +1251,6 @@ local function deobfDecodeCustom(b64, S)
 	return table.concat(out)
 end
 
--- 转义输出：生成 Lua 字符串字面量安全形式（统一 3 位十进制转义）
 local function deobfLuaEscape(str)
 	local out = {}
 	for i = 1, #str do
@@ -1325,22 +1276,8 @@ local function deobfLuaEscape(str)
 	return table.concat(out)
 end
 
--- p 表解码：local p={base64转义项...} 解码为常量池字符串
-
--- W() 内联：将 W(数字) 调用替换为 p 表对应项字面量
-
--- ============================================================
--- WeAreDev v1.0 新版结构还原（变量名每次随机，逻辑与实测通过版一致）
---   字符串保护（base64 里有 + / 与数字，不保护会被算术规则吃掉）
---   -> 只整体求值“纯数字括号组”的安全化简
---   -> 复现解码前对常量数组的洗牌重排
---   -> 用产物自带的 64 键字母表按其 base64 规则解码（含 = 分支的 off-by-one 细节）
---   -> 把 取串器(<数值表达式>) 内联成明文常量
--- 不执行 VM：产物仍可运行，输出与原脚本一致
--- ============================================================
-
 local evalNumericLocal = nil
--- ===== 字符串保护：内容抽走，位置换成 \1Q<idx>\1 占位（连同引号一起被替换）=====
+
 local function wearedevProtectStrings(s)
     local inners, out, i, last = {}, {}, 1, 1
     local n = #s
@@ -1374,7 +1311,6 @@ local function wearedevUnprotectStrings(s, strings)
     end))
 end
 
--- ===== 纯数字表达式求值 =====
 local function wearedevEvalNumeric(expr)
     if expr:find("[A-Za-z_%[%]\"']") then return nil end
     local s = expr:gsub("%s", "")
@@ -1442,7 +1378,6 @@ local function wearedevFmtNum(n)
     return tostring(n)
 end
 
--- 只折叠"整体为纯数字的括号组"（函数调用括号除外）
 local function wearedevSimplify(s)
     local count, guard, changed = 0, 0, true
     while changed and guard < 14 do
@@ -1461,7 +1396,7 @@ local function wearedevSimplify(s)
                     if v ~= nil then
                         local txt = wearedevFmtNum(v)
                         if v < 0 then txt = "(" .. txt .. ")" end
-                        -- 折叠后避免与后一个记号粘连（1end / 2and 之类）
+
                         if s:sub(i + #group, i + #group):match("[%w_.]") then txt = txt .. " " end
                         out[#out + 1] = txt
                         i = i + #group
@@ -1487,7 +1422,6 @@ local function wearedevUnescapeDec(s)
     return (s:gsub("\\(%d%d%d)", function(d) return string.char(tonumber(d)) end))
 end
 
--- 生成字符串"内部内容"（不含外层引号），控制字符用 \ddd
 local function wearedevEscapeInner(str)
     local out = {}
     local q, bs = string.byte('"'), string.byte('\\')
@@ -1503,7 +1437,6 @@ end
 wearedevEscapeInner = wearedevEscapeInner
 wearedevLuaEscape = function(s) return '"' .. wearedevEscapeInner(s) .. '"' end
 
--- 取串器：local function A(a) return T[a - N] end（无反向引用，捕获后比对）
 local function wearedevFindAccessor(s)
     for acc, param, arr, iv, sign, num in s:gmatch(
         "local%s+function%s+([%a_][%w_]*)%(([%a_][%w_]*)%)return%s+([%a_][%w_]*)%[([%a_][%w_]*)%s*([%-+]?)%s*(%d+)%]end") do
@@ -1516,8 +1449,6 @@ local function wearedevFindAccessor(s)
     return nil
 end
 
--- 还原运行时的洗牌重排：for a,b in ipairs({{x,y},...}) do while a<b do swap(m[a],m[b]) a+1 b-1 end end
--- 数组体是纯数字表构造式，整体求值即可（先校验字符集，避免误执行）
 local function wearedevApplyShuffle(s, entries)
     local body = s:match("ipairs%s*%((%b{})%)")
     if not body then
@@ -1546,7 +1477,6 @@ local function wearedevApplyShuffle(s, entries)
     return entries, n
 end
 
--- 64 键自定义 base64 字母表：键是单字符（["\ddd"] 或裸字母），值是数字表达式
 local function wearedevFindAlphabet(s)
     local best
     for body in s:gmatch("local%s+[%a_][%w_]*%s*=%s*%{([^{}]*)%}") do
@@ -1568,15 +1498,15 @@ local function wearedevFindAlphabet(s)
 end
 
 local function wearedevDecodeB64(s, alpha)
-    -- 与产物自带的解码器逐位对齐：4 字符 -> 3 字节；遇 "=" 按 WeAreDev 的分支补齐后停止
+
     local out, buf, bits, i = {}, 0, 0, 1
     local n = #s
     while i <= n do
         local ch = s:sub(i, i)
         if ch == "=" then
-            local k = buf * 2 ^ (24 - bits)      -- 左对齐到 24 位，和产物里的 k 一致
+            local k = buf * 2 ^ (24 - bits)
             out[#out + 1] = string.char(math.floor(k / 65536) % 256)
-            -- 产物里的判定是 sub(w+1,w+2) ~= "="（单个等号），不是 "=="
+
             if i >= n or s:sub(i + 1, i + 1) ~= "=" then
                 out[#out + 1] = string.char(math.floor((k % 65536) / 256))
             end
@@ -1597,7 +1527,6 @@ local function wearedevDecodeB64(s, alpha)
     return table.concat(out)
 end
 
-
 function deobfWeAreDevV1(code)
     local stats = { arith = 0, accessor = nil, array = nil, offset = 0, entries = 0,
         decoded = 0, printable = 0, inlined = 0, alphabet = false, b64 = false, shuffles = 0,
@@ -1609,7 +1538,6 @@ function deobfWeAreDevV1(code)
     local acc, arr, off = wearedevFindAccessor(prot)
     stats.accessor, stats.array, stats.offset = acc, arr, off
 
-    -- 常量数组：数组体里是若干 \1Q<idx>\1 占位，按序映射回 strings
     local entries = {}
     if arr then
         local body = prot:match("local%s+" .. arr .. "%s*=%s*(%b{})")
@@ -1629,14 +1557,13 @@ function deobfWeAreDevV1(code)
     end
     stats.b64 = #entries > 0 and b64ish >= math.ceil(#entries * 0.7)
 
-    -- 字母表在原文里（键带引号，会被 protect 抽走），所以用未保护副本查找
     local alpha = wearedevFindAlphabet(code) or wearedevFindAlphabet(wearedevUnprotectStrings(prot, strings))
     stats.alphabet = alpha ~= nil
     local decodedList, byIndex = {}, {}
     if acc and alpha and stats.b64 then
         for i, e in ipairs(entries) do
             local d = wearedevDecodeB64(e, alpha.map)
-            byIndex[i] = d   -- 取串器为 1 基：m[num - offset]
+            byIndex[i] = d
             decodedList[#decodedList + 1] = d
             if d and #d > 0 and not d:find("[\1-\8\14-\31]") then
             stats.printable = stats.printable + 1
@@ -1653,19 +1580,11 @@ function deobfWeAreDevV1(code)
             strings[#strings + 1] = wearedevEscapeInner(s)
             return "\1Q" .. (#strings - 1) .. "\1"
         end)
-        -- 内联后要摘掉 4 处"仅供运行时解码"的结构，否则运行时会用 base64 覆盖明文常量
-        -- 注：剥离解码脚手架会破坏可执行性（已定位），当前版本保留原解码块
+
     end
     return wearedevUnprotectStrings(prot, strings), stats, decodedList
 end
 
-
--- ============================================================
--- WeAreDev v1.0 行为还原：把脚本在受控全局表里真跑一遍，记录它实际对外做的事
--- 返回 statements(字符串数组), constants(出现过的字符串), err
--- 注意：会真实执行脚本，只能作为显式确认后的独立工具，不并入 wearedev_full
--- 只包装"非 VM 运行时原语"的全局（print 等），原语直接透传，避免把 VM 自己搞崩
--- ============================================================
 local WEAREDEV_RUNTIME_GLOBALS = {
     type = true, pcall = true, xpcall = true, error = true, select = true, unpack = true,
     next = true, pairs = true, ipairs = true, rawget = true, rawset = true, tostring = true,
@@ -1720,7 +1639,7 @@ local function deobfWeAreDevTrace(code)
                     local parts = {}
                     for i = 1, cnt do parts[i] = toText(args[i]) end
                     statements[#statements + 1] = key .. "(" .. table.concat(parts, ", ") .. ")"
-                    return v(...)                       -- 尾调用：多返回值与错误传播完全保真
+                    return v(...)
                 end
                 namesOf[wrapped] = key
                 return wrapped
@@ -2355,8 +2274,6 @@ local function deobfRunTool(toolId)
         totalChanges = totalChanges + c3
         if c3 > 0 then AddLog("分割字符串合并: " .. c3 .. " 处", "info") end
 
-        -- 变量重命名 / 垃圾清理 不在本链里执行：实测它们会改动 VM 的局部名与派发行，
-        -- 使还原产物体积反增且运行报 nil；需要时点各自按钮单独执行。
         local formatted = deobfFormatCode(deobfResult)
 
         if dataApi and deobfSelectedFile then
@@ -2961,10 +2878,10 @@ function pageDef.build(frame, helpers)
         deobfNotify = helpers.ShowNotification
     end
 
-    -- 编译反混淆器页面本体。Luraph 残留损坏有两种典型形态：
-    --   (a) 类型注解数字占位 -> “Expected type, got 'N'”（本 issue 为 '6'）
-    --   (b) for-in 循环变量被重赋值 -> “attempt to assign to const variable 'VAR'”
-    -- 任一形态导致 loadstring 失败时，迭代执行对应清理（可叠加、多轮），再重新编译。
+
+
+
+
     local function tryCompile(src)
         return loadstring(src, "@deobfuscator")
     end
@@ -2978,7 +2895,7 @@ function pageDef.build(frame, helpers)
             local cur = src
             local changed = false
 
-            -- (a) 损坏的类型注解
+
             if e:find("Expected type", 1, true) then
                 local cleaned = deobfSanitizeTypeAnnotations(cur)
                 if cleaned ~= cur then
@@ -2987,7 +2904,7 @@ function pageDef.build(frame, helpers)
                 end
             end
 
-            -- (b) for-in 循环变量 const 冲突（可与 (a) 叠加）
+
             if e:find("const variable", 1, true) or e:find("Expected type", 1, true) then
                 local fixed = deobfFixForInConstAssign(cur)
                 if fixed ~= cur then

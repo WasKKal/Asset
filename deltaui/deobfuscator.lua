@@ -7,7 +7,7 @@ DeltaPageInfo = {
     title = "反混淆工具",
     icon = "shield-check",
     dataFolder = "deobfuscator",
-    version = "1.0.4",
+    version = "1.0.5",
 }
 local pageInfo = DeltaPageInfo
 
@@ -157,10 +157,12 @@ local deobfHookLogItems = {}
 local deobfHookRecords = {}
 local deobfEditorTextBox = deobfEditorBridge
 local deobfToolButtons = {}
+local deobfBehaviorArmed = nil
 
 local DEOBF_TOOLS = {
     { id = "detect_obf", name = "混淆检测", icon = "scan-search", desc = "检测代码使用的混淆器类型", color = "accent2" },
     { id = "wearedev_full", name = "WeAreDev 完全反混淆", icon = "wand-sparkles", desc = "一键完全反混淆 WeAreDev 脚本", color = "green" },
+    { id = "wearedev_behavior", name = "WeAreDev 行为还原", icon = "scan-search", desc = "执行脚本并还原它实际运行的语句（会真的跑起来）", color = "red" },
     { id = "hook_loadstring", name = "Hook Loadstring", icon = "link", desc = "拦截并记录所有 loadstring 调用", color = "accent" },
     { id = "rename_vars", name = "变量重命名", icon = "pencil", desc = "将混淆变量名替换为可读名称", color = "accent2" },
     { id = "string_decrypt", name = "字符串解密", icon = "key-round", desc = "解密加密的字符串常量", color = "green" },
@@ -695,9 +697,6 @@ local function deobfRefreshHookLog()
     end
 end
 
-local function deobfSaveCurrentFile()
-    if deobfNotify then deobfNotify("请在主页编辑器中保存", 1) end
-end
 
 local function deobfDetectObfuscation(code)
     local results = {}
@@ -904,7 +903,7 @@ local function deobfStringDecrypt(code)
         return "string.char(" .. nums .. ")" .. suffix
     end)
 
-    result = result:gsub('"%s*%.\.%s*"', function()
+    result = result:gsub('"%s*%.%.%s*"', function()
         count = count + 1
         return '"'
     end)
@@ -967,15 +966,6 @@ local function deobfCleanLuraph(code)
         return '""'
     end)
 
-    return result, count
-end
-
-            return '"'.. a ..'"]["'.. b ..'"]["'.. c ..'"]="'.. d ..'"'
-        end)
-
-        count = count + 1
-    end
-
     result = result:gsub('oOoOOo%s*=', 'local ')
 
     result = result:gsub('string%s*%.[%w_]+%s*=%s*function%s*%([^)]*%).-end', function(m)
@@ -1014,14 +1004,6 @@ local function deobfRestoreControlFlow(code)
     return result, changes
 end
 
-local function deobfSandboxExec(code, env)
-    local fn, err = loadstring(code)
-    if not fn then return nil, err end
-    setfenv(fn, env or {})
-    local ok, result = pcall(fn)
-    if ok then return result end
-    return nil, result
-end
 
 -- ============================================================
 -- WeAreDev v1.0.0 深度反混淆（Luau 版）
@@ -1131,67 +1113,11 @@ local function deobfArithReplace(s, pattern, compute, countRef)
 end
 
 -- 数字化简：7 条算术规则循环（字符串保护，避免误伤字符串字面量）
-local function deobfSimplifyArith(s)
-	local protected, strings = deobfProtectStrings(s)
-	s = protected
-	local countRef = { value = 0 }
-	local prev
-	repeat
-		prev = s
-		s = deobfArithReplace(s, '()%-([%d]+)%s*%-%s*%(%-([%d]+)%)()', function(a, b) return b - a end, countRef)
-		s = deobfArithReplace(s, '()([%d]+)%s*%-%s*%(%-([%d]+)%)()', function(a, b) return a + b end, countRef)
-		s = deobfArithReplace(s, '()([%d]+)%s*%+%-%s*([%d]+)()', function(a, b) return a - b end, countRef)
-		s = deobfArithReplace(s, '()%-([%d]+)%s*%+%s*([%d]+)()', function(a, b) return b - a end, countRef)
-		s = deobfArithReplace(s, '()%-([%d]+)%s*%-%s*([%d]+)()', function(a, b) return -(a + b) end, countRef)
-		s = deobfArithReplace(s, '()([%d]+)%s*%+%s*([%d]+)()', function(a, b) return a + b end, countRef)
-		s = deobfArithReplace(s, '()([%d]+)%s*%-%s*([%d]+)()', function(a, b) return a - b end, countRef)
-	until s == prev or countRef.value >= DEOBF_ARITH_LIMIT
-	s = s:gsub('\0S(%d+)\0', function(idx) return '"' .. strings[tonumber(idx) + 1] .. '"' end)
-	return s, countRef.value
-end
 
 -- 转义展开：字符串内的 \ddd (2-3位十进制) 展开为实际字符
 -- 先保护 \\ 双反斜杠，再展开，最后恢复
-local function deobfExpandEscapes(s)
-	local placeholder = '\1\2'
-	local count = 0
-	s = s:gsub('\\\\\\\\', placeholder)
-	s = s:gsub('\\(%d%d%d?)', function(num)
-		if #num < 2 then return '\\' .. num end
-		local code = tonumber(num)
-		if code and code >= 32 and code <= 126 then
-			count = count + 1
-			return string.char(code)
-		end
-		return '\\' .. num
-	end)
-	s = s:gsub(placeholder, '\\\\')
-	return s, count
-end
 
 -- S 表提取：local S={...} for p= 之间的 64 键自定义 base64 字母表
-local function deobfExtractSMap(s)
-	local body = s:match('local%s+S%s*=%s*{([^}]*)}%s*for%s+p%s*=%s*')
-	if not body then return nil end
-	local S = {}
-	-- ["key"]=num 形式
-	for key, num in body:gmatch('%[%"([^"]*)"%]%s*=%s*(%d+)') do
-		local decoded = key:gsub('\\(%d%d%d?)', function(d)
-			local code = tonumber(d)
-			if code then return string.char(code) end
-			return d
-		end)
-		S[decoded] = tonumber(num)
-	end
-	-- identifier=num 形式
-	for name, num in body:gmatch('([%a_][%w_]*)%s*=%s*(%d+)') do
-		S[name] = tonumber(num)
-	end
-	local n = 0
-	for _ in pairs(S) do n = n + 1 end
-	if n == 64 then return S end
-	return nil
-end
 
 -- 自定义 base64 解码（S 表字母表）
 local function deobfDecodeCustom(b64, S)
@@ -1240,414 +1166,426 @@ local function deobfLuaEscape(str)
 end
 
 -- p 表解码：local p={base64转义项...} 解码为常量池字符串
-local function deobfDecodePTable(s, S)
-	local count = 0
-	local prev
-	repeat
-		prev = s
-		s = s:gsub('()local%s+p%s*=%s*{([^{}]*)}()', function(pos1, body, pos2)
-			local items = deobfScanStrings(body)
-			if #items < 2 then
-				return s:sub(pos1, pos2 - 1)
-			end
-			local out = {}
-			for _, it in ipairs(items) do
-				local inner = it:gsub('\\(%d%d%d?)', function(d)
-					local code = tonumber(d)
-					if code and code >= 32 and code <= 126 then return string.char(code) end
-					return '\\' .. d
-				end)
-				local dec = deobfDecodeCustom(inner, S)
-				if dec == nil then
-					return s:sub(pos1, pos2 - 1)
-				end
-				table.insert(out, '"' .. deobfLuaEscape(dec) .. '"')
-				count = count + 1
-			end
-			return 'local p={' .. table.concat(out, ',') .. '}'
-		end)
-	until s == prev or count >= 100000
-	return s, count
-end
 
 -- W() 内联：将 W(数字) 调用替换为 p 表对应项字面量
-local function deobfInlineW(s)
-	local param, off = s:match('local%s+function%s+W%s*%(%s*([%w_]+)%s*%)%s*return%s+p%s*%[%s*%1%s*%-%s*%(%s*(%d+)%s*%)%s*%]%s*end')
-	if not param then
-		param, off = s:match('local%s+function%s+W%s*%(%s*([%w_]+)%s*%)%s*return%s+p%s*%[%s*%1%s*%-%s*(%d+)%s*%]%s*end')
-	end
-	if not param then return s, 0 end
-	local offset = tonumber(off)
-	local pBody = s:match('local%s+p%s*=%s*{([^{}]*)}')
-	if not pBody then return s, 0 end
-	local pVals = deobfScanStrings(pBody)
-	local count = 0
-	s = s:gsub('()%f[%w]W%s*%(%s*(%d+)%s*%)()', function(pos1, idx, pos2)
-		local realIdx = tonumber(idx) - offset
-		-- 注意：JS 原型用 0-based 数组，Lua 表 1-based，需 +1
-		local val = pVals[realIdx + 1]
-		if val then
-			count = count + 1
-			return '"' .. val .. '"'
-		end
-		return s:sub(pos1, pos2 - 1)
-	end)
-	return s, count
+
+-- ============================================================
+-- WeAreDev v1.0 新版结构还原（变量名每次随机，逻辑与实测通过版一致）
+--   字符串保护（base64 里有 + / 与数字，不保护会被算术规则吃掉）
+--   -> 只整体求值“纯数字括号组”的安全化简
+--   -> 复现解码前对常量数组的洗牌重排
+--   -> 用产物自带的 64 键字母表按其 base64 规则解码（含 = 分支的 off-by-one 细节）
+--   -> 把 取串器(<数值表达式>) 内联成明文常量
+-- 不执行 VM：产物仍可运行，输出与原脚本一致
+-- ============================================================
+
+local evalNumericLocal = nil
+-- ===== 字符串保护：内容抽走，位置换成 \1Q<idx>\1 占位（连同引号一起被替换）=====
+local function wearedevProtectStrings(s)
+    local inners, out, i, last = {}, {}, 1, 1
+    local n = #s
+    while i <= n do
+        local b = s:byte(i)
+        if b == 34 or b == 39 then
+            local q = b
+            local j = i + 1
+            while j <= n do
+                local c = s:byte(j)
+                if c == 92 then j = j + 2
+                elseif c == q then break
+                else j = j + 1 end
+            end
+            inners[#inners + 1] = s:sub(i + 1, math.min(j, n + 1) - 1)
+            out[#out + 1] = s:sub(last, i - 1)
+            out[#out + 1] = "\1Q" .. (#inners - 1) .. "\1"
+            i, last = j + 1, j + 1
+        else
+            i = i + 1
+        end
+    end
+    out[#out + 1] = s:sub(last)
+    return table.concat(out), inners
 end
 
--- 主入口：WeAreDev v1.0.0 深度反混淆
--- 返回 result, stats, ok（ok=false 表示未识别为 WeAreDev v1.0.0，result 原样返回）
-local function deobfWeAreDevDeep(code)
-	local result = code
-	local stats = { arith = 0, escapes = 0, decoded = 0, winline = 0 }
-	-- Step 1: 数字化简
-	result, stats.arith = deobfSimplifyArith(result)
-	-- Step 2: S 表提取
-	local S = deobfExtractSMap(result)
-	if not S then
-		return result, stats, false
-	end
-	-- Step 3: 转义展开
-	result, stats.escapes = deobfExpandEscapes(result)
-	-- Step 4: p 表解码
-	result, stats.decoded = deobfDecodePTable(result, S)
-	-- Step 5: W 内联
-	result, stats.winline = deobfInlineW(result)
-	return result, stats, true
+local function wearedevUnprotectStrings(s, strings)
+    return (s:gsub("\1Q(%d+)\1", function(idx)
+        local v = strings[tonumber(idx) + 1]
+        return v and ('"' .. v .. '"') or '""'
+    end))
 end
 
-local function deobfWeAreDevSandboxDeobfuscate(code)
-    local results = {}
-    local count = 0
-    local result_code = code
-
-    result_code = result_code:gsub("%-%-%[%[.-https://wearedevs%.net/obfuscator.-%]%]%s*", "")
-    count = count + 1
-    table.insert(results, "移除 Watermark 标记")
-
-    local u_match = result_code:match("local%s+u%s*=%s*({.-})")
-    if not u_match then
-        u_match = result_code:match("local%s+(%w+)%s*=%s*({[^\n]-})")
-        if u_match then
-            u_match = result_code:match("local%s+" .. u_match .. "%s*=%s*({.-})")
-        end
-    end
-
-    if not u_match then
-        table.insert(results, "警告: 未找到常量数组")
-        return result_code, count, results
-    end
-
-    local g_offset_str = result_code:match("local%s+function%s+G%(G%)return%s+u%[G%-(.-)%]end")
-    local g_offset = 0
-    if g_offset_str then
-        local expr = g_offset_str:gsub("%s", "")
-local function safeEvalNumber(expr)
-    if type(expr) ~= "string" then return nil end
-    local compact = expr:gsub("%s+", "")
-    if compact == "" then return nil end
-    local asNum = tonumber(compact)
-    if asNum then return asNum end
-    if compact:match("^[0-9%+%-%*/%(%)%.]+$") then
-        local fn, err = loadstring("return " .. compact)
-        if fn then
-            local ok, val = pcall(fn)
-            if ok and type(val) == "number" then return val end
-        end
-    end
-    local floor = math.floor
-    local function toB(x) return floor(tonumber(x) or 0) % 0x100000000 end
-    local function bnot(x) return 0xFFFFFFFF - toB(x) end
-    local function band(x, y)
-        x, y = toB(x), toB(y); local r, b = 0, 1
-        for i = 0, 31 do
-            if x % 2 == 1 and y % 2 == 1 then r = r + b end
-            x = floor(x / 2); y = floor(y / 2); b = b * 2
-        end
-        return r
-    end
-    local function bor(x, y)
-        x, y = toB(x), toB(y); local r, b = 0, 1
-        for i = 0, 31 do
-            if x % 2 == 1 or y % 2 == 1 then r = r + b end
-            x = floor(x / 2); y = floor(y / 2); b = b * 2
-        end
-        return r
-    end
-    local function bxor(x, y)
-        x, y = toB(x), toB(y); local r, b = 0, 1
-        for i = 0, 31 do
-            if x % 2 ~= y % 2 then r = r + b end
-            x = floor(x / 2); y = floor(y / 2); b = b * 2
-        end
-        return r
-    end
-    local p = 1
-    local len = #compact
-    local function peek() return compact:sub(p, p) end
-    local F = {}
-    function F.parseFact()
-        local t = peek()
-        if t == "" then return nil end
-        if t == "~" then p = p + 1; return bnot(F.parseFact() or 0) end
-        if t == "-" then p = p + 1; return -(F.parseFact() or 0) end
-        if t == "+" then p = p + 1; return F.parseFact() or 0 end
-        if t == "(" then
-            p = p + 1
-            local v = F.parseExpr()
-            if p <= len and peek() == ")" then p = p + 1 end
+-- ===== 纯数字表达式求值 =====
+local function wearedevEvalNumeric(expr)
+    if expr:find("[A-Za-z_%[%]\"']") then return nil end
+    local s = expr:gsub("%s", "")
+    if #s == 0 or not s:find("%d") then return nil end
+    local pos = 1
+    local peek, pFact, pTerm, pExpr
+    function peek() return s:sub(pos, pos) end
+    function pFact()
+        local c = peek()
+        if c == "" then return nil end
+        if c == "-" then pos = pos + 1; local v = pFact(); return v and -v end
+        if c == "+" then pos = pos + 1; return pFact() end
+        if c == "(" then
+            pos = pos + 1
+            local v = pExpr()
+            if peek() == ")" then pos = pos + 1 end
             return v
         end
-        if t:match("[0-9]") then
-            local s = p
-            while p <= len and compact:sub(p, p):match("[0-9%.]") do p = p + 1 end
-            return tonumber(compact:sub(s, p - 1)) or 0
-        end
-        return nil
+        local num = s:match("^[%d%.]+", pos)
+        if not num then return nil end
+        pos = pos + #num
+        return tonumber(num)
     end
-    function F.parseTerm()
-        local val = F.parseFact()
-        while p <= len do
-            local t = peek()
-            if t == "*" then p = p + 1; val = (val or 0) * (F.parseFact() or 0)
-            elseif t == "/" then p = p + 1; val = (val or 0) / (F.parseFact() or 0)
+    function pTerm()
+        local v = pFact()
+        if v == nil then return nil end
+        while true do
+            local c = peek()
+            if c == "*" then
+                pos = pos + 1
+                local r = pFact()
+                if r == nil then return nil end
+                v = v * r
+            elseif c == "/" then
+                pos = pos + 1
+                local r = pFact()
+                if r == nil or r == 0 then return nil end
+                v = v / r
             else break end
         end
-        return val
+        return v
     end
-    function F.parseExpr()
-        local val = F.parseTerm()
-        while p <= len do
-            local t = peek()
-            if t == "+" then p = p + 1; val = (val or 0) + (F.parseTerm() or 0)
-            elseif t == "-" then p = p + 1; val = (val or 0) - (F.parseTerm() or 0)
-            elseif t == "~" then p = p + 1; val = bxor(val or 0, F.parseTerm() or 0)
-            elseif t == "&" then p = p + 1; val = band(val or 0, F.parseTerm() or 0)
-            elseif t == "|" then p = p + 1; val = bor(val or 0, F.parseTerm() or 0)
+    function pExpr()
+        local v = pTerm()
+        if v == nil then return nil end
+        while true do
+            local c = peek()
+            if c == "+" or c == "-" then
+                pos = pos + 1
+                local r = pTerm()
+                if r == nil then return nil end
+                v = (c == "+") and (v + r) or (v - r)
             else break end
         end
-        return val
+        return v
     end
-    local ok, val = pcall(parseExpr)
-    if ok and type(val) == "number" and p >= len then return val end
-    return nil
+    local v = pExpr()
+    if v == nil or pos <= #s then return nil end
+    if v ~= v or v == math.huge or v == -math.huge then return nil end
+    return v
 end
-        local ok, val = pcall(function() return safeEvalNumber(expr) end)
-        if ok and type(val) == "number" then
-            g_offset = val
-        end
-    end
-    table.insert(results, "G 函数偏移量: " .. tostring(g_offset))
 
-    local shuffle_pairs = {}
-    for a, b in result_code:gmatch("{([^,}]+),([^}]+)}") do
-        local ok_a, val_a = pcall(function() return safeEvalNumber(a:gsub("%s","")) end)
-        local ok_b, val_b = pcall(function() return safeEvalNumber(b:gsub("%s","")) end)
-        if ok_a and ok_b and type(val_a) == "number" and type(val_b) == "number" then
-            if val_a < val_b then
-                table.insert(shuffle_pairs, {val_a, val_b})
-            end
-        end
-    end
-    table.insert(results, "Shuffle 对数: " .. #shuffle_pairs)
+local function wearedevFmtNum(n)
+    if n == math.floor(n) and math.abs(n) < 1e15 then return string.format("%.0f", n) end
+    return tostring(n)
+end
 
-    local init_start = result_code:find("local%s+u%s*=%s*{")
-    if not init_start then
-        table.insert(results, "警告: 未找到常量数组起始位置")
-        return result_code, count, results
-    end
-
-    local g_func_pos = result_code:find("local%s+function%s+G%(G%)return%s+u%[")
-    local init_end = nil
-
-    if g_func_pos then
-        local search_end = g_func_pos
-        local end_end_pos = result_code:find("end end", init_start)
-        if end_end_pos and end_end_pos < search_end then
-            init_end = end_end_pos + 7
-        end
-    end
-
-    if not init_end then
-        init_end = result_code:find("local%s+function%s+G%(G%)") or #result_code
-    end
-
-    local init_code = result_code:sub(init_start, init_end)
-
-    local b_table_code = init_code:match("(B=%b{})")
-    if not b_table_code then
-        table.insert(results, "警告: 未找到 B 表 (自定义 base64 字母表)")
-    end
-
-    local sandbox_code = [[
-        local math = math
-        local string = string
-        local table = table
-        local ipairs = ipairs
-        local tonumber = tonumber
-        local tostring = tostring
-        local type = type
-        local pairs = pairs
-        local assert = assert
-
-        ]] .. init_code .. [[
-
-        local decoded = {}
-        for i = 1, #u do
-            decoded[i] = u[i]
-        end
-
-        local function G(x)
-            return u[x - ]] .. tostring(g_offset) .. [[]
-        end
-
-        return decoded, G
-    ]]
-
-    local sandbox_env = {
-        math = math,
-        string = string,
-        table = table,
-        ipairs = ipairs,
-        tonumber = tonumber,
-        tostring = tostring,
-        type = type,
-        pairs = pairs,
-        assert = assert,
-        print = function() end,
-        error = function() end,
-        pcall = pcall,
-        select = select,
-        rawget = rawget,
-        rawset = rawset,
-        rawequal = rawequal,
-        setmetatable = setmetatable,
-        getmetatable = getmetatable,
-        unpack = unpack or table.unpack,
-    }
-
-    local fn, err = loadstring(sandbox_code)
-    if not fn then
-        table.insert(results, "沙箱编译失败: " .. tostring(err))
-        return result_code, count, results
-    end
-    setfenv(fn, sandbox_env)
-
-    local ok, decoded, g_func = pcall(fn)
-    if not ok or type(decoded) ~= "table" then
-        table.insert(results, "沙箱执行失败: " .. tostring(decoded))
-        return result_code, count, results
-    end
-
-    table.insert(results, "成功解码 " .. #decoded .. " 个常量")
-    count = count + #decoded
-
-    local g_replacements = 0
-    result_code = result_code:gsub("G%(([-+%d%s%*%/%(%)]+)%)", function(expr)
-        local clean_expr = expr:gsub("%s", "")
-        local ok_eval, val = pcall(function() return safeEvalNumber(clean_expr) end)
-        if ok_eval and type(val) == "number" and g_func then
-            local str = g_func(val)
-            if type(str) == "string" then
-                g_replacements = g_replacements + 1
-                local escaped = str:gsub("\\", "\\\\")
-                escaped = escaped:gsub('"', '\\"')
-                escaped = escaped:gsub("\n", "\\n")
-                escaped = escaped:gsub("\r", "\\r")
-                escaped = escaped:gsub("\t", "\\t")
-                return '"' .. escaped .. '"'
-            end
-        end
-        return "G(" .. expr .. ")"
-    end)
-
-    table.insert(results, "替换 G() 调用: " .. g_replacements .. " 处")
-    count = count + g_replacements
-
-    local num_replacements = 0
-    result_code = result_code:gsub("%(([-+]?(%d+)%s*([%+%-])%s*%(?([-+]?%d+)%s*%)?%)", function(full, a, op, b)
-        local na, nb = tonumber(a), tonumber(b)
-        if na and nb then
-            local val
-            if op == "+" then val = na + nb
-            elseif op == "-" then val = na - nb
-            end
-            if val then
-                num_replacements = num_replacements + 1
-                return tostring(val)
-            end
-        end
-        return full
-    end)
-
-    for _ = 1, 5 do
-        local prev = result_code
-        result_code = result_code:gsub("%(([-+]?(%d+)%s*([%+%-])%s*%(?([-+]?%d+)%s*%)?%)", function(full, a, op, b)
-            local na, nb = tonumber(a), tonumber(b)
-            if na and nb then
-                local val
-                if op == "+" then val = na + nb
-                elseif op == "-" then val = na - nb
-                end
-                if val then return tostring(val) end
-            end
-            return full
-        end)
-        if result_code == prev then break end
-    end
-
-    table.insert(results, "还原数字表达式: " .. num_replacements .. " 处")
-    count = count + num_replacements
-
-    result_code = result_code:gsub("^return%(function%(%.%.%.%)", "do\n", 1)
-    result_code = result_code:gsub("end%)%(getfenv.-%)end%)%(%%.%.%.%)%s*$", "\nend", 1)
-    result_code = result_code:gsub("end%)%([^)]*%)%s*end%)%(%%.%.%.%)%s*$", "\nend", 1)
-    count = count + 2
-    table.insert(results, "移除 WrapInFunction 包装")
-
-    result_code = result_code:gsub("local%s+u%s*=%s*%b{}%s*", "", 1)
-    result_code = result_code:gsub("local%s+function%s+G%(G%)return%s+u%[G%-.-%]end%s*", "", 1)
-    table.insert(results, "移除常量数组和 G 函数定义")
-
-    result_code = result_code:gsub("^do%s+for%s+%w+,%w+%s+in%s+ipairs%(.-%s*do%s+while.-%s+end%s+end%s+end%s*", "", 1)
-    table.insert(results, "移除 shuffle 块")
-
-    local decoder_start = result_code:find("do local")
-    if decoder_start and decoder_start < 500 then
-        local depth = 0
-        local pos = decoder_start
-        local decoder_end = nil
-        while pos <= #result_code do
-            local ch = result_code:sub(pos, pos + 2)
-            if ch == "do " or ch == "do\n" or ch == "do\t" then
-                depth = depth + 1
-                pos = pos + 2
-            elseif result_code:sub(pos, pos + 3) == "end " or result_code:sub(pos, pos + 3) == "end\n" or result_code:sub(pos, pos + 3) == "end\t" or result_code:sub(pos, pos + 3) == "end)" then
-                depth = depth - 1
-                pos = pos + 3
-                if depth <= 0 then
-                    decoder_end = pos + 1
-                    break
+-- 只折叠"整体为纯数字的括号组"（函数调用括号除外）
+local function wearedevSimplify(s)
+    local count, guard, changed = 0, 0, true
+    while changed and guard < 14 do
+        changed = false
+        guard = guard + 1
+        local out, i = {}, 1
+        while i <= #s do
+            local ch = s:sub(i, i)
+            if ch == "(" then
+                local pre = i > 1 and s:sub(i - 1, i - 1) or ""
+                local group = s:sub(i):match("^%b()")
+                local inner = group and group:sub(2, -2)
+                if group and pre:match("[%w_)%]]") == nil and inner:find("%d")
+                    and not inner:find("[A-Za-z_%[%]\"'/]") then
+                    local v = wearedevEvalNumeric(inner)
+                    if v ~= nil then
+                        local txt = wearedevFmtNum(v)
+                        if v < 0 then txt = "(" .. txt .. ")" end
+                        -- 折叠后避免与后一个记号粘连（1end / 2and 之类）
+                        if s:sub(i + #group, i + #group):match("[%w_.]") then txt = txt .. " " end
+                        out[#out + 1] = txt
+                        i = i + #group
+                        count = count + 1
+                        changed = true
+                    else
+                        out[#out + 1] = "("; i = i + 1
+                    end
+                else
+                    out[#out + 1] = "("; i = i + 1
                 end
             else
-                pos = pos + 1
+                out[#out + 1] = ch
+                i = i + 1
             end
         end
-        if decoder_end then
-            result_code = result_code:sub(1, decoder_start - 1) .. result_code:sub(decoder_end)
-            count = count + 1
-            table.insert(results, "移除 base64 解码器块")
+        s = table.concat(out)
+    end
+    return s, count
+end
+
+local function wearedevUnescapeDec(s)
+    return (s:gsub("\\(%d%d%d)", function(d) return string.char(tonumber(d)) end))
+end
+
+-- 生成字符串"内部内容"（不含外层引号），控制字符用 \ddd
+local function wearedevEscapeInner(str)
+    local out = {}
+    local q, bs = string.byte('"'), string.byte('\\')
+    for i = 1, #str do
+        local b = str:byte(i)
+        if b == q then out[#out + 1] = '\\"'
+        elseif b == bs then out[#out + 1] = '\\\\'
+        elseif b >= 32 and b <= 126 then out[#out + 1] = str:sub(i, i)
+        else out[#out + 1] = string.format('\\%03d', b) end
+    end
+    return table.concat(out)
+end
+wearedevEscapeInner = wearedevEscapeInner
+wearedevLuaEscape = function(s) return '"' .. wearedevEscapeInner(s) .. '"' end
+
+-- 取串器：local function A(a) return T[a - N] end（无反向引用，捕获后比对）
+local function wearedevFindAccessor(s)
+    for acc, param, arr, iv, sign, num in s:gmatch(
+        "local%s+function%s+([%a_][%w_]*)%(([%a_][%w_]*)%)return%s+([%a_][%w_]*)%[([%a_][%w_]*)%s*([%-+]?)%s*(%d+)%]end") do
+        if param == iv then
+            local off = tonumber(num) or 0
+            if sign == "+" then off = -off end
+            return acc, arr, off
+        end
+    end
+    return nil
+end
+
+-- 还原运行时的洗牌重排：for a,b in ipairs({{x,y},...}) do while a<b do swap(m[a],m[b]) a+1 b-1 end end
+-- 数组体是纯数字表构造式，整体求值即可（先校验字符集，避免误执行）
+local function wearedevApplyShuffle(s, entries)
+    local body = s:match("ipairs%s*%((%b{})%)")
+    if not body then
+            return entries, 0
+    end
+    if not (body:find("%d") and body:match("^[%d%s%+%-%(%)%,;{}]+$")) then
+            return entries, 0
+    end
+    local chunk = loadstring("return " .. body)
+    if not chunk then return entries, 0 end
+    local ok, pairsList = pcall(chunk)
+    if not ok or type(pairsList) ~= "table" then
+        return entries, 0
+    end
+    local n = 0
+    for _, pr in ipairs(pairsList) do
+        if type(pr) == "table" and type(pr[1]) == "number" and type(pr[2]) == "number" then
+            local i, j = math.floor(pr[1]), math.floor(pr[2])
+            while i < j and entries[i] and entries[j] do
+                entries[i], entries[j] = entries[j], entries[i]
+                i, j = i + 1, j - 1
+            end
+            n = n + 1
+        end
+    end
+    return entries, n
+end
+
+-- 64 键自定义 base64 字母表：键是单字符（["\ddd"] 或裸字母），值是数字表达式
+local function wearedevFindAlphabet(s)
+    local best
+    for body in s:gmatch("local%s+[%a_][%w_]*%s*=%s*%{([^{}]*)%}") do
+        local map, n = {}, 0
+        for key, val in body:gmatch('%[%"([^"]+)"%]%s*=%s*([%-+%d%s%(%)]+)') do
+            local ch = wearedevUnescapeDec(key)
+            local v = wearedevEvalNumeric(val)
+            if #ch == 1 and v ~= nil and map[ch] == nil then map[ch] = v; n = n + 1 end
+        end
+        for key, val in body:gmatch('([%a_])%s*=%s*([%-+%d%s%(%)]+)') do
+            local v = wearedevEvalNumeric(val)
+            if v ~= nil and map[key] == nil then map[key] = v; n = n + 1 end
+        end
+        if n >= 60 and n <= 96 and (not best or n > best.n) then
+            best = { map = map, n = n }
+        end
+    end
+    return best
+end
+
+local function wearedevDecodeB64(s, alpha)
+    -- 与产物自带的解码器逐位对齐：4 字符 -> 3 字节；遇 "=" 按 WeAreDev 的分支补齐后停止
+    local out, buf, bits, i = {}, 0, 0, 1
+    local n = #s
+    while i <= n do
+        local ch = s:sub(i, i)
+        if ch == "=" then
+            local k = buf * 2 ^ (24 - bits)      -- 左对齐到 24 位，和产物里的 k 一致
+            out[#out + 1] = string.char(math.floor(k / 65536) % 256)
+            -- 产物里的判定是 sub(w+1,w+2) ~= "="（单个等号），不是 "=="
+            if i >= n or s:sub(i + 1, i + 1) ~= "=" then
+                out[#out + 1] = string.char(math.floor((k % 65536) / 256))
+            end
+            break
+        end
+        local idx = alpha[ch]
+        if idx == nil then return nil end
+        buf = buf * 64 + idx
+        bits = bits + 6
+        if bits >= 24 then
+            out[#out + 1] = string.char(math.floor(buf / 65536) % 256)
+            out[#out + 1] = string.char(math.floor(buf / 256) % 256)
+            out[#out + 1] = string.char(buf % 256)
+            buf, bits = 0, 0
+        end
+        i = i + 1
+    end
+    return table.concat(out)
+end
+
+
+function deobfWeAreDevV1(code)
+    local stats = { arith = 0, accessor = nil, array = nil, offset = 0, entries = 0,
+        decoded = 0, printable = 0, inlined = 0, alphabet = false, b64 = false, shuffles = 0,
+        constSample = {},
+    }
+    local prot, strings = wearedevProtectStrings(code)
+    prot, stats.arith = wearedevSimplify(prot)
+
+    local acc, arr, off = wearedevFindAccessor(prot)
+    stats.accessor, stats.array, stats.offset = acc, arr, off
+
+    -- 常量数组：数组体里是若干 \1Q<idx>\1 占位，按序映射回 strings
+    local entries = {}
+    if arr then
+        local body = prot:match("local%s+" .. arr .. "%s*=%s*(%b{})")
+        if body then
+            for ph in body:gmatch("\1Q(%d+)\1") do
+                local raw = strings[tonumber(ph) + 1]
+                if raw then entries[#entries + 1] = wearedevUnescapeDec(raw) end
+            end
+        end
+    end
+    entries, stats.shuffles = wearedevApplyShuffle(prot, entries)
+    stats.entries = #entries
+
+    local b64ish = 0
+    for _, e in ipairs(entries) do
+        if #e >= 2 and e:match('^[%w%+/%=]+$') then b64ish = b64ish + 1 end
+    end
+    stats.b64 = #entries > 0 and b64ish >= math.ceil(#entries * 0.7)
+
+    -- 字母表在原文里（键带引号，会被 protect 抽走），所以用未保护副本查找
+    local alpha = wearedevFindAlphabet(code) or wearedevFindAlphabet(wearedevUnprotectStrings(prot, strings))
+    stats.alphabet = alpha ~= nil
+    local decodedList, byIndex = {}, {}
+    if acc and alpha and stats.b64 then
+        for i, e in ipairs(entries) do
+            local d = wearedevDecodeB64(e, alpha.map)
+            byIndex[i] = d   -- 取串器为 1 基：m[num - offset]
+            decodedList[#decodedList + 1] = d
+            if d and #d > 0 and not d:find("[\1-\8\14-\31]") then
+            stats.printable = stats.printable + 1
+            if #stats.constSample < 40 and #d < 48 then stats.constSample[#stats.constSample + 1] = d end
+        end
+        end
+        stats.decoded = #decodedList
+        prot = prot:gsub("%f[%w_]" .. acc .. "%s*%(([%d%s%+%-%*%/%(%)]+)%)", function(argTxt)
+            local v = wearedevEvalNumeric(argTxt)
+            if v == nil then return nil end
+            local s = byIndex[math.floor(v - off)]
+            if s == nil then return nil end
+            stats.inlined = stats.inlined + 1
+            strings[#strings + 1] = wearedevEscapeInner(s)
+            return "\1Q" .. (#strings - 1) .. "\1"
+        end)
+        -- 内联后要摘掉 4 处"仅供运行时解码"的结构，否则运行时会用 base64 覆盖明文常量
+        -- 注：剥离解码脚手架会破坏可执行性（已定位），当前版本保留原解码块
+    end
+    return wearedevUnprotectStrings(prot, strings), stats, decodedList
+end
+
+
+-- ============================================================
+-- WeAreDev v1.0 行为还原：把脚本在受控全局表里真跑一遍，记录它实际对外做的事
+-- 返回 statements(字符串数组), constants(出现过的字符串), err
+-- 注意：会真实执行脚本，只能作为显式确认后的独立工具，不并入 wearedev_full
+-- 只包装"非 VM 运行时原语"的全局（print 等），原语直接透传，避免把 VM 自己搞崩
+-- ============================================================
+local WEAREDEV_RUNTIME_GLOBALS = {
+    type = true, pcall = true, xpcall = true, error = true, select = true, unpack = true,
+    next = true, pairs = true, ipairs = true, rawget = true, rawset = true, tostring = true,
+    tonumber = true, setmetatable = true, getmetatable = true, newproxy = true,
+    getfenv = true, setfenv = true, loadstring = true, require = true, assert = true,
+    string = true, table = true, math = true, os = true, coroutine = true, io = true,
+}
+
+local function deobfWeAreDevTrace(code)
+    if type(code) ~= "string" or #code == 0 then return nil, nil, "空代码" end
+    local statements, constants, namesOf, seenConst = {}, {}, {}, {}
+    local ENV
+
+    local function noteValue(v)
+        if type(v) == "string" and #v > 0 and #v < 256 and not seenConst[v] then
+            seenConst[v] = true
+            constants[#constants + 1] = v
         end
     end
 
-    local vm_start = result_code:find("local%s+function%s+[A-Z]%b()")
-    if vm_start then
-        table.insert(results, "检测到 VM 代码区域 (位置 " .. vm_start .. ")")
+    local function toText(v)
+        if type(v) == "function" then
+            if namesOf[v] then return "<fn:" .. namesOf[v] .. ">" end
+            return "<function>"
+        elseif type(v) == "table" then
+            local parts, n = {}, 0
+            for i = 1, 12 do
+                if v[i] == nil then break end
+                n = n + 1
+                parts[n] = toText(v[i])
+            end
+            if n > 0 then return "{" .. table.concat(parts, ", ") .. "}" end
+            return "<table>"
+        elseif type(v) == "string" then
+            noteValue(v)
+            return '"' .. wearedevEscapeInner(v) .. '"'
+        end
+        return tostring(v)
     end
 
-    table.insert(results, "执行代码格式化")
+    ENV = setmetatable({}, {
+        __index = function(t, key)
+            local own = rawget(t, key)
+            if own ~= nil then return own end
+            if type(key) ~= "string" then return nil end
+            local v = _G[key]
+            if v == nil then return nil end
+            if WEAREDEV_RUNTIME_GLOBALS[key] then return v end
+            if type(v) == "function" then
+                local wrapped = function(...)
+                    local args, cnt = { ... }, select("#", ...)
+                    local parts = {}
+                    for i = 1, cnt do parts[i] = toText(args[i]) end
+                    statements[#statements + 1] = key .. "(" .. table.concat(parts, ", ") .. ")"
+                    return v(...)                       -- 尾调用：多返回值与错误传播完全保真
+                end
+                namesOf[wrapped] = key
+                return wrapped
+            end
+            if type(v) == "table" then
+                local copy = {}
+                for k, val in pairs(v) do copy[k] = val end
+                return copy
+            end
+            return v
+        end,
+        __newindex = function(t, key, val)
+            rawset(t, key, val)
+            if type(key) == "string" then
+                statements[#statements + 1] = key .. " = " .. toText(val)
+            end
+        end,
+    })
 
-    return result_code, count, results
+    local chunk, lerr = loadstring(code, "@wearedev_trace")
+    if not chunk then return nil, nil, "载入失败: " .. tostring(lerr) end
+    pcall(setfenv, chunk, ENV)
+    local ok, rerr = pcall(chunk)
+    if not ok then return statements, constants, "执行中断: " .. tostring(rerr) end
+    return statements, constants, nil
 end
 
 local function deobfNumExprRestore(code)
@@ -2229,23 +2167,21 @@ local function deobfRunTool(toolId)
         AddLog("=== WeAreDev 沙箱反混淆引擎 ===", "info")
         AddLog("开始处理...", "info")
 
-        local deobfResult, changeCount, stepResults = deobfWeAreDevSandboxDeobfuscate(content)
+        local deobfResult, v1Stats = deobfWeAreDevV1(content)
+        local totalChanges = 0
 
-        for _, stepInfo in ipairs(stepResults) do
-            AddLog("  " .. stepInfo, "info")
-        end
-
-        AddLog("沙箱引擎完成: " .. changeCount .. " 处修改", "info")
-
-        local totalChanges = changeCount
-
-        local deepResult, deepStats, deepOk = deobfWeAreDevDeep(deobfResult)
-        if deepOk then
-            deobfResult = deepResult
-            totalChanges = totalChanges + deepStats.arith + deepStats.escapes + deepStats.decoded + deepStats.winline
-            AddLog("深度反混淆(v1.0.0): 数字化简 " .. deepStats.arith .. " 处, 转义展开 " .. deepStats.escapes .. " 处, p表解码 " .. deepStats.decoded .. " 项, W内联 " .. deepStats.winline .. " 处", "info")
+        if v1Stats.alphabet and v1Stats.entries > 0 then
+            AddLog(string.format("新版结构还原: 常量数组 %s 共 %d 条，洗牌 %d 段，base64 解出 %d 条（可打印 %d）",
+                tostring(v1Stats.array), v1Stats.entries, v1Stats.shuffles, v1Stats.decoded, v1Stats.printable), "info")
+            AddLog(string.format("  取串器 %s(%s[]) 偏移 %s，数字化简 %d 处，取串调用内联 %d 处",
+                tostring(v1Stats.accessor), tostring(v1Stats.array), tostring(v1Stats.offset),
+                v1Stats.arith, v1Stats.inlined), "info")
+            totalChanges = totalChanges + v1Stats.arith + v1Stats.inlined
+            if #v1Stats.constSample > 0 then
+                AddLog("  还原文本常量: " .. table.concat(v1Stats.constSample, ", "):sub(1, 400), "info")
+            end
         else
-            AddLog("深度反混淆(v1.0.0): 未识别 S/p/W 结构，跳过", "warn")
+            AddLog("未识别为 WeAreDev v1.0 结构（缺 64 键字母表或常量数组），仅执行后续通用清理", "warn")
         end
 
         local r2, c2 = deobfNumExprRestore(deobfResult)
@@ -2258,16 +2194,8 @@ local function deobfRunTool(toolId)
         totalChanges = totalChanges + c3
         if c3 > 0 then AddLog("分割字符串合并: " .. c3 .. " 处", "info") end
 
-        local r4, c4 = deobfRenameVars(deobfResult)
-        deobfResult = r4
-        totalChanges = totalChanges + c4
-        if c4 > 0 then AddLog("变量重命名: " .. c4 .. " 处", "info") end
-
-        local r5, c5 = deobfGcClean(deobfResult)
-        deobfResult = r5
-        totalChanges = totalChanges + c5
-        if c5 > 0 then AddLog("垃圾代码清理: " .. c5 .. " 行", "info") end
-
+        -- 变量重命名 / 垃圾清理 不在本链里执行：实测它们会改动 VM 的局部名与派发行，
+        -- 使还原产物体积反增且运行报 nil；需要时点各自按钮单独执行。
         local formatted = deobfFormatCode(deobfResult)
 
         if dataApi and deobfSelectedFile then
@@ -2287,6 +2215,56 @@ local function deobfRunTool(toolId)
             end
             AddLog("=== 反混淆完成 ===", "info")
             AddLog("总计 " .. totalChanges .. " 处修改", "info")
+        end
+        return
+    end
+
+    if toolId == "wearedev_behavior" then
+        local srcText = ""
+        if deobfSelectedFile and dataApi then
+            srcText = dataApi.readFile(deobfSelectedFile) or ""
+        end
+        if srcText == "" then
+            srcText = deobfEditorTextBox and deobfEditorTextBox.Text or ""
+        end
+        if srcText == "" then
+            AddLog("请先选择文件或输入代码", "warn")
+            return
+        end
+        local now = os.clock()
+        if deobfBehaviorArmed ~= nil and (now - deobfBehaviorArmed) < 12 then
+            deobfBehaviorArmed = nil
+            AddLog("=== WeAreDev 行为还原（正在执行脚本）===", "info")
+            local stmts, consts, err = deobfWeAreDevTrace(srcText)
+            if err then AddLog(err, "warn") end
+            if stmts and #stmts > 0 then
+                local body = table.concat(stmts, "\n")
+                AddLog("还原出 " .. #stmts .. " 条外部行为语句", "info")
+                if consts and #consts > 0 then
+                    body = body .. "\n\n-- 运行期出现的字符串常量\n"
+                    for _, c in ipairs(consts) do
+                        body = body .. "-- " .. tostring(c):gsub("[%c]", ".") .. "\n"
+                    end
+                end
+                if deobfViewMode == "editor" and deobfEditorTextBox then
+                    deobfEditorTextBox.Text = body
+                end
+                if dataApi and deobfSelectedFile then
+                    local outName = deobfSelectedFile:gsub("%.([^%.]+)$", "_behavior.%1")
+                    dataApi.writeFile(outName, body)
+                    AddLog("行为还原结果已保存到: " .. outName, "info")
+                end
+            else
+                AddLog("未捕获到外部行为（脚本只改了自身局部变量，或已在执行前报错）", "warn")
+            end
+        else
+            deobfBehaviorArmed = now
+            AddLog("行为还原会真实执行该脚本（游戏 API 调用会发生）。12 秒内再点一次确认。", "warn")
+            task.delay(12, function()
+                if deobfBehaviorArmed ~= nil and (os.clock() - deobfBehaviorArmed) >= 11 then
+                    deobfBehaviorArmed = nil
+                end
+            end)
         end
         return
     end

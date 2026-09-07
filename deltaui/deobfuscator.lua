@@ -1,3 +1,16 @@
+-- 页面信息：DeltaUI 从这里读取 name/title/icon/version/dataFolder（不再依赖顶部注释标识）
+-- 要求：顶格书写、扁平表、值为字符串；不要嵌套表，值里不要出现 } 或 "
+-- name 之外的字段以这里为准；混淆后若声明被改写，运行时仍可通过该全局变量取回
+-- 注意：不要在此声明 unsafe，是否沙箱运行只由 DeltaUI 侧决定
+DeltaPageInfo = {
+    name = "deobfuscator",
+    title = "反混淆工具",
+    icon = "shield-check",
+    dataFolder = "deobfuscator",
+    version = "1.0.4",
+}
+local pageInfo = DeltaPageInfo
+
 local DEOBFUSCATOR_PAGE_SOURCE = [===[
 deobfPage.Name = "deobfuscator"
 
@@ -2793,17 +2806,17 @@ buildUI()
 ]===]
 
 local pageDef = {
-    name = "deobfuscator",
-    title = "反混淆工具",
-    icon = "shield-check",
-    dataFolder = "deobfuscator",
-    version = "1.0.0",
+    name = pageInfo.name,
+    title = pageInfo.title,
+    icon = pageInfo.icon,
+    dataFolder = pageInfo.dataFolder,
+    version = pageInfo.version,
 }
 
 function pageDef.build(frame, helpers)
     deobfDataApi = helpers and helpers.data
     deobfPage = frame
-    frame.Name = "deobfuscator"
+    frame.Name = pageInfo.name
     if helpers then
         deobfSwitchPage = helpers.switchPage
         deobfNotify = helpers.ShowNotification
@@ -2824,7 +2837,7 @@ function pageDef.build(frame, helpers)
         return
     end
 
-    if _G.__DeltaUI_AddLog then _G.__DeltaUI_AddLog("[反混淆] 页面构建完成 v1.0.0", "info") end
+    if _G.__DeltaUI_AddLog then _G.__DeltaUI_AddLog("[反混淆] 页面构建完成 v" .. tostring(pageInfo.version), "info") end
 end
 
 local function register()

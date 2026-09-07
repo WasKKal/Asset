@@ -2314,6 +2314,7 @@ local function deobfRunTool(toolId)
         for _, line in ipairs(results) do
             AddLog(line, "info")
         end
+        deobfNotify("混淆检测完成，查看日志详情", 1)
         return
     end
 
@@ -2336,14 +2337,16 @@ local function deobfRunTool(toolId)
         local formatted, totalChanges = deobfPrometheusFull(content)
 
         if dataApi and deobfSelectedFile then
-            local backupName = deobfSelectedFile:gsub("%.([^%.]+)$", "_deobfuscated.%1")
-            dataApi.writeFile(backupName, formatted)
+            local backupName = deobfSelectedFile:gsub("%.([^%.]+)$", "_backup.%1")
+            dataApi.writeFile(backupName, content)
+            dataApi.writeFile(deobfSelectedFile, formatted)
             if deobfViewMode == "editor" and deobfEditorTextBox then
                 deobfEditorTextBox.Text = formatted
             end
             AddLog("=== 反混淆完成 ===", "info")
             AddLog("总计 " .. totalChanges .. " 处修改", "info")
-            AddLog("结果已保存到: " .. backupName, "info")
+            AddLog("已应用到: " .. deobfSelectedFile .. " (备份: " .. backupName .. ")", "info")
+            deobfNotify("反混淆完成，已应用到 " .. deobfSelectedFile, 1)
         else
             AddLog("=== 反混淆完成 ===", "info")
             AddLog("总计 " .. totalChanges .. " 处修改", "info")
@@ -2397,8 +2400,9 @@ local function deobfRunTool(toolId)
         local formatted = deobfFormatCode(deobfResult)
 
         if dataApi and deobfSelectedFile then
-            local backupName = deobfSelectedFile:gsub("%.([^%.]+)$", "_deobfuscated.%1")
-            dataApi.writeFile(backupName, formatted)
+            local backupName = deobfSelectedFile:gsub("%.([^%.]+)$", "_backup.%1")
+            dataApi.writeFile(backupName, content)
+            dataApi.writeFile(deobfSelectedFile, formatted)
 
             if deobfViewMode == "editor" and deobfEditorTextBox then
                 deobfEditorTextBox.Text = formatted
@@ -2406,7 +2410,8 @@ local function deobfRunTool(toolId)
 
             AddLog("=== 反混淆完成 ===", "info")
             AddLog("总计 " .. totalChanges .. " 处修改", "info")
-            AddLog("结果已保存到: " .. backupName, "info")
+            AddLog("已应用到: " .. deobfSelectedFile .. " (备份: " .. backupName .. ")", "info")
+            deobfNotify("反混淆完成，已应用到 " .. deobfSelectedFile, 1)
         else
             if deobfViewMode == "editor" and deobfEditorTextBox then
                 deobfEditorTextBox.Text = formatted
@@ -2448,9 +2453,11 @@ local function deobfRunTool(toolId)
                     deobfEditorTextBox.Text = body
                 end
                 if dataApi and deobfSelectedFile then
-                    local outName = deobfSelectedFile:gsub("%.([^%.]+)$", "_behavior.%1")
-                    dataApi.writeFile(outName, body)
-                    AddLog("行为还原结果已保存到: " .. outName, "info")
+                    local backupName = deobfSelectedFile:gsub("%.([^%.]+)$", "_backup.%1")
+                    dataApi.writeFile(backupName, srcText)
+                    dataApi.writeFile(deobfSelectedFile, body)
+                    AddLog("行为还原已应用到: " .. deobfSelectedFile .. " (备份: " .. backupName .. ")", "info")
+                    deobfNotify("行为还原完成，已应用到 " .. deobfSelectedFile, 1)
                 end
             else
                 AddLog("未捕获到外部行为（脚本只改了自身局部变量，或已在执行前报错）", "warn")
@@ -2535,12 +2542,14 @@ local function deobfRunTool(toolId)
         dataApi.writeFile(backupName, content)
         dataApi.writeFile(deobfSelectedFile, newContent)
         AddLog(info .. " (备份: " .. backupName .. ")", "info")
+        deobfNotify(info .. "，已应用到 " .. deobfSelectedFile, 1)
 
         if deobfViewMode == "editor" and deobfEditorTextBox then
             deobfEditorTextBox.Text = newContent
         end
     else
         AddLog("没有需要修改的内容", "info")
+        deobfNotify("没有需要修改的内容", 2)
     end
 end
 

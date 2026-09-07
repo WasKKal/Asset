@@ -11,6 +11,77 @@ DeltaPageInfo = {
 }
 local pageInfo = DeltaPageInfo
 
+--[[
+    修复 Luraph 反混淆产生的损坏 Luau 类型注解。
+    现象：反混淆还原后的源码中，类型注解位置残留了“类型表索引”数字
+    （例如 `local x: 6`、`(): 6`、`<6>`、`as 6`），导致 loadstring 报
+    “Expected type, got 'N'”（本 issue 为 '6'，行号约 1118）。
+    这些注解对运行时无实际作用，此处仅做“再解析前”的保守清理：
+      - 去掉参数/变量/返回值位置的数字类型注解  `: <digit>` / `): <digit>`
+      - 去掉 `as <digit>`
+      - 去掉泛型 `<...>` 中看起来是损坏的数字占位符
+    只在编译失败（提示类型相关）时作为兜底重试使用，避免误伤正常代码。
+]]
+local function deobfSplitLines(src)
+    local t = {}
+    local pos = 1
+    while pos <= #src do
+        local nl = src:find("\n", pos, true)
+        if nl then
+            table.insert(t, src:sub(pos, nl - 1))
+            pos = nl + 1
+        else
+            table.insert(t, src:sub(pos))
+            break
+        end
+    end
+    if #src == 0 or src:sub(-1) == "\n" then
+        table.insert(t, "")
+    end
+    return t
+end
+
+-- 判断 `:`（位于 colonPos）是否处于“类型注解”上下文：
+--   - 前面是标识符（变量/参数/字段名），且不是运算符/关键字
+--   - 或前面是 `)`（返回值 `): T`）、`,` `(` `[` `{`
+local function deobfIsTypeColon(code, colonPos)
+    local before = code:sub(1, colonPos - 1):match("%s*(%S+)%s*$")
+    if not before then return false end
+    if before:match("^[%a_][%w_]*$") then
+        if before == "local" or before == "function" or before == "for" or before == "in" then
+            return false
+        end
+        return true
+    end
+    return before == ")" or before == "," or before == "(" or before == "[" or before == "{"
+end
+
+local function deobfSanitizeTypeAnnotations(src)
+    if type(src) ~= "string" then return src end
+    local out = {}
+    for _, line in ipairs(deobfSplitLines(src)) do
+        local s = line
+        -- 1) 返回值注解 `): <digit>` -> `)`（仅数字占位，运行时无效）
+        --    注意：故意不匹配字母开头的类型名，避免误伤方法调用 `obj):method(` 之类；
+        --    真实类型注解由下方规则 2 的“数字占位”逻辑统一处理（本 issue 损坏形态就是数字）。
+        s = s:gsub("%)%s*:%s*%d[%d%.]*", ")")
+        -- 2) 仅作用于“类型注解位置”的数字占位 `: <digit>`
+        s = s:gsub(":%s*%d[%d%.]*", function(m)
+            local colonPos = s:find(m, 1, true)
+            if colonPos and deobfIsTypeColon(s, colonPos) then
+                return ""
+            end
+            return m
+        end)
+        -- 3) `as <digit>` 类型断言占位（用捕获保留前导字符，避免误删 `xas`、`has` 等）
+        s = s:gsub("([^%w_])as%s+%d[%d%.]*", "%1")
+        -- 4) 泛型里的数字占位 `<digit, ...>` -> `<>`
+        s = s:gsub("<%s*%d[%d%.]*[%s%d%,%.]*>", "<>")
+        table.insert(out, s)
+    end
+    return table.concat(out, "\n")
+end
+
 local DEOBFUSCATOR_PAGE_SOURCE = [===[
 deobfPage.Name = "deobfuscator"
 
@@ -2800,7 +2871,25 @@ function pageDef.build(frame, helpers)
         deobfNotify = helpers.ShowNotification
     end
 
-    local fn, err = loadstring(DEOBFUSCATOR_PAGE_SOURCE, "@deobfuscator")
+    -- 编译反混淆器页面本体。若因 Luraph 残留的损坏类型注解
+    -- （如 “Expected type, got '6'”）失败，则做一次“清理后再编译”的兜底重试。
+    local function tryCompile(src)
+        return loadstring(src, "@deobfuscator")
+    end
+
+    local fn, err = tryCompile(DEOBFUSCATOR_PAGE_SOURCE)
+    if not fn and err and tostring(err):find("Expected type", 1, true) then
+        local cleaned = deobfSanitizeTypeAnnotations(DEOBFUSCATOR_PAGE_SOURCE)
+        if cleaned ~= DEOBFUSCATOR_PAGE_SOURCE then
+            local fn2, err2 = tryCompile(cleaned)
+            if fn2 then
+                fn, err = fn2, nil
+                if _G.__DeltaUI_AddLog then
+                    _G.__DeltaUI_AddLog("[反混淆] 已自动修复损坏的类型注解并重新编译", "info")
+                end
+            end
+        end
+    end
     if not fn then
         if helpers and helpers.ShowNotification then helpers.ShowNotification("Deobf: loadstring失败 " .. tostring(err), 4) end
         warn("[Deobf] loadstring failed:", err)

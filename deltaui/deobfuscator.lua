@@ -1905,7 +1905,8 @@ local function deobfConstantArrayInline(code)
         local items = {}
         local allStrings = true
         local allNumbers = true
-        for item in content:gmatch('%s*([^,]+)') do
+        for _item in content:gmatch('%s*([^,]+)') do
+    local item = _item
             item = item:match("^%s*(.-)%s*$")
             if item ~= "" then
                 table.insert(items, item)

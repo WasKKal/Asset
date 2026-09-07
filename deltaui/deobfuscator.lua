@@ -162,6 +162,7 @@ local deobfHouseFileMap = {}
 local deobfHouseLastFile = nil
 local deobfHouseSaveTimer = nil
 local deobfHouseSyncConnected = false
+local deobfHouseOpenFiles = {}
 local deobfNotify = nil
 
 local function deobfGetHouseCurrentTabName()
@@ -216,6 +217,24 @@ local function deobfOpenInHouseEditor(name, content)
         return false
     end
 
+    local existingTab = deobfHouseOpenFiles[name]
+    if existingTab and api.__DeltaUI_switchTab then
+        local ok = pcall(api.__DeltaUI_switchTab, existingTab)
+        if ok then
+            if deobfSwitchPage then deobfSwitchPage("house") end
+            deobfNotify("已切换到已打开的 " .. name, 1)
+            return true
+        end
+    end
+    if existingTab and api.__DeltaUI_selectTab then
+        local ok = pcall(api.__DeltaUI_selectTab, existingTab)
+        if ok then
+            if deobfSwitchPage then deobfSwitchPage("house") end
+            deobfNotify("已切换到已打开的 " .. name, 1)
+            return true
+        end
+    end
+
     api.__DeltaUI_addTab()
     deobfHouseFileMap[tabName] = name
     deobfHouseLastFile = name
@@ -233,6 +252,7 @@ local function deobfOpenInHouseEditor(name, content)
     end
 
     if api.__DeltaUI_renderTabs then pcall(api.__DeltaUI_renderTabs) end
+    deobfHouseOpenFiles[name] = tabName
 
     if deobfSwitchPage then deobfSwitchPage("house") end
     if deobfNotify then deobfNotify("已在主页新建代码页: " .. tabName, 1) end
@@ -299,17 +319,15 @@ local function ensureDeps()
         }
     end
     if not AddLog then AddLog = function(msg, lvl) print("[Deobf]", msg) end end
-    if not deobfNotify then deobfNotify = function(msg, lvl) AddLog(msg, (lvl == 1) and "info" or "warn") end end
-    if deobfDataApi then dataApi = deobfDataApi end
-    if DeltaPage and DeltaPage.switchPage then deobfSwitchPage = DeltaPage.switchPage end
-    if not deobfSwitchPage and _G.__DeltaUI_switchPage then deobfSwitchPage = _G.__DeltaUI_switchPage end
-    if DeltaPage then
-        if not _G.create and DeltaPage.create then _G.create = DeltaPage.create end
-        if not _G.corner and DeltaPage.corner then _G.corner = DeltaPage.corner end
-        if not _G.stroke and DeltaPage.stroke then _G.stroke = DeltaPage.stroke end
-        if not _G.GetIcon and DeltaPage.GetIcon then _G.GetIcon = DeltaPage.GetIcon end
-        if not _G.safeConnect and DeltaPage.safeConnect then _G.safeConnect = DeltaPage.safeConnect end
-        if not _G.t and DeltaPage.t then _G.t = DeltaPage.t end
+    if not deobfNotify then
+        deobfNotify = function(msg, lvl)
+            local ok = false
+            if _G.__DeltaUI_Notify then ok = pcall(_G.__DeltaUI_Notify, msg, lvl) end
+            if not ok and _G.__DeltaUI_notify then ok = pcall(_G.__DeltaUI_notify, msg, lvl) end
+            if not ok and DeltaPage and DeltaPage.notify then ok = pcall(DeltaPage.notify, msg, lvl) end
+            if not ok and _G.__DeltaUI_Toast then ok = pcall(_G.__DeltaUI_Toast, msg) end
+            if not ok then AddLog(msg, (lvl == 1) and "info" or "warn") end
+        end
     end
 end
 
@@ -2411,6 +2429,37 @@ local function deobfRunTool(toolId)
         deobfResult = r3
         totalChanges = totalChanges + c3
         if c3 > 0 then AddLog("分割字符串合并: " .. c3 .. " 处", "info") end
+
+
+        local r4, c4 = deobfUnwrapFunction(deobfResult)
+        deobfResult = r4
+        if c4 > 0 then AddLog("函数包装解除: " .. c4 .. " 层", "info") end
+
+        local r5, c5 = deobfConstantArrayInline(deobfResult)
+        deobfResult = r5
+        if c5 > 0 then AddLog("常量数组内联: " .. c5 .. " 处", "info") end
+
+        local r6, c6 = deobfUnproxify(deobfResult)
+        deobfResult = r6
+        if c6 > 0 then AddLog("代理变量还原: " .. c6 .. " 个", "info") end
+
+        local r7, c7 = deobfStringDecrypt(deobfResult)
+        deobfResult = r7
+        if c7 > 0 then AddLog("字符串解密: " .. c7 .. " 个", "info") end
+
+        local r8, c8 = deobfRestoreControlFlow(deobfResult)
+        deobfResult = r8
+        if c8 > 0 then AddLog("控制流还原: " .. c8 .. " 处", "info") end
+
+        local r9, c9 = deobfGcClean(deobfResult)
+        deobfResult = r9
+        if c9 > 0 then AddLog("垃圾代码清理: " .. c9 .. " 行", "info") end
+
+        local r10, c10 = deobfRenameVars(deobfResult)
+        deobfResult = r10
+        if c10 > 0 then AddLog("变量重命名: " .. c10 .. " 个", "info") end
+
+        totalChanges = totalChanges + c4 + c5 + c6 + c7 + c8 + c9 + c10
 
         local formatted = deobfFormatCode(deobfResult)
 

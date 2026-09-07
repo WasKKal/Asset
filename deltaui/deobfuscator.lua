@@ -3,7 +3,7 @@ DeltaPageInfo = {
     title = "反混淆工具",
     icon = "shield-check",
     dataFolder = "deobfuscator",
-    version = "1.1.0",
+    version = "1.0.0",
 }
 local pageInfo = DeltaPageInfo
 

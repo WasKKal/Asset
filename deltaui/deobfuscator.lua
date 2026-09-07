@@ -251,6 +251,7 @@ local function ensureDeps()
         }
     end
     if not AddLog then AddLog = function(msg, lvl) print("[Deobf]", msg) end end
+    if not deobfNotify then deobfNotify = function(msg, lvl) AddLog(msg, (lvl == 1) and "info" or "warn") end end
     if deobfDataApi then dataApi = deobfDataApi end
     if DeltaPage then
         if not _G.create and DeltaPage.create then _G.create = DeltaPage.create end

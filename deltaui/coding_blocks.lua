@@ -1,7 +1,3 @@
--- 页面信息：DeltaUI 从这里读取 name/title/icon/version/dataFolder（不再依赖顶部注释标识）
--- 要求：顶格书写、扁平表、值为字符串；不要嵌套表，值里不要出现 } 或 "
--- name 之外的字段以这里为准；混淆后若声明被改写，运行时仍可通过该全局变量取回
--- 注意：不要在此声明 unsafe，是否沙箱运行只由 DeltaUI 侧决定
 DeltaPageInfo = {
     name = "coding_blocks",
     title = "积木编程",

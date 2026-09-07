@@ -7,7 +7,7 @@ DeltaPageInfo = {
     title = "积木编程",
     icon = "blocks",
     dataFolder = "coding_blocks",
-    version = "1.0.4",
+    version = "1.0.0",
 }
 local pageInfo = DeltaPageInfo
 

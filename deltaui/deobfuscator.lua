@@ -560,51 +560,62 @@ end
 
 local function deobfCreateNewFile()
     if deobfCreatingFile then return end
-    if not deobfNewFileInputBox then
-        deobfHideNewFileInput(true)
-        return
-    end
-    local raw = (deobfNewFileInputBox.Text or ""):match("^%s*(.-)%s*$") or ""
-    if raw == "" then
-        AddLog("请输入文件名", "warn")
-        deobfNotify("请输入文件名", 2)
-        pcall(function() deobfNewFileInputBox:CaptureFocus() end)
-        return
-    end
-    local fname = raw
-    if not fname:match("%.lua$") and not fname:match("%.txt$") then
-        if not fname:match("%.") then
-            fname = fname .. ".lua"
-        else
-            AddLog("文件名格式不正确", "warn")
-            deobfNotify("文件名格式不正确", 2)
+    deobfCreatingFile = true
+    local ok, err = pcall(function()
+        if not deobfNewFileInputBox then
+            deobfHideNewFileInput(true)
             return
         end
-    end
-    if not dataApi then
-        AddLog("存储不可用，无法创建文件", "warn")
-        deobfNotify("存储不可用", 2)
+        local raw = (deobfNewFileInputBox.Text or ""):match("^%s*(.-)%s*$") or ""
+        if raw == "" then
+            AddLog("请输入文件名", "warn")
+            deobfNotify("请输入文件名", 2)
+            pcall(function() deobfNewFileInputBox:CaptureFocus() end)
+            deobfCreatingFile = false
+            return
+        end
+        local fname = raw
+        if not fname:match("%.lua$") and not fname:match("%.txt$") then
+            if not fname:match("%.") then
+                fname = fname .. ".lua"
+            else
+                AddLog("文件名格式不正确", "warn")
+                deobfNotify("文件名格式不正确", 2)
+                deobfHideNewFileInput(true)
+                return
+            end
+        end
+        if not dataApi then
+            AddLog("存储不可用，无法创建文件", "warn")
+            deobfNotify("存储不可用", 2)
+            deobfHideNewFileInput(true)
+            return
+        end
+        if dataApi.isFile and dataApi.isFile(fname) then
+            AddLog("文件已存在: " .. fname, "warn")
+            deobfNotify("文件已存在", 2)
+            deobfHideNewFileInput(true)
+            return
+        end
+        local writeOk = pcall(function() return dataApi.writeFile(fname, "") end)
+        if writeOk and deobfSelectedFile ~= fname then
+            AddLog("已创建: " .. fname .. "（长按文件即可编辑）", "info")
+            deobfNotify("已创建 " .. fname, 1)
+            deobfSelectedFile = fname
+            deobfHideNewFileInput(false)
+            pcall(function() deobfRefreshFileList() end)
+        else
+            AddLog("创建失败: " .. fname, "warn")
+            deobfNotify("创建失败", 2)
+            deobfHideNewFileInput(true)
+        end
+    end)
+    if not ok then
+        AddLog("创建文件出错: " .. tostring(err), "warn")
+        deobfNotify("创建出错", 2)
         deobfHideNewFileInput(true)
-        return
     end
-    if dataApi.isFile and dataApi.isFile(fname) then
-        AddLog("文件已存在: " .. fname, "warn")
-        deobfNotify("文件已存在", 2)
-        return
-    end
-    deobfCreatingFile = true
-    local ok = pcall(function() return dataApi.writeFile(fname, "") end)
-    if ok and deobfSelectedFile ~= fname then
-        AddLog("已创建: " .. fname .. "（长按文件即可编辑）", "info")
-        deobfNotify("已创建 " .. fname, 1)
-        deobfSelectedFile = fname
-        deobfHideNewFileInput(false)
-        deobfRefreshFileList()
-    else
-        deobfCreatingFile = false
-        AddLog("创建失败: " .. fname, "warn")
-        deobfNotify("创建失败", 2)
-    end
+    deobfCreatingFile = false
 end
 
 function deobfShowTools()

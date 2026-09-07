@@ -169,12 +169,38 @@ local function deobfGetHouseCurrentTabName()
     local api = _G
     if api.__DeltaUI_getCurrentTabName then
         local ok, r = pcall(api.__DeltaUI_getCurrentTabName)
-        if ok then return r end
+        if ok and r then return r end
+    end
+    if api.__DeltaUI_getActiveTab then
+        local ok, r = pcall(api.__DeltaUI_getActiveTab)
+        if ok and r then return r end
     end
     if api.__DeltaUI_currentTab then return api.__DeltaUI_currentTab end
     if api.__DeltaUI_activeTab then return api.__DeltaUI_activeTab end
     if api.__DeltaUI_selectedTab then return api.__DeltaUI_selectedTab end
+    if api.__DeltaUI_activeTabName then return api.__DeltaUI_activeTabName end
     return nil
+end
+
+local function deobfHouseSaveNow()
+    local cb = _G.__DeltaUI_codeBox
+    if not cb or not dataApi then return end
+    local fileName = nil
+    local tabName = deobfGetHouseCurrentTabName()
+    if tabName and deobfHouseFileMap[tabName] then
+        fileName = deobfHouseFileMap[tabName]
+    else
+        local attrName = cb:GetAttribute("deobfFileName")
+        if attrName then fileName = attrName end
+    end
+    if not fileName then return end
+    if deobfHouseSaveTimer then
+        pcall(task.cancel, deobfHouseSaveTimer)
+        deobfHouseSaveTimer = nil
+    end
+    pcall(function()
+        dataApi.writeFile(fileName, cb.Text)
+    end)
 end
 
 local function deobfSetupHouseSync()
@@ -182,12 +208,14 @@ local function deobfSetupHouseSync()
     local cb = _G.__DeltaUI_codeBox
     if not cb then return end
     deobfHouseSyncConnected = true
+
     cb:GetPropertyChangedSignal("Text"):Connect(function()
         if _G.__DeltaUI_isProgrammaticTextChange then return end
         local fileName = nil
         local tabName = deobfGetHouseCurrentTabName()
         if tabName and deobfHouseFileMap[tabName] then
             fileName = deobfHouseFileMap[tabName]
+            pcall(function() cb:SetAttribute("deobfFileName", fileName) end)
         else
             local attrName = cb:GetAttribute("deobfFileName")
             if attrName then fileName = attrName end
@@ -196,11 +224,29 @@ local function deobfSetupHouseSync()
         if deobfHouseSaveTimer then
             pcall(task.cancel, deobfHouseSaveTimer)
         end
-        deobfHouseSaveTimer = task.delay(0.5, function()
+        deobfHouseSaveTimer = task.delay(0.3, function()
+            deobfHouseSaveTimer = nil
             pcall(function()
                 dataApi.writeFile(fileName, cb.Text)
             end)
         end)
+    end)
+
+    pcall(function()
+        cb.FocusLost:Connect(function()
+            deobfHouseSaveNow()
+        end)
+    end)
+
+    pcall(function()
+        if _G.__DeltaUI_onTabChanged then
+            _G.__DeltaUI_onTabChanged:Connect(function(tabName)
+                if tabName and deobfHouseFileMap[tabName] then
+                    local fn = deobfHouseFileMap[tabName]
+                    pcall(function() cb:SetAttribute("deobfFileName", fn) end)
+                end
+            end)
+        end
     end)
 end
 
@@ -237,7 +283,9 @@ local function deobfOpenInHouseEditor(name, content)
 
     api.__DeltaUI_addTab()
     deobfHouseFileMap[tabName] = name
+    deobfHouseOpenFiles[name] = tabName
     deobfHouseLastFile = name
+    pcall(function() cb:SetAttribute("deobfFileName", name) end)
 
     local cb = api.__DeltaUI_codeBox
     _G.__DeltaUI_isProgrammaticTextChange = true

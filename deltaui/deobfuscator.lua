@@ -1205,10 +1205,11 @@ local function deobfRenameVars(code)
                or var:match("^v_") or var:match("^_v")
                or var:match("^O0+") or var:match("^l_")
                or var:match("^L0_") or var:match("^L1_")
-               or var:match("^____") then
+               or var:match("^____") or var:match("^v%d+$")
+               or var:match("^_[%a_][%w_]*$") or var:match("^[%a_]%d+$") then
                 if not varMap[var] then
                     varCount = varCount + 1
-                    varMap[var] = "v" .. string.format("%03d", varCount)
+                    varMap[var] = "var" .. string.format("%03d", varCount)
                 end
             end
         end
@@ -1872,6 +1873,50 @@ local function deobfWeAreDevTrace(code)
     return statements, constants, nil
 end
 
+local function deobfGlobalNumSimplify(code)
+    local count = 0
+    local guard = 0
+    local changed = true
+    while changed and guard < 20 do
+        changed = false
+        guard = guard + 1
+        local out, i = {}, 1
+        while i <= #code do
+            local ch = code:sub(i, i)
+            if ch:match("[%d%-]") and (i == 1 or not code:sub(i-1, i-1):match("[%w_%.]")) then
+                local numExpr = code:sub(i):match("^([%d%s%+%-%*%/%(%)%.^]+)")
+                if numExpr and #numExpr >= 3 and numExpr:find("[%+%-%*/]") then
+                    local trimmed = numExpr:match("^(.-)%s*$")
+                    if not trimmed:match("[%a_]") and trimmed:match("%d") then
+                        local v = wearedevEvalNumeric(trimmed)
+                        if v ~= nil and math.type(v) == "integer" then
+                            local txt = tostring(v)
+                            out[#out + 1] = txt
+                            i = i + #trimmed
+                            count = count + 1
+                            changed = true
+                        else
+                            out[#out + 1] = ch
+                            i = i + 1
+                        end
+                    else
+                        out[#out + 1] = ch
+                        i = i + 1
+                    end
+                else
+                    out[#out + 1] = ch
+                    i = i + 1
+                end
+            else
+                out[#out + 1] = ch
+                i = i + 1
+            end
+        end
+        code = table.concat(out)
+    end
+    return code, count
+end
+
 local function deobfNumExprRestore(code)
     local result = code
     local count = 0
@@ -2227,7 +2272,77 @@ local function deobfGcClean(code)
     return table.concat(result, "\n"), removed
 end
 
+local function deobfStripComments(code)
+    local out = {}
+    local i = 1
+    local n = #code
+    while i <= n do
+        local ch = code:sub(i, i)
+        if ch == "-" and i < n and code:sub(i+1, i+1) == "-" then
+            if code:sub(i+1, i+4) == "--[[" or code:sub(i+1, i+5) == "--[=[" then
+                local eqMatch = code:sub(i):match("^%-%-%[(=*)%[")
+                if eqMatch then
+                    local closePattern = "%]" .. eqMatch .. "%]"
+                    local closePos = code:find(closePattern, i + 4 + #eqMatch)
+                    if closePos then
+                        i = closePos + 1 + #eqMatch
+                    else
+                        i = n + 1
+                    end
+                else
+                    i = i + 2
+                end
+            else
+                local nl = code:find("\n", i)
+                if nl then i = nl else i = n + 1 end
+            end
+        elseif ch == '"' or ch == "'" then
+            local quote = ch
+            out[#out + 1] = ch
+            i = i + 1
+            while i <= n do
+                local c = code:sub(i, i)
+                out[#out + 1] = c
+                if c == "\\" then
+                    i = i + 1
+                    if i <= n then
+                        out[#out + 1] = code:sub(i, i)
+                        i = i + 1
+                    end
+                elseif c == quote then
+                    i = i + 1
+                    break
+                else
+                    i = i + 1
+                end
+            end
+        elseif ch == "[" and code:sub(i, i+1):match("%[=*%[") then
+            local eqMatch = code:sub(i):match("^%[(=*)%[")
+            local closePattern = "%]" .. eqMatch .. "%]"
+            local closePos = code:find(closePattern, i + 2 + #eqMatch)
+            if closePos then
+                out[#out + 1] = code:sub(i, closePos + 1 + #eqMatch)
+                i = closePos + 2 + #eqMatch
+            else
+                out[#out + 1] = ch
+                i = i + 1
+            end
+        else
+            out[#out + 1] = ch
+            i = i + 1
+        end
+    end
+    return table.concat(out)
+end
+
 local function deobfFormatCode(code)
+    code = code:gsub("(%s+)(then)(%s+)", "%1%2\n")
+    code = code:gsub("(%s+)(do)(%s+)", "%1%2\n")
+    code = code:gsub("(%s+)(else)(%s+)", "\n%1%2\n")
+    code = code:gsub("(%s+)(end)(%s+)", "\n%1%2\n")
+    code = code:gsub("(%s+)(return)(%s+)", "\n%1%2 ")
+    code = code:gsub("(%s+)(local%s+function)", "\n%1")
+    code = code:gsub("(%s+)(function%s*[%(%a_])", "\n%1")
     local lines = {}
     for line in code:gmatch("[^\r\n]+") do
         table.insert(lines, line)
@@ -2472,6 +2587,11 @@ local function deobfRunTool(toolId)
             AddLog("未识别为 WeAreDev v1.0 结构（缺 64 键字母表或常量数组），仅执行后续通用清理", "warn")
         end
 
+        local r1b, c1b = deobfGlobalNumSimplify(deobfResult)
+        deobfResult = r1b
+        totalChanges = totalChanges + c1b
+        if c1b > 0 then AddLog("全局数字表达式化简: " .. c1b .. " 处", "info") end
+
         local r2, c2 = deobfNumExprRestore(deobfResult)
         deobfResult = r2
         totalChanges = totalChanges + c2
@@ -2512,6 +2632,10 @@ local function deobfRunTool(toolId)
         if c10 > 0 then AddLog("变量重命名: " .. c10 .. " 个", "info") end
 
         totalChanges = totalChanges + c4 + c5 + c6 + c7 + c8 + c9 + c10
+
+        local stripped = deobfStripComments(deobfResult)
+        deobfResult = stripped
+        AddLog("注释已移除", "info")
 
         local formatted = deobfFormatCode(deobfResult)
 

@@ -2279,13 +2279,13 @@ local function deobfStripComments(code)
     while i <= n do
         local ch = code:sub(i, i)
         if ch == "-" and i < n and code:sub(i+1, i+1) == "-" then
-            if code:sub(i+1, i+4) == "--[[" or code:sub(i+1, i+5) == "--[=[" then
+            if code:sub(i, i+3) == "--[[" or code:sub(i, i+4) == "--[=[" then
                 local eqMatch = code:sub(i):match("^%-%-%[(=*)%[")
                 if eqMatch then
                     local closePattern = "%]" .. eqMatch .. "%]"
                     local closePos = code:find(closePattern, i + 4 + #eqMatch)
                     if closePos then
-                        i = closePos + 1 + #eqMatch
+                        i = closePos + 2 + #eqMatch
                     else
                         i = n + 1
                     end

@@ -272,6 +272,7 @@ end
 local deobfLeftPanel = nil
 local deobfFileList = nil
 local deobfFileListScroll = nil
+local deobfLeftTitle = nil
 local deobfNewFileBtn = nil
 local deobfNewFileInput = nil
 local deobfNewFileInputBox = nil
@@ -518,12 +519,27 @@ local deobfCreatingFile = false
 local function deobfShowNewFileInput()
     deobfIsCreatingNew = true
     deobfCreatingFile = false
-    deobfNewFileBtn.Visible = false
-    deobfNewFileInput.Visible = true
+    if deobfNewFileBtn then
+        deobfNewFileBtn.Visible = true
+        deobfTween(deobfNewFileBtn, {
+            BackgroundTransparency = 1,
+            Size = UDim2.new(0, 0, 0, 28),
+        }, 0.2)
+    end
+    if deobfLeftTitle then
+        deobfTween(deobfLeftTitle, {TextTransparency = 1}, 0.15)
+    end
+    if deobfNewFileInput then
+        deobfNewFileInput.Visible = true
+        deobfNewFileInput.BackgroundTransparency = 1
+        deobfTween(deobfNewFileInput, {
+            BackgroundTransparency = 0.3,
+        }, 0.2)
+    end
     if deobfNewFileInputBox then
         deobfNewFileInputBox.Text = ""
         task.spawn(function()
-            task.wait()
+            task.wait(0.15)
             pcall(function() deobfNewFileInputBox:CaptureFocus() end)
         end)
     end
@@ -535,26 +551,28 @@ local function deobfHideNewFileInput(reset)
     if reset and deobfNewFileInputBox then
         deobfNewFileInputBox.Text = ""
     end
+    if deobfNewFileBtn then
+        deobfNewFileBtn.Visible = true
+        deobfTween(deobfNewFileBtn, {
+            BackgroundTransparency = 0.3,
+            Size = UDim2.new(0, 32, 0, 28),
+        }, 0.2)
+    end
+    if deobfLeftTitle then
+        deobfTween(deobfLeftTitle, {TextTransparency = 0}, 0.2)
+    end
     if deobfNewFileInput then
         local input = deobfNewFileInput
         deobfTween(input, {
             BackgroundTransparency = 1,
-            Size = UDim2.new(0, 0, 0, 36),
-            Position = UDim2.new(1, -16, 0, 52),
         }, 0.2)
         task.spawn(function()
             task.wait(0.2)
             if not deobfIsCreatingNew then
                 input.Visible = false
-                input.BackgroundTransparency = 0.3
-                input.Size = UDim2.new(1, -16, 0, 36)
-                input.Position = UDim2.new(0, 8, 0, 52)
+                input.BackgroundTransparency = 1
             end
         end)
-    end
-    if deobfNewFileBtn then
-        deobfNewFileBtn.Visible = true
-        deobfNewFileBtn.BackgroundTransparency = 0.3
     end
 end
 
@@ -2472,6 +2490,7 @@ local function buildUI()
         ZIndex = 5,
     })
     leftTitle.Parent = leftHeader
+    deobfLeftTitle = leftTitle
 
     deobfNewFileBtn = create("TextButton", {
         AnchorPoint = Vector2.new(1, 0.5),
@@ -2496,17 +2515,18 @@ local function buildUI()
     deobfNewFileBtn.MouseButton1Click:Connect(deobfShowNewFileInput)
 
     deobfNewFileInput = create("Frame", {
-        Size = UDim2.new(1, -16, 0, 36),
-        Position = UDim2.new(0, 8, 0, 52),
+        Size = UDim2.new(1, -64, 0, 28),
+        Position = UDim2.new(0, 14, 0.5, 0),
+        AnchorPoint = Vector2.new(0, 0.5),
         BackgroundColor3 = theme.surface,
-        BackgroundTransparency = 0.3,
+        BackgroundTransparency = 1,
         BorderSizePixel = 0,
         ZIndex = 6,
         Visible = false,
     })
-    corner(10, deobfNewFileInput)
+    corner(8, deobfNewFileInput)
     stroke(theme.accent, 1, deobfNewFileInput)
-    deobfNewFileInput.Parent = deobfLeftPanel
+    deobfNewFileInput.Parent = leftHeader
 
     deobfNewFileInputBox = create("TextBox", {
         Position = UDim2.new(0, 10, 0, 0),

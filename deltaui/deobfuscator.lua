@@ -367,10 +367,14 @@ local function ensureDeps()
         }
     end
     if not AddLog then AddLog = function(msg, lvl) print("[Deobf]", msg) end end
+    if not dataApi and deobfDataApi then dataApi = deobfDataApi end
+    if not dataApi and _G.__DeltaUI_pageDataApi then dataApi = _G.__DeltaUI_pageDataApi end
     if not deobfNotify then
         deobfNotify = function(msg, lvl)
             local ok = false
-            if _G.__DeltaUI_Notify then ok = pcall(_G.__DeltaUI_Notify, msg, lvl) end
+            if ShowNotification then ok = pcall(ShowNotification, msg, (lvl == 1) and 2 or 3) end
+            if not ok and _G.ShowNotification then ok = pcall(_G.ShowNotification, msg, (lvl == 1) and 2 or 3) end
+            if not ok and _G.__DeltaUI_Notify then ok = pcall(_G.__DeltaUI_Notify, msg, lvl) end
             if not ok and _G.__DeltaUI_notify then ok = pcall(_G.__DeltaUI_notify, msg, lvl) end
             if not ok and DeltaPage and DeltaPage.notify then ok = pcall(DeltaPage.notify, msg, lvl) end
             if not ok and _G.__DeltaUI_Toast then ok = pcall(_G.__DeltaUI_Toast, msg) end

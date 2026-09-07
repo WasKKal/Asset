@@ -1241,11 +1241,11 @@ local function deobfDecodeCustom(b64, S)
 		if c == '=' then break end
 		local v = S[c]
 		if v == nil then return nil end
-		buf = (buf << 6) | v
+		buf = bit32.bor(bit32.lshift(buf, 6), v)
 		bits = bits + 6
 		if bits >= 8 then
 			bits = bits - 8
-			table.insert(out, string.char((buf >> bits) & 0xff))
+			table.insert(out, string.char(bit32.band(bit32.rshift(buf, bits), 0xff)))
 		end
 	end
 	return table.concat(out)

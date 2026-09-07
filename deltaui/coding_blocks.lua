@@ -1,3 +1,16 @@
+-- 页面信息：DeltaUI 从这里读取 name/title/icon/version/dataFolder（不再依赖顶部注释标识）
+-- 要求：顶格书写、扁平表、值为字符串；不要嵌套表，值里不要出现 } 或 "
+-- name 之外的字段以这里为准；混淆后若声明被改写，运行时仍可通过该全局变量取回
+-- 注意：不要在此声明 unsafe，是否沙箱运行只由 DeltaUI 侧决定
+DeltaPageInfo = {
+    name = "coding_blocks",
+    title = "积木编程",
+    icon = "blocks",
+    dataFolder = "coding_blocks",
+    version = "1.0.4",
+}
+local pageInfo = DeltaPageInfo
+
 local CODING_PAGE_SOURCE = [===[function codingObjPropOptions()
     local out, seen = {}, {}
     local function put(n)
@@ -4550,15 +4563,17 @@ local function ensureDependencies()
 end
 
 local pageDef = {
-    name = "coding_blocks",
-    title = "积木编程",
-    icon = "blocks",
+    name = pageInfo.name,
+    title = pageInfo.title,
+    icon = pageInfo.icon,
+    dataFolder = pageInfo.dataFolder,
+    version = pageInfo.version,
 }
 
 function pageDef.build(frame, helpers)
     ensureDependencies()
     codingPage = frame
-    frame.Name = "coding_blocks"
+    frame.Name = pageInfo.name
 
     local fn, err = loadstring(CODING_PAGE_SOURCE, "@coding_blocks")
     if not fn then

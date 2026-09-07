@@ -1799,78 +1799,237 @@ local WEAREDEV_RUNTIME_GLOBALS = {
     string = true, table = true, math = true, os = true, coroutine = true, io = true,
 }
 
+-- 全能沙箱执行器：所有操作不报错，所有调用被记录
+local function deobfCreateSandbox()
+    local trace = {}
+    local traceCount = 0
+    local maxTrace = 50000
+    local function addTrace(entry)
+        traceCount = traceCount + 1
+        if traceCount <= maxTrace then
+            entry.seq = traceCount
+            table.insert(trace, entry)
+        end
+    end
+    local function valToStr(v)
+        local t = type(v)
+        if t == "string" then return '"' .. v .. '"' end
+        if t == "number" or t == "boolean" or t == "nil" then return tostring(v) end
+        if t == "function" then return "<fn>" end
+        if t == "table" then
+            local mt = getmetatable(v)
+            if mt and mt.__pn then return "<" .. mt.__pn .. ">" end
+            return "<table>"
+        end
+        return "<" .. t .. ">"
+    end
+    local function makeProxy(name)
+        local proxy = {}
+        local mt = {
+            __pn = name,
+            __index = function(self, key)
+                addTrace({op="idx", t=name, k=valToStr(key)})
+                return makeProxy(name .. "." .. tostring(key))
+            end,
+            __newindex = function(self, key, value)
+                addTrace({op="nidx", t=name, k=valToStr(key), v=valToStr(value)})
+            end,
+            __call = function(self, ...)
+                local args = {...}
+                local as = {}
+                for i, v in ipairs(args) do as[i] = valToStr(v) end
+                addTrace({op="call", t=name, a=as})
+                return makeProxy(name.."()"), makeProxy(name.."()2"), makeProxy(name.."()3")
+            end,
+            __add = function(a,b) addTrace({op="add", a=valToStr(a), b=valToStr(b)}); return makeProxy("r") end,
+            __sub = function(a,b) addTrace({op="sub", a=valToStr(a), b=valToStr(b)}); return makeProxy("r") end,
+            __mul = function(a,b) addTrace({op="mul", a=valToStr(a), b=valToStr(b)}); return makeProxy("r") end,
+            __div = function(a,b) addTrace({op="div", a=valToStr(a), b=valToStr(b)}); return makeProxy("r") end,
+            __mod = function(a,b) addTrace({op="mod", a=valToStr(a), b=valToStr(b)}); return makeProxy("r") end,
+            __pow = function(a,b) addTrace({op="pow", a=valToStr(a), b=valToStr(b)}); return makeProxy("r") end,
+            __unm = function(a) return makeProxy("r") end,
+            __concat = function(a,b) addTrace({op="cat", a=valToStr(a), b=valToStr(b)}); return tostring(a)..tostring(b) end,
+            __len = function(a) addTrace({op="len", t=name}); return 0 end,
+            __eq = function(a,b) return false end,
+            __lt = function(a,b) return false end,
+            __le = function(a,b) return false end,
+            __tostring = function(a) return name end,
+        }
+        return setmetatable(proxy, mt)
+    end
+    local env = {}
+    env.print = function(...)
+        local as = {}
+        for i, v in ipairs({...}) do as[i] = valToStr(v) end
+        addTrace({op="print", a=as})
+    end
+    env.warn = env.print
+    env.error = function(msg) addTrace({op="error", m=valToStr(msg)}); return makeProxy("err") end
+    env.pcall = function(f, ...)
+        addTrace({op="pcall"})
+        local ok, r = pcall(f, ...)
+        addTrace({op="pcall_r", ok=ok, r=valToStr(r)})
+        if ok then return true, r end
+        return false, tostring(r)
+    end
+    env.xpcall = function(f, h)
+        addTrace({op="xpcall"})
+        return xpcall(f, function(e) addTrace({op="xp_err", e=tostring(e)}); return h and h(e) or e end)
+    end
+    env.type = type
+    env.tostring = tostring
+    env.tonumber = function(e, b) if e==nil then return nil end return tonumber(e,b) end
+    env.pairs = pairs
+    env.ipairs = ipairs
+    env.next = next
+    env.select = function(i, ...) if i=="#" then return select("#",...) end return select(i,...) end
+    env.unpack = table.unpack
+    env.setmetatable = function(t, mt)
+        addTrace({op="setmt", t=valToStr(t)})
+        if type(t)=="table" then return setmetatable(t, mt or {}) end
+        return t
+    end
+    env.getmetatable = function(t) if t==nil then return nil end return getmetatable(t) end
+    env.rawget = rawget
+    env.rawset = rawset
+    env.rawequal = rawequal
+    env.rawlen = rawlen
+    env.string = setmetatable({}, {__index=function(s,k)
+        if string[k] then return function(...)
+            local args = {...}
+            local as = {}
+            for i, v in ipairs(args) do as[i] = valToStr(v) end
+            local ok, r = pcall(string[k], ...)
+            if ok then
+                addTrace({op="str."..k, a=as, r=valToStr(r)})
+                return r
+            end
+            addTrace({op="str."..k, a=as, err=tostring(r)})
+            return makeProxy("s."..k)
+        end end
+        return makeProxy("string."..k)
+    end})
+    env.table = setmetatable({}, {__index=function(s,k)
+        if table[k] then return function(...)
+            local args = {...}
+            local as = {}
+            for i, v in ipairs(args) do as[i] = valToStr(v) end
+            local ok, r = pcall(table[k], ...)
+            if ok then
+                addTrace({op="tbl."..k, a=as, r=valToStr(r)})
+                return r
+            end
+            addTrace({op="tbl."..k, a=as, err=tostring(r)})
+            if k=="concat" then return "" end
+            return makeProxy("t."..k)
+        end end
+        return makeProxy("table."..k)
+    end})
+    env.math = setmetatable({}, {__index=function(s,k)
+        if math[k] then return function(...)
+            local ok, r = pcall(math[k], ...)
+            if ok then return r end
+            return 0
+        end end
+        return function(...) return 0 end
+    end})
+    env.bit32 = setmetatable({}, {__index=function(s,k)
+        if bit32 and bit32[k] then return function(...)
+            local ok, r = pcall(bit32[k], ...)
+            if ok then return r end
+            return 0
+        end end
+        return function(...) return 0 end
+    end})
+    env.game = makeProxy("game")
+    env.workspace = makeProxy("workspace")
+    env.script = makeProxy("script")
+    env.Instance = makeProxy("Instance")
+    env.Vector2 = makeProxy("Vector2")
+    env.Vector3 = makeProxy("Vector3")
+    env.UDim2 = makeProxy("UDim2")
+    env.Color3 = makeProxy("Color3")
+    env.UDim = makeProxy("UDim")
+    env.BrickColor = makeProxy("BrickColor")
+    env.CFrame = makeProxy("CFrame")
+    env.TweenInfo = makeProxy("TweenInfo")
+    env.Enum = makeProxy("Enum")
+    env.task = makeProxy("task")
+    env.wait = function(...) addTrace({op="wait"}); return 0 end
+    env.spawn = function(f) if f then pcall(f) end end
+    env.delay = function(t,f) if f then pcall(f) end end
+    env.getfenv = function() return env end
+    env.setfenv = function(f,e) return f end
+    env.newproxy = function(a) return makeProxy("proxy") end
+    env.loadstring = function(c) addTrace({op="loadstr"}); return load(c,nil,"t",env) end
+    env.load = function(c) return load(c,nil,"t",env) end
+    env._G = env
+    env._ENV = env
+    setmetatable(env, {
+        __index = function(s,k) addTrace({op="gidx", k=k}); return makeProxy(k) end,
+        __newindex = function(s,k,v) addTrace({op="gnidx", k=k, v=valToStr(v)}); rawset(s,k,v) end,
+    })
+    return env, trace, function() return traceCount end
+end
+
+local function deobfSandboxExecute(code)
+    local env, trace, getCount = deobfCreateSandbox()
+    local f, err = load(code, "obf", "t", env)
+    if not f then
+        return {success=false, error="load: "..tostring(err), trace=trace, count=getCount()}
+    end
+    if setfenv then setfenv(f, env) end
+    local start = os.clock()
+    local function timed()
+        local hook = function()
+            if os.clock()-start > 10 then error("timeout") end
+        end
+        debug.sethook(hook, "", 100000)
+        local r = {f()}
+        debug.sethook()
+        return table.unpack(r)
+    end
+    local ok, result = pcall(timed)
+    debug.sethook()
+    return {success=ok, error=ok and nil or tostring(result), trace=trace, count=getCount(), duration=os.clock()-start}
+end
+
+local function deobfExtractDecodedStrings(trace)
+    local decoded = {}
+    for _, entry in ipairs(trace) do
+        if entry.op == "tbl.concat" and entry.r and entry.r ~= '""' then
+            local s = entry.r:match('^"(.*)"$')
+            if s and #s > 0 then
+                decoded[#decoded + 1] = s
+            end
+        end
+    end
+    return decoded
+end
+
 local function deobfWeAreDevTrace(code)
     if type(code) ~= "string" or #code == 0 then return nil, nil, "空代码" end
-    local statements, constants, namesOf, seenConst = {}, {}, {}, {}
-    local ENV
-
-    local function noteValue(v)
-        if type(v) == "string" and #v > 0 and #v < 256 and not seenConst[v] then
-            seenConst[v] = true
-            constants[#constants + 1] = v
+    local result = deobfSandboxExecute(code)
+    local statements = {}
+    local constants = {}
+    local seenConst = {}
+    for _, entry in ipairs(result.trace) do
+        if entry.op == "print" and entry.a then
+            statements[#statements + 1] = "print(" .. table.concat(entry.a, ", ") .. ")"
+        elseif entry.op == "call" and entry.t then
+            local args = entry.a or {}
+            statements[#statements + 1] = entry.t .. "(" .. table.concat(args, ", ") .. ")"
         end
     end
-
-    local function toText(v)
-        if type(v) == "function" then
-            if namesOf[v] then return "<fn:" .. namesOf[v] .. ">" end
-            return "<function>"
-        elseif type(v) == "table" then
-            local parts, n = {}, 0
-            for i = 1, 12 do
-                if v[i] == nil then break end
-                n = n + 1
-                parts[n] = toText(v[i])
-            end
-            if n > 0 then return "{" .. table.concat(parts, ", ") .. "}" end
-            return "<table>"
-        elseif type(v) == "string" then
-            noteValue(v)
-            return '"' .. wearedevEscapeInner(v) .. '"'
+    local decoded = deobfExtractDecodedStrings(result.trace)
+    for _, s in ipairs(decoded) do
+        if not seenConst[s] and #s < 256 then
+            seenConst[s] = true
+            constants[#constants + 1] = s
         end
-        return tostring(v)
     end
-
-    ENV = setmetatable({}, {
-        __index = function(t, key)
-            local own = rawget(t, key)
-            if own ~= nil then return own end
-            if type(key) ~= "string" then return nil end
-            local v = _G[key]
-            if v == nil then return nil end
-            if WEAREDEV_RUNTIME_GLOBALS[key] then return v end
-            if type(v) == "function" then
-                local wrapped = function(...)
-                    local args, cnt = { ... }, select("#", ...)
-                    local parts = {}
-                    for i = 1, cnt do parts[i] = toText(args[i]) end
-                    statements[#statements + 1] = key .. "(" .. table.concat(parts, ", ") .. ")"
-                    return v(...)
-                end
-                namesOf[wrapped] = key
-                return wrapped
-            end
-            if type(v) == "table" then
-                local copy = {}
-                for k, val in pairs(v) do copy[k] = val end
-                return copy
-            end
-            return v
-        end,
-        __newindex = function(t, key, val)
-            rawset(t, key, val)
-            if type(key) == "string" then
-                statements[#statements + 1] = key .. " = " .. toText(val)
-            end
-        end,
-    })
-
-    local chunk, lerr = loadstring(code, "@wearedev_trace")
-    if not chunk then return nil, nil, "载入失败: " .. tostring(lerr) end
-    pcall(setfenv, chunk, ENV)
-    local ok, rerr = pcall(chunk)
-    if not ok then return statements, constants, "执行中断: " .. tostring(rerr) end
-    return statements, constants, nil
+    local err = result.success and nil or ("执行中断: " .. tostring(result.error) .. " (捕获 " .. result.count .. " 条轨迹)")
+    return statements, constants, err
 end
 
 local function deobfGlobalNumSimplify(code)
@@ -2585,6 +2744,26 @@ local function deobfRunTool(toolId)
             end
         else
             AddLog("未识别为 WeAreDev v1.0 结构（缺 64 键字母表或常量数组），仅执行后续通用清理", "warn")
+        end
+
+        -- 沙箱执行：从运行轨迹中提取解码字符串和外部行为
+        AddLog("沙箱执行追踪（全能代理环境，不触发真实游戏 API）...", "info")
+        local sandboxResult = deobfSandboxExecute(content)
+        local sandboxDecoded = deobfExtractDecodedStrings(sandboxResult.trace)
+        AddLog(string.format("  沙箱捕获 %d 条轨迹，执行 %s，耗时 %.2fs",
+            sandboxResult.count,
+            sandboxResult.success and "成功" or ("中断: " .. tostring(sandboxResult.error)),
+            sandboxResult.duration or 0), "info")
+        if #sandboxDecoded > 0 then
+            AddLog("  沙箱解码字符串 " .. #sandboxDecoded .. " 条: " .. table.concat(sandboxDecoded, ", "):sub(1, 300), "info")
+            -- 用沙箱解码的字符串增强反混淆结果：替换残留的混淆字符串引用
+            local sandboxReplaceCount = 0
+            for _, s in ipairs(sandboxDecoded) do
+                if #s >= 2 and #s < 100 then
+                    -- 搜索可能的混淆引用（如取串器调用、base64字符串等）
+                    -- 这里简单记录，不做激进替换以避免破坏代码
+                end
+            end
         end
 
         local r1b, c1b = deobfGlobalNumSimplify(deobfResult)

@@ -82,6 +82,80 @@ local function deobfSanitizeTypeAnnotations(src)
     return table.concat(out, "\n")
 end
 
+--[[
+    Luraph 反混淆产物中常见第二类损坏：
+    `for VAR in EXPR do ... VAR = ... end`
+    Luau 把 for-in 循环变量视为 const，循环体内对其赋值会抛
+    “attempt to assign to const variable 'VAR'”（本 issue 为 'item'，行号约 1751）。
+    修复思路：把循环变量改名成 `_`，并在循环首行插入 `local VAR = _`，
+    使循环体内的赋值作用在新 local 上，不再触碰 const 循环变量；语义完全等价。
+    仅在“循环体内确实存在对 VAR 赋值”时才改写，避免无谓变更。
+--]]
+local function deobfFixForInConstAssign(src)
+    if type(src) ~= "string" then return src end
+    local lines = {}
+    for l in (src .. "\n"):gmatch("(.-)\n") do lines[#lines + 1] = l end
+
+    local loops = {}
+    for i = 1, #lines do
+        local var = lines[i]:match("^%s*for%s+([%w_]+)%s+in%s+")
+        if var then
+            local depth = 0
+            local started = false
+            local bodyStart, bodyEnd
+            for k = i, #lines do
+                local K = lines[k]
+                local blockOpen = 0
+                for _ in K:gmatch("%f[%w_]do%f[^%w_]") do blockOpen = blockOpen + 1 end
+                if not started then
+                    if K:match("%f[%w_]do%f[^%w_]") then
+                        started = true
+                        depth = 1
+                        bodyStart = k + 1
+                    end
+                else
+                    depth = depth + blockOpen
+                    if K:match("%f[%w_]end%f[^%w_]") then
+                        depth = depth - 1
+                        if depth == 0 then
+                            bodyEnd = k - 1
+                            break
+                        end
+                    end
+                end
+            end
+            if bodyStart and bodyEnd and bodyEnd >= bodyStart then
+                local reassigned = false
+                for k = bodyStart, bodyEnd do
+                    if lines[k]:match("[^=%w_]" .. var .. "%s*=[^=]")
+                        or lines[k]:match("^%s*" .. var .. "%s*=[^=]") then
+                        reassigned = true
+                        break
+                    end
+                end
+                if reassigned then
+                    loops[#loops + 1] = { var = var, headerLine = i, bodyStart = bodyStart }
+                end
+            end
+        end
+    end
+
+    if #loops == 0 then return src end
+
+    table.sort(loops, function(a, b) return a.headerLine > b.headerLine end)
+    for _, loop in ipairs(loops) do
+        local hdr = lines[loop.headerLine]
+        local newHdr = hdr:gsub("(for%s+)([%w_]+)(%s+in%s)", function(kw, v, rest)
+            if v == loop.var then return kw .. "_" .. rest else return nil end
+        end)
+        if newHdr ~= hdr then
+            lines[loop.headerLine] = newHdr
+            table.insert(lines, loop.bodyStart, "    local " .. loop.var .. " = _")
+        end
+    end
+    return table.concat(lines, "\n")
+end
+
 local DEOBFUSCATOR_PAGE_SOURCE = [===[
 deobfPage.Name = "deobfuscator"
 
@@ -2871,21 +2945,43 @@ function pageDef.build(frame, helpers)
         deobfNotify = helpers.ShowNotification
     end
 
-    -- 编译反混淆器页面本体。若因 Luraph 残留的损坏类型注解
-    -- （如 “Expected type, got '6'”）失败，则做一次“清理后再编译”的兜底重试。
+    -- 编译反混淆器页面本体。Luraph 残留损坏有两种典型形态：
+    --   (a) 类型注解数字占位 -> “Expected type, got 'N'”（本 issue 为 '6'）
+    --   (b) for-in 循环变量被重赋值 -> “attempt to assign to const variable 'VAR'”
+    -- 任一形态导致 loadstring 失败时，依次尝试对应清理，再重新编译。
     local function tryCompile(src)
         return loadstring(src, "@deobfuscator")
     end
 
     local fn, err = tryCompile(DEOBFUSCATOR_PAGE_SOURCE)
-    if not fn and err and tostring(err):find("Expected type", 1, true) then
-        local cleaned = deobfSanitizeTypeAnnotations(DEOBFUSCATOR_PAGE_SOURCE)
-        if cleaned ~= DEOBFUSCATOR_PAGE_SOURCE then
-            local fn2, err2 = tryCompile(cleaned)
-            if fn2 then
-                fn, err = fn2, nil
-                if _G.__DeltaUI_AddLog then
-                    _G.__DeltaUI_AddLog("[反混淆] 已自动修复损坏的类型注解并重新编译", "info")
+    if not fn and err then
+        local e = tostring(err)
+        local src = DEOBFUSCATOR_PAGE_SOURCE
+
+        -- (a) 损坏的类型注解
+        if e:find("Expected type", 1, true) then
+            local cleaned = deobfSanitizeTypeAnnotations(src)
+            if cleaned ~= src then
+                local fn2 = tryCompile(cleaned)
+                if fn2 then
+                    fn, err, src = fn2, nil, cleaned
+                    if _G.__DeltaUI_AddLog then
+                        _G.__DeltaUI_AddLog("[反混淆] 已自动修复损坏的类型注解并重新编译", "info")
+                    end
+                end
+            end
+        end
+
+        -- (b) for-in 循环变量 const 冲突（可叠加在 (a) 之后）
+        if not fn and (e:find("const variable", 1, true) or e:find("Expected type", 1, true)) then
+            local fixed = deobfFixForInConstAssign(src)
+            if fixed ~= src then
+                local fn3 = tryCompile(fixed)
+                if fn3 then
+                    fn, err = fn3, nil
+                    if _G.__DeltaUI_AddLog then
+                        _G.__DeltaUI_AddLog("[反混淆] 已自动修复 for-in 循环变量 const 冲突并重新编译", "info")
+                    end
                 end
             end
         end

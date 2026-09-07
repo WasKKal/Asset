@@ -534,7 +534,15 @@ local function deobfRefreshFileList()
         row.MouseButton1Up:Connect(function()
             if not isLongPressed then
                 deobfSelectedFile = fname
-                deobfRefreshFileList()
+                for fn, r in pairs(deobfFileItems) do
+                    if fn == fname then
+                        r.BackgroundColor3 = theme.accent
+                        r.BackgroundTransparency = 0.75
+                    else
+                        r.BackgroundColor3 = theme.surface
+                        r.BackgroundTransparency = 0.4
+                    end
+                end
             end
             cancelLongPress()
         end)
@@ -711,7 +719,14 @@ local function deobfCreateNewFile()
             deobfNotify("已创建 " .. fname, 1)
             deobfSelectedFile = fname
             deobfHideNewFileInput(false)
-            pcall(function() deobfRefreshFileList() end)
+            if not table.find(deobfFiles, fname) then
+                table.insert(deobfFiles, fname)
+                table.sort(deobfFiles, function(a, b) return a:lower() < b:lower() end)
+            end
+            task.spawn(function()
+                task.wait(0.15)
+                pcall(function() deobfRefreshFileList() end)
+            end)
         else
             AddLog("创建失败: " .. fname, "warn")
             deobfNotify("创建失败", 2)

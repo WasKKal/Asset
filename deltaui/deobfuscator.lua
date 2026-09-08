@@ -6192,6 +6192,11 @@ extract_user_code = M.extract_user_code
 deobfWeAreDevClean = M.deobfWeAreDevClean
 
 
+deobfWeAreDevFull = M.deobfWeAreDevFull
+extract_user_code = M.extract_user_code
+deobfWeAreDevClean = M.deobfWeAreDevClean
+
+
 
 
 --[[

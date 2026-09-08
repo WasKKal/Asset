@@ -3835,6 +3835,7 @@ M.analyze_container = analyze_container
 
 local function find_vm_container(toks)
   local best = nil
+  local best_names = 0
   local i = 1
   while i <= #toks do
     if toks[i].k == "function" and i+1 <= #toks and toks[i+1].k == "OP" and toks[i+1].v == "(" then
@@ -3862,7 +3863,10 @@ local function find_vm_container(toks)
             end
             m = m + 1
           end
-          best = {params[1], params[2], params[3], params[4], names, k, j, i}
+          if #names > best_names then
+            best_names = #names
+            best = {params[1], params[2], params[3], params[4], names, k, j, i}
+          end
         end
       end
       i = j

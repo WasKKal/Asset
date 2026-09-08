@@ -3,7 +3,7 @@ DeltaPageInfo = {
     title = "反混淆工具",
     icon = "shield-check",
     dataFolder = "deobfuscator",
-    version = "1.0.1",
+    version = "1.0.2",
 }
 local pageInfo = DeltaPageInfo
 
@@ -6962,30 +6962,6 @@ local function vm_is_runtime_stmt(stmt, runtime_vars)
   return false
 end
 
-function M.interpret_block(block, runtime_vars)
-  runtime_vars = runtime_vars or {}
-  
-  local rv = {}
-  for k, v in pairs(vm_runtime_var_names) do rv[k] = v end
-  for k, v in pairs(runtime_vars) do rv[k] = v end
-  
-  local user_stmts = {}
-  local runtime_stmts = {}
-  
-  for i, stmt in ipairs(block.body) do
-    if vm_is_runtime_stmt(stmt, rv) then
-      table.insert(runtime_stmts, stmt)
-      local k = stmt[1] or stmt.tag
-      if (k == "let" or k == "setvar") and type(stmt[2]) == "string" then
-        rv[stmt[2]] = true
-      end
-    else
-      table.insert(user_stmts, stmt)
-    end
-  end
-  
-  return user_stmts, runtime_stmts
-end
 
 -- 全局导出（兼容 dofile 后直接调用）
 deobfWeAreDevFull = M.deobfWeAreDevFull

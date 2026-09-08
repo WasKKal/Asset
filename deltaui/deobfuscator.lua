@@ -263,29 +263,30 @@ local function deobfOpenInHouseEditor(name, content)
         return false
     end
 
+    -- 如果文件已经打开，直接切换，不创建新tab
     local existingTab = deobfHouseOpenFiles[name]
-    if existingTab and api.__DeltaUI_switchTab then
-        local ok = pcall(api.__DeltaUI_switchTab, existingTab)
-        if ok then
-            if deobfSwitchPage then deobfSwitchPage("house") end
-            deobfNotify("已切换到已打开的 " .. name, 1)
-            return true
+    if existingTab then
+        local switched = false
+        if api.__DeltaUI_switchTab then
+            local ok = pcall(api.__DeltaUI_switchTab, existingTab)
+            if ok then switched = true end
         end
-    end
-    if existingTab and api.__DeltaUI_selectTab then
-        local ok = pcall(api.__DeltaUI_selectTab, existingTab)
-        if ok then
-            if deobfSwitchPage then deobfSwitchPage("house") end
-            deobfNotify("已切换到已打开的 " .. name, 1)
-            return true
+        if not switched and api.__DeltaUI_selectTab then
+            local ok = pcall(api.__DeltaUI_selectTab, existingTab)
+            if ok then switched = true end
         end
+        -- 即使切换失败，也不创建新tab，直接跳转到housepage
+        if deobfSwitchPage then
+            pcall(deobfSwitchPage, "house")
+        end
+        if deobfNotify then deobfNotify("已切换到 " .. name, 1) end
+        return true
     end
 
     api.__DeltaUI_addTab()
     deobfHouseFileMap[tabName] = name
     deobfHouseOpenFiles[name] = tabName
     deobfHouseLastFile = name
-    pcall(function() cb:SetAttribute("deobfFileName", name) end)
 
     local cb = api.__DeltaUI_codeBox
     _G.__DeltaUI_isProgrammaticTextChange = true
@@ -300,9 +301,11 @@ local function deobfOpenInHouseEditor(name, content)
     end
 
     if api.__DeltaUI_renderTabs then pcall(api.__DeltaUI_renderTabs) end
-    deobfHouseOpenFiles[name] = tabName
 
-    if deobfSwitchPage then deobfSwitchPage("house") end
+    -- 确保跳转到housepage
+    if deobfSwitchPage then
+        pcall(deobfSwitchPage, "house")
+    end
     if deobfNotify then deobfNotify("已在主页新建代码页: " .. tabName, 1) end
     return true
 end
@@ -6013,29 +6016,61 @@ function M.extract_user_code(decompiled)
     return line:find("^%s*end$") or line:find("^%s*until .*$")
   end
   
-  -- 提取用户代码块（只保留包含明确用户特征的行，不保留控制流结构）
+  -- 提取用户代码块（上下文感知：保留用户特征行前后的相关代码）
   local user_lines = {}
   local seen = {}
+  local context_range = 3  -- 保留用户特征行前后3行的上下文
   
+  -- 第一步：标记所有包含用户特征的行
+  local user_marks = {}
   for i, line in ipairs(lines) do
     local trimmed = line:match("^%s*(.-)%s*$")
-    if #trimmed == 0 then goto continue end
+    if #trimmed == 0 then goto continue_mark end
     
     local simplified = simplify(trimmed)
-    if #simplified == 0 then goto continue end
-    if not is_valid(simplified) then goto continue end
+    if #simplified == 0 then goto continue_mark end
+    if not is_valid(simplified) then goto continue_mark end
     
     local user = has_user_strict(simplified)
     local runtime = is_runtime(simplified)
     
     if user and not runtime then
-      if not seen[simplified] then
-        seen[simplified] = true
-        table.insert(user_lines, simplified)
-      end
+      user_marks[i] = true
     end
     
-    ::continue::
+    ::continue_mark::
+  end
+  
+  -- 第二步：扩展上下文（保留用户特征行前后的相关代码）
+  local extended_marks = {}
+  for i, _ in pairs(user_marks) do
+    for j = math.max(1, i - context_range), math.min(#lines, i + context_range) do
+      extended_marks[j] = true
+    end
+  end
+  
+  -- 第三步：提取扩展后的行，过滤掉纯运行时代码
+  for i, line in ipairs(lines) do
+    if not extended_marks[i] then goto continue_extract end
+    
+    local trimmed = line:match("^%s*(.-)%s*$")
+    if #trimmed == 0 then goto continue_extract end
+    
+    local simplified = simplify(trimmed)
+    if #simplified == 0 then goto continue_extract end
+    if not is_valid(simplified) then goto continue_extract end
+    
+    -- 过滤掉纯运行时代码（但保留用户特征行）
+    if not user_marks[i] and is_runtime(simplified) then
+      goto continue_extract
+    end
+    
+    if not seen[simplified] then
+      seen[simplified] = true
+      table.insert(user_lines, simplified)
+    end
+    
+    ::continue_extract::
   end
   
   return table.concat(user_lines, "\n")
@@ -6052,6 +6087,11 @@ function M.deobfWeAreDevClean(code)
 end
 
 -- 全局导出（兼容 dofile 后直接调用）
+deobfWeAreDevFull = M.deobfWeAreDevFull
+extract_user_code = M.extract_user_code
+deobfWeAreDevClean = M.deobfWeAreDevClean
+
+
 deobfWeAreDevFull = M.deobfWeAreDevFull
 extract_user_code = M.extract_user_code
 deobfWeAreDevClean = M.deobfWeAreDevClean

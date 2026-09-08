@@ -417,8 +417,6 @@ local deobfBehaviorArmed = nil
 local DEOBF_TOOLS = {
     { id = "detect_obf", name = "混淆检测", icon = "scan-search", desc = "检测代码使用的混淆器类型", color = "accent2" },
     { id = "wearedev_full", name = "WeAreDev 完全反混淆", icon = "wand-sparkles", desc = "一键完全反混淆 WeAreDev 脚本", color = "green" },
-    { id = "wearedev_v2", name = "WeAreDev V2 反编译器", icon = "cpu", desc = "基于VM逆向的通用反编译器（开发中）", color = "accent" },
-    { id = "wearedev_behavior", name = "WeAreDev 行为还原", icon = "scan-search", desc = "执行脚本并还原它实际运行的语句（会真的跑起来）", color = "red" },
     { id = "hook_loadstring", name = "Hook Loadstring", icon = "link", desc = "拦截并记录所有 loadstring 调用", color = "accent" },
     { id = "rename_vars", name = "变量重命名", icon = "pencil", desc = "将混淆变量名替换为可读名称", color = "accent2" },
     { id = "string_decrypt", name = "字符串解密", icon = "key-round", desc = "解密加密的字符串常量", color = "green" },
@@ -6210,246 +6208,34 @@ local function deobfRunTool(toolId)
             AddLog("请先选择文件或输入代码", "warn")
             return
         end
-
-        AddLog("=== WeAreDev 沙箱反混淆引擎 ===", "info")
-        AddLog("开始处理...", "info")
-
-        local deobfResult, v1Stats = deobfWeAreDevV1(content)
-        local totalChanges = 0
-
-        if v1Stats.alphabet and v1Stats.entries > 0 then
-            AddLog(string.format("新版结构还原: 常量数组 %s 共 %d 条，洗牌 %d 段，base64 解出 %d 条（可打印 %d）",
-                tostring(v1Stats.array), v1Stats.entries, v1Stats.shuffles, v1Stats.decoded, v1Stats.printable), "info")
-            AddLog(string.format("  取串器 %s(%s[]) 偏移 %s，数字化简 %d 处，取串调用内联 %d 处",
-                tostring(v1Stats.accessor), tostring(v1Stats.array), tostring(v1Stats.offset),
-                v1Stats.arith, v1Stats.inlined), "info")
-            totalChanges = totalChanges + v1Stats.arith + v1Stats.inlined
-            if #v1Stats.constSample > 0 then
-                AddLog("  还原文本常量: " .. table.concat(v1Stats.constSample, ", "):sub(1, 400), "info")
-            end
-        else
-            AddLog("未识别为 WeAreDev v1.0 结构（缺 64 键字母表或常量数组），仅执行后续通用清理", "warn")
-        end
-
-        -- 沙箱执行：从运行轨迹中提取解码字符串和外部行为
-        AddLog("沙箱执行追踪（全能代理环境，不触发真实游戏 API）...", "info")
-        local sandboxResult = deobfSandboxExecute(content)
-        local sandboxDecoded = deobfExtractDecodedStrings(sandboxResult.trace)
-        AddLog(string.format("  沙箱捕获 %d 条轨迹，执行 %s，耗时 %.2fs",
-            sandboxResult.count,
-            sandboxResult.success and "成功" or ("中断: " .. tostring(sandboxResult.error)),
-            sandboxResult.duration or 0), "info")
-        if #sandboxDecoded > 0 then
-            AddLog("  沙箱解码字符串 " .. #sandboxDecoded .. " 条: " .. table.concat(sandboxDecoded, ", "):sub(1, 300), "info")
-        end
-
-        -- VM 状态追踪：在 while 循环中插入 string.len 标记，从沙箱轨迹提取状态转换序列
-        AddLog("VM 状态追踪（控制流扁平化还原）...", "info")
-        local vmStates, vmUniqueCount, vmTraceCount = deobfTraceVMStates(content)
-        if vmStates and #vmStates > 0 then
-            AddLog(string.format("  捕获 %d 个状态转换，%d 个唯一状态，%d 条轨迹", #vmStates, vmUniqueCount, vmTraceCount), "info")
-            -- 检测循环结构（交替出现的状态对）
-            local loops = {}
-            for i = 1, #vmStates - 1 do
-                if vmStates[i] ~= vmStates[i+1] then
-                    local pair = vmStates[i] .. "<->" .. vmStates[i+1]
-                    loops[pair] = (loops[pair] or 0) + 1
-                end
-            end
-            for pair, count in pairs(loops) do
-                if count >= 3 then
-                    AddLog("  检测到循环: " .. pair .. " (迭代" .. count .. "次)", "info")
-                end
-            end
-            -- 输出前20个状态
-            local stateSample = {}
-            for i = 1, math.min(20, #vmStates) do
-                stateSample[#stateSample + 1] = vmStates[i]
-            end
-            AddLog("  状态序列: " .. table.concat(stateSample, " -> "), "info")
-        else
-            AddLog("  未捕获到 VM 状态（可能不是控制流扁平化格式）", "warn")
-        end
-
-        local r1b, c1b = deobfGlobalNumSimplify(deobfResult)
-        deobfResult = r1b
-        totalChanges = totalChanges + c1b
-        if c1b > 0 then AddLog("全局数字表达式化简: " .. c1b .. " 处", "info") end
-
-        local r2, c2 = deobfNumExprRestore(deobfResult)
-        deobfResult = r2
-        totalChanges = totalChanges + c2
-        if c2 > 0 then AddLog("数字表达式还原: " .. c2 .. " 处", "info") end
-
-        local r3, c3 = deobfUnsplitStrings(deobfResult)
-        deobfResult = r3
-        totalChanges = totalChanges + c3
-        if c3 > 0 then AddLog("分割字符串合并: " .. c3 .. " 处", "info") end
-
-
-        local r4, c4 = deobfUnwrapFunction(deobfResult)
-        deobfResult = r4
-        if c4 > 0 then AddLog("函数包装解除: " .. c4 .. " 层", "info") end
-
-        local r5, c5 = deobfConstantArrayInline(deobfResult)
-        deobfResult = r5
-        if c5 > 0 then AddLog("常量数组内联: " .. c5 .. " 处", "info") end
-
-        local r6, c6 = deobfUnproxify(deobfResult)
-        deobfResult = r6
-        if c6 > 0 then AddLog("代理变量还原: " .. c6 .. " 个", "info") end
-
-        local r7, c7 = deobfStringDecrypt(deobfResult)
-        deobfResult = r7
-        if c7 > 0 then AddLog("字符串解密: " .. c7 .. " 个", "info") end
-
-        local r8, c8 = deobfRestoreControlFlow(deobfResult)
-        deobfResult = r8
-        if c8 > 0 then AddLog("控制流还原: " .. c8 .. " 处", "info") end
-
-        local r9, c9 = deobfGcClean(deobfResult)
-        deobfResult = r9
-        if c9 > 0 then AddLog("垃圾代码清理: " .. c9 .. " 行", "info") end
-
-        local r10, c10 = deobfRenameVars(deobfResult)
-        deobfResult = r10
-        if c10 > 0 then AddLog("变量重命名: " .. c10 .. " 个", "info") end
-
-        totalChanges = totalChanges + c4 + c5 + c6 + c7 + c8 + c9 + c10
-
-        local stripped = deobfStripComments(deobfResult)
-        deobfResult = stripped
-        AddLog("注释已移除", "info")
-
-        local formatted = deobfFormatCode(deobfResult)
-
-        if dataApi and deobfSelectedFile then
-            local backupName = deobfSelectedFile:gsub("%.([^%.]+)$", "_backup.%1")
-            dataApi.writeFile(backupName, content)
-            dataApi.writeFile(deobfSelectedFile, formatted)
-
-            if deobfViewMode == "editor" and deobfEditorTextBox then
-                deobfEditorTextBox.Text = formatted
-            end
-
-            AddLog("=== 反混淆完成 ===", "info")
-            AddLog("总计 " .. totalChanges .. " 处修改", "info")
-            AddLog("已应用到: " .. deobfSelectedFile .. " (备份: " .. backupName .. ")", "info")
-            deobfNotify("反混淆完成，已应用到 " .. deobfSelectedFile, 1)
-        else
-            if deobfViewMode == "editor" and deobfEditorTextBox then
-                deobfEditorTextBox.Text = formatted
-            end
-            AddLog("=== 反混淆完成 ===", "info")
-            AddLog("总计 " .. totalChanges .. " 处修改", "info")
-        end
-        return
-    end
-
-    if toolId == "wearedev_v2" then
-        local content = ""
-        if deobfSelectedFile and dataApi then
-            content = dataApi.readFile(deobfSelectedFile) or ""
-        end
-        if content == "" then
-            content = deobfEditorTextBox and deobfEditorTextBox.Text or ""
-        end
-        if content == "" then
-            AddLog("请先选择文件或输入代码", "warn")
+        AddLog("=== WeAreDev 完全反混淆（VM逆向引擎）===", "info")
+        AddLog("管线：词法→解析→基本块→寄存器折叠→CFG→常量数组→LCG解密→容器解析→语义→upvalue还原→短路折叠→结构化→代码生成", "info")
+        local result, err = deobfWeAreDevV2(content)
+        if not result then
+            AddLog("反编译失败: " .. tostring(err), "warn")
             return
         end
-        AddLog("=== WeAreDev V2 通用反编译器 ===", "info")
-        AddLog("基于 Prometheus Vmify VM 逆向，管线：词法→解析→基本块→寄存器折叠→CFG→常量数组→LCG解密→容器解析→语义→upvalue还原→短路折叠→结构化→代码生成", "info")
-        local v2Result, err = deobfWeAreDevV2(content)
-        if not v2Result then
-            AddLog("V2 反编译失败: " .. tostring(err), "warn")
-            return
+        AddLog("识别为 Vmify 结构: " .. tostring(result.isVmify), "info")
+        if result.lcgParams and result.lcgParams.mul45 then
+            AddLog(string.format("LCG 参数: mul45=%s add45=%s mul8=%s key8=%s",
+                tostring(result.lcgParams.mul45), tostring(result.lcgParams.add45),
+                tostring(result.lcgParams.mul8), tostring(result.lcgParams.key8)), "info")
         end
-        AddLog("识别为 Vmify 结构: " .. tostring(v2Result.isVmify), "info")
-        if v2Result.lcgParams.mul45 then
-            AddLog(string.format("LCG 参数: mul45=%s add45=%s", tostring(v2Result.lcgParams.mul45), tostring(v2Result.lcgParams.add45)), "info")
-        end
-        AddLog("反编译输出长度: " .. #v2Result.source .. " 字节", "info")
-        AddLog("完整反编译管线执行完成", "info")
-        -- 写入结果
-        local outName = (deobfSelectedFile or "output"):gsub("%.lua$", "") .. "_v2.lua"
+        AddLog("反编译输出长度: " .. #result.source .. " 字节", "info")
+        local outName = (deobfSelectedFile or "output"):gsub("%.lua$", "") .. "_deobf.lua"
         if dataApi then
-            dataApi.writeFile(outName, v2Result.source)
+            dataApi.writeFile(outName, result.source)
             AddLog("结果已写入: " .. outName, "info")
         end
         if deobfEditorTextBox then
-            deobfEditorTextBox.Text = v2Result.source
+            deobfEditorTextBox.Text = result.source
         end
-        AddLog("=== V2 反编译完成 ===", "info")
+        if deobfNotify then
+            deobfNotify("反混淆完成", "输出 " .. #result.source .. " 字节")
+        end
+        AddLog("=== 反混淆完成 ===", "info")
         return
     end
-
-    if toolId == "wearedev_behavior" then
-        local srcText = ""
-        if deobfSelectedFile and dataApi then
-            srcText = dataApi.readFile(deobfSelectedFile) or ""
-        end
-        if srcText == "" then
-            srcText = deobfEditorTextBox and deobfEditorTextBox.Text or ""
-        end
-        if srcText == "" then
-            AddLog("请先选择文件或输入代码", "warn")
-            return
-        end
-        local now = os.clock()
-        if deobfBehaviorArmed ~= nil and (now - deobfBehaviorArmed) < 12 then
-            deobfBehaviorArmed = nil
-            AddLog("=== WeAreDev 行为还原（正在执行脚本）===", "info")
-            local stmts, consts, err = deobfWeAreDevTrace(srcText)
-            if err then AddLog(err, "warn") end
-            if stmts and #stmts > 0 then
-                local body = table.concat(stmts, "\n")
-                AddLog("还原出 " .. #stmts .. " 条外部行为语句", "info")
-                if consts and #consts > 0 then
-                    body = body .. "\n\n-- 运行期出现的字符串常量\n"
-                    for _, c in ipairs(consts) do
-                        body = body .. "-- " .. tostring(c):gsub("[%c]", ".") .. "\n"
-                    end
-                end
-                if deobfViewMode == "editor" and deobfEditorTextBox then
-                    deobfEditorTextBox.Text = body
-                end
-                if dataApi and deobfSelectedFile then
-                    local backupName = deobfSelectedFile:gsub("%.([^%.]+)$", "_backup.%1")
-                    dataApi.writeFile(backupName, srcText)
-                    dataApi.writeFile(deobfSelectedFile, body)
-                    AddLog("行为还原已应用到: " .. deobfSelectedFile .. " (备份: " .. backupName .. ")", "info")
-                    deobfNotify("行为还原完成，已应用到 " .. deobfSelectedFile, 1)
-                end
-            else
-                AddLog("未捕获到外部行为（脚本只改了自身局部变量，或已在执行前报错）", "warn")
-            end
-        else
-            deobfBehaviorArmed = now
-            AddLog("行为还原会真实执行该脚本（游戏 API 调用会发生）。12 秒内再点一次确认。", "warn")
-            task.delay(12, function()
-                if deobfBehaviorArmed ~= nil and (os.clock() - deobfBehaviorArmed) >= 11 then
-                    deobfBehaviorArmed = nil
-                end
-            end)
-        end
-        return
-    end
-
-    if not deobfSelectedFile or not dataApi then
-        AddLog("请先选择一个文件", "warn")
-        return
-    end
-
-    local content = dataApi.readFile(deobfSelectedFile) or ""
-    if content == "" then
-        AddLog("文件为空", "warn")
-        return
-    end
-
-    local newContent = content
-    local info = ""
-    local count = 0
 
     if toolId == "rename_vars" then
         newContent, count = deobfRenameVars(content)

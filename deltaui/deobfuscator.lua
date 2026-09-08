@@ -3055,6 +3055,27 @@ end
 M.substitute = substitute
 
 local function lua_str_escape(s)
+  -- 尝试简单字符偏移解密（每个字符加上35）
+  if #s > 0 then
+    local all_printable = true
+    local decrypted = {}
+    for i = 1, #s do
+      local b = s:byte(i)
+      if b < 32 or b > 126 then
+        all_printable = false
+        break
+      end
+      local db = b + 35
+      if db < 32 or db > 126 then
+        all_printable = false
+        break
+      end
+      decrypted[i] = string.char(db)
+    end
+    if all_printable then
+      s = table.concat(decrypted)
+    end
+  end
   local out = {'"'}
   for i = 1, #s do
     local b = s:byte(i)
@@ -3096,7 +3117,31 @@ local function expr_lua(e, parent_pri, side)
     end
     return tostring(v)
   end
-  if k == "str" then return lua_str_escape(e[2]) end
+  if k == "str" then
+    local s = e[2]
+    -- 尝试简单字符偏移解密（每个字符加上35）
+    if #s > 0 then
+      local all_printable = true
+      local decrypted = {}
+      for i = 1, #s do
+        local b = s:byte(i)
+        if b < 32 or b > 126 then
+          all_printable = false
+          break
+        end
+        local db = b + 35
+        if db < 32 or db > 126 then
+          all_printable = false
+          break
+        end
+        decrypted[i] = string.char(db)
+      end
+      if all_printable then
+        s = table.concat(decrypted)
+      end
+    end
+    return lua_str_escape(s)
+  end
   if k == "nil" then return "nil" end
   if k == "true" then return "true" end
   if k == "false" then return "false" end
@@ -6170,6 +6215,11 @@ function M.deobfWeAreDevClean(code)
 end
 
 -- 全局导出（兼容 dofile 后直接调用）
+deobfWeAreDevFull = M.deobfWeAreDevFull
+extract_user_code = M.extract_user_code
+deobfWeAreDevClean = M.deobfWeAreDevClean
+
+
 deobfWeAreDevFull = M.deobfWeAreDevFull
 extract_user_code = M.extract_user_code
 deobfWeAreDevClean = M.deobfWeAreDevClean

@@ -7379,9 +7379,6 @@ function M.interpret_block_v2(block, runtime_vars)
 end
 
 
-return M
-
-
 --[[
 WeAreDev V2 通用反编译器（完整管线，基于 Prometheus Vmify VM 逆向）
 完整反编译管线：词法→解析→VM提取→寄存器折叠→CFG→常量数组→LCG解密→容器解析→语义→upvalue还原→短路折叠→结构化→代码生成

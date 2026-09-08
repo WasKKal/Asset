@@ -5105,7 +5105,12 @@ local function Structurer_new(blocks, entry, retvar, posvar, cont)
     return normal, retargs
   end
   function self:structure()
-    local stmts, _ = self:_region(self.entry, {}, nil)
+    local ok, stmts = pcall(function()
+      return self:_region(self.entry, {}, nil)
+    end)
+    if not ok then
+      return {SReturn({})}
+    end
     return stmts
   end
   function self:_region(cur, stop, loopctx)
@@ -6009,6 +6014,11 @@ function M.deobfWeAreDevClean(code)
 end
 
 -- 全局导出（兼容 dofile 后直接调用）
+deobfWeAreDevFull = M.deobfWeAreDevFull
+extract_user_code = M.extract_user_code
+deobfWeAreDevClean = M.deobfWeAreDevClean
+
+
 deobfWeAreDevFull = M.deobfWeAreDevFull
 extract_user_code = M.extract_user_code
 deobfWeAreDevClean = M.deobfWeAreDevClean

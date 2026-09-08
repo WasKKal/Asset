@@ -4203,8 +4203,9 @@ local function try_decrypt(e, decrypt)
         else return decrypt[enc .. "\0" .. seed] end
       end)
       if not ok or plain == nil then return nil end
-      -- 检查是否为可打印文本
+      -- 检查是否为可打印文本（ASCII可打印 或 合法UTF-8，支持中文）
       if isPrintableText(plain) then return plain end
+      if isValidUTF8(plain) and #plain > 0 then return plain end
       return nil
     end
   end

@@ -1046,6 +1046,7 @@ local function deobfRefreshHookLog()
 end
 
 local function deobfDetectObfuscation(code)
+    if type(code) ~= "string" or #code == 0 then return code or "" end
     local results = {}
     local totalScore = 0
 
@@ -1194,6 +1195,7 @@ local function deobfDetectObfuscation(code)
 end
 
 local function deobfRenameVars(code)
+    if type(code) ~= "string" or #code == 0 then return code or "" end
     local varMap = {}
     local varCount = 0
     local reserved = {
@@ -1233,6 +1235,7 @@ local function deobfRenameVars(code)
 end
 
 local function deobfStringDecrypt(code)
+    if type(code) ~= "string" or #code == 0 then return code or "" end
     local result = code
     local count = 0
 
@@ -1286,6 +1289,7 @@ local function deobfStringDecrypt(code)
 end
 
 local function deobfCleanLuraph(code)
+    if type(code) ~= "string" or #code == 0 then return code or "" end
     local result = code
     local count = 0
 
@@ -1328,6 +1332,7 @@ local function deobfCleanLuraph(code)
 end
 
 local function deobfRestoreControlFlow(code)
+    if type(code) ~= "string" or #code == 0 then return code or "" end
     local result = code
     local changes = 0
 
@@ -1983,6 +1988,7 @@ local function deobfCreateSandbox()
 end
 
 local function deobfSandboxExecute(code)
+    if type(code) ~= "string" or #code == 0 then return code or "" end
     local env, trace, getCount = deobfCreateSandbox()
     local f, err = load(code, "obf", "t", env)
     if not f then
@@ -6295,6 +6301,20 @@ M.deobfuscate = deobfuscate
 
 function M.deobfWeAreDevFull(code)
   local R = deobfuscate(code)
+  
+  -- 使用VM解释器v2消除运行时代码
+  if R.blocks and M.analyze_runtime_vars_v2 and M.interpret_block_v2 then
+    local runtime_vars = M.analyze_runtime_vars_v2(R.blocks)
+    for block_id, block in pairs(R.blocks) do
+      if block.body and #block.body > 0 then
+        local user_stmts = M.interpret_block_v2(block, runtime_vars)
+        if user_stmts and #user_stmts > 0 then
+          block.body = user_stmts
+        end
+      end
+    end
+  end
+  
   local dc = Decompiler_new(R)
   local cg = CodeGen_new(dc)
   return cg:gen_top()
@@ -6499,13 +6519,13 @@ function M.extract_user_code(decompiled)
   
   -- 第一步：标记所有包含用户特征的行
   local user_marks = {}
-  local function process_mark(i, line)
+  for i, line in ipairs(lines) do
     local trimmed = line:match("^%s*(.-)%s*$")
-    if #trimmed == 0 then return end
+    if #trimmed == 0 then goto continue_mark end
     
     local simplified = simplify(trimmed)
-    if #simplified == 0 then return end
-    if not is_valid(simplified) then return end
+    if #simplified == 0 then goto continue_mark end
+    if not is_valid(simplified) then goto continue_mark end
     
     local user = has_user_strict(simplified)
     local runtime = is_runtime(simplified)
@@ -6513,9 +6533,8 @@ function M.extract_user_code(decompiled)
     if user and not runtime then
       user_marks[i] = true
     end
-  end
-  for i, line in ipairs(lines) do
-    process_mark(i, line)
+    
+    ::continue_mark::
   end
   
   -- 第二步：扩展上下文（保留用户特征行前后的相关代码，包括函数定义和控制流结构）
@@ -6568,15 +6587,15 @@ function M.extract_user_code(decompiled)
   end
   
   -- 第四步：提取扩展后的行，过滤掉纯运行时代码
-  local function process_extract(i, line)
-    if not extended_marks[i] then return end
+  for i, line in ipairs(lines) do
+    if not extended_marks[i] then goto continue_extract end
     
     local trimmed = line:match("^%s*(.-)%s*$")
-    if #trimmed == 0 then return end
+    if #trimmed == 0 then goto continue_extract end
     
     local simplified = simplify(trimmed)
-    if #simplified == 0 then return end
-    if not is_valid(simplified) then return end
+    if #simplified == 0 then goto continue_extract end
+    if not is_valid(simplified) then goto continue_extract end
     
     -- 过滤掉纯运行时代码（但保留用户特征行和函数定义/控制流结构）
     if not user_marks[i] and is_runtime(simplified) then
@@ -6586,7 +6605,7 @@ function M.extract_user_code(decompiled)
               simplified:find("^if .* then$") or simplified:find("^while .* do$") or
               simplified:find("^for .* do$") or simplified == "else" or
               simplified:find("^elseif .* then$") or simplified:find("^until .*$")) then
-        return
+        goto continue_extract
       end
     end
     
@@ -6594,9 +6613,8 @@ function M.extract_user_code(decompiled)
       seen[simplified] = true
       table.insert(user_lines, simplified)
     end
-  end
-  for i, line in ipairs(lines) do
-    process_extract(i, line)
+    
+    ::continue_extract::
   end
   
   return table.concat(user_lines, "\n")
@@ -7379,6 +7397,9 @@ function M.interpret_block_v2(block, runtime_vars)
 end
 
 
+return M
+
+
 --[[
 WeAreDev V2 通用反编译器（完整管线，基于 Prometheus Vmify VM 逆向）
 完整反编译管线：词法→解析→VM提取→寄存器折叠→CFG→常量数组→LCG解密→容器解析→语义→upvalue还原→短路折叠→结构化→代码生成
@@ -7454,6 +7475,7 @@ local function deobfWeAreDevTrace(code)
 end
 
 local function deobfGlobalNumSimplify(code)
+    if type(code) ~= "string" or #code == 0 then return code or "" end
     local count = 0
     local guard = 0
     local changed = true
@@ -7498,6 +7520,7 @@ local function deobfGlobalNumSimplify(code)
 end
 
 local function deobfNumExprRestore(code)
+    if type(code) ~= "string" or #code == 0 then return code or "" end
     local result = code
     local count = 0
 
@@ -7589,6 +7612,7 @@ local function deobfNumExprRestore(code)
 end
 
 local function deobfUnsplitStrings(code)
+    if type(code) ~= "string" or #code == 0 then return code or "", 0 end
     local result = code
     local count = 0
 
@@ -7625,6 +7649,7 @@ local function deobfUnsplitStrings(code)
 end
 
 local function deobfUnwrapFunction(code)
+    if type(code) ~= "string" or #code == 0 then return code or "" end
     local result = code
     local count = 0
 
@@ -7660,6 +7685,7 @@ local function deobfUnwrapFunction(code)
 end
 
 local function deobfConstantArrayInline(code)
+    if type(code) ~= "string" or #code == 0 then return code or "" end
     local result = code
     local count = 0
 
@@ -7705,6 +7731,7 @@ local function deobfConstantArrayInline(code)
 end
 
 local function deobfUnproxify(code)
+    if type(code) ~= "string" or #code == 0 then return code or "" end
     local result = code
     local count = 0
 
@@ -7738,6 +7765,7 @@ local function deobfUnproxify(code)
 end
 
 local function deobfPrometheusFull(code)
+    if type(code) ~= "string" or #code == 0 then return code or "" end
     local result = code
     local totalChanges = 0
     local stepCount = 0
@@ -7804,6 +7832,7 @@ local function deobfPrometheusFull(code)
 end
 
 local function deobfGcClean(code)
+    if type(code) ~= "string" or #code == 0 then return code or "", 0 end
     local lines = {}
     for line in code:gmatch("[^\r\n]+") do
         table.insert(lines, line)
@@ -7853,6 +7882,7 @@ local function deobfGcClean(code)
 end
 
 local function deobfStripComments(code)
+    if type(code) ~= "string" or #code == 0 then return code or "" end
     local out = {}
     local i = 1
     local n = #code
@@ -7916,6 +7946,7 @@ local function deobfStripComments(code)
 end
 
 local function deobfFormatCode(code)
+    if type(code) ~= "string" or #code == 0 then return code or "" end
     code = code:gsub("(%s+)(then)(%s+)", "%1%2\n")
     code = code:gsub("(%s+)(do)(%s+)", "%1%2\n")
     code = code:gsub("(%s+)(else)(%s+)", "\n%1%2\n")
@@ -7962,6 +7993,7 @@ local function deobfFormatCode(code)
 end
 
 local function deobfAnalyzeCode(code)
+    if type(code) ~= "string" or #code == 0 then return code or "" end
     local stats = {}
     stats.totalLines = select(2, code:gsub("\n", "\n")) + 1
     stats.totalChars = #code

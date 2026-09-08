@@ -2495,7 +2495,7 @@ local function lex(s)
   while i <= n do
     local c = s:byte(i)
     -- 空白
-    if isSpace(c) then i = i + 1; goto continue end
+    if isSpace(c) then i = i + 1; goto __cont end
     -- 注释
     if c == 45 and i + 1 <= n and s:byte(i + 1) == 45 then
       -- 长注释?
@@ -2512,12 +2512,12 @@ local function lex(s)
         local close = "]" .. string.rep("=", lb_eq) .. "]"
         local k = s:find(close, lb_start, true)
         if k then i = k + #close else i = n + 1 end
-        goto continue
+        goto __cont
       end
       -- 行注释
       local j = s:find("\n", i, true)
       if j then i = j else i = n + 1 end
-      goto continue
+      goto __cont
     end
     -- 数字
     if isDigit(c) or (c == 46 and i + 1 <= n and isDigit(s:byte(i + 1))) then
@@ -2539,7 +2539,7 @@ local function lex(s)
       local num = s:sub(i, j - 1)
       toks[#toks + 1] = {k = "NUMBER", v = num, p = i}
       i = j
-      goto continue
+      goto __cont
     end
     -- 标识符/关键字
     if isAlpha(c) then
@@ -2549,7 +2549,7 @@ local function lex(s)
       local kind = KEYWORDS[w] and w or "NAME"
       toks[#toks + 1] = {k = kind, v = w, p = i}
       i = j
-      goto continue
+      goto __cont
     end
     -- 字符串
     if c == 34 or c == 39 then
@@ -2582,7 +2582,7 @@ local function lex(s)
       end
       toks[#toks + 1] = {k = "STRING", v = table.concat(buf), p = i}
       i = j
-      goto continue
+      goto __cont
     end
     -- 长字符串
     if c == 91 then
@@ -2596,7 +2596,7 @@ local function lex(s)
         local content = k and s:sub(start, k - 1) or ""
         toks[#toks + 1] = {k = "STRING", v = content, p = i}
         i = k and (k + #close) or (n + 1)
-        goto continue
+        goto __cont
       end
     end
     -- 运算符
@@ -2612,7 +2612,7 @@ local function lex(s)
     if not matched then
       error("无法识别字符 @" .. i .. ": " .. s:sub(math.max(1, i - 20), i + 20))
     end
-    ::continue::
+    ::__cont::
   end
   toks[#toks + 1] = {k = "EOF", v = nil, p = n + 1}
   return toks

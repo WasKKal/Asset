@@ -1333,7 +1333,7 @@ local function deobfStringDecrypt(code)
     end)
 
     result = result:gsub('"([^"]*)"', function(str)
-        local hex, replacements = string.gsub(str, "\\x(%x%x)", function(hex)
+        local hex, replacements = string.gsub(str, "\92x(%x%x)", function(hex)
             count = count + 1
             return string.char(tonumber(hex, 16))
         end)
@@ -6686,33 +6686,30 @@ function M.extract_user_code(decompiled)
   
   -- 第四步：提取扩展后的行，过滤掉纯运行时代码
   for i, line in ipairs(lines) do
-    if not extended_marks[i] then goto continue_extract end
-    
-    local trimmed = line:match("^%s*(.-)%s*$")
-    if #trimmed == 0 then goto continue_extract end
-    
-    local simplified = simplify(trimmed)
-    if #simplified == 0 then goto continue_extract end
-    if not is_valid(simplified) then goto continue_extract end
-    
-    -- 过滤掉纯运行时代码（但保留用户特征行和函数定义/控制流结构）
-    if not user_marks[i] and is_runtime(simplified) then
-      -- 保留函数定义和控制流结构
-      if not (simplified:find("function%(") or simplified:find("local .* = function") or 
-              simplified:find("local function") or simplified == "end" or
-              simplified:find("^if .* then$") or simplified:find("^while .* do$") or
-              simplified:find("^for .* do$") or simplified == "else" or
-              simplified:find("^elseif .* then$") or simplified:find("^until .*$")) then
-        goto continue_extract
+    if extended_marks[i] then
+      local trimmed = line:match("^%s*(.-)%s*$")
+      if #trimmed > 0 then
+        local simplified = simplify(trimmed)
+        if #simplified > 0 and is_valid(simplified) then
+          -- 过滤掉纯运行时代码（但保留用户特征行和函数定义/控制流结构）
+          local keep = true
+          if not user_marks[i] and is_runtime(simplified) then
+            -- 保留函数定义和控制流结构
+            if not (simplified:find("function%(") or simplified:find("local .* = function") or 
+                    simplified:find("local function") or simplified == "end" or
+                    simplified:find("^if .* then$") or simplified:find("^while .* do$") or
+                    simplified:find("^for .* do$") or simplified == "else" or
+                    simplified:find("^elseif .* then$") or simplified:find("^until .*$")) then
+              keep = false
+            end
+          end
+          if keep and not seen[simplified] then
+            seen[simplified] = true
+            table.insert(user_lines, simplified)
+          end
+        end
       end
     end
-    
-    if not seen[simplified] then
-      seen[simplified] = true
-      table.insert(user_lines, simplified)
-    end
-    
-    ::continue_extract::
   end
   
   return table.concat(user_lines, "\n")

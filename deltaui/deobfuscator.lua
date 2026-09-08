@@ -2328,11 +2328,9 @@ deobfExprLua（表达式渲染）、deobfB64Decode（base64解码）、deobfLcg�
 ]]
 
 -- ============================================================
+-- ============================================================
 -- prom_decomp.lua — Prometheus Vmify 完整反编译器（内联）
 -- ============================================================
-
--- prom_decomp.lua — Prometheus Vmify 反编译器（Lua 5.3 / Luau 自包含模块）
--- 提供 deobfWeAreDevFull(code) -> 反编译后的 Lua 源码字符串
 
 local M = {}
 
@@ -3101,7 +3099,11 @@ local function expr_lua(e, parent_pri, side)
   if k == "vararg" then return "..." end
   if k == "var" then return e[2] end
   if k == "un" then
-    return e[2] .. expr_lua(e[3], 8)
+    local op = e[2]
+    if op == "not" or op == "#" then
+      return op .. " " .. expr_lua(e[3], 8)
+    end
+    return op .. expr_lua(e[3], 8)
   end
   if k == "index" then
     local base = expr_lua(e[2], 10)
@@ -3879,6 +3881,7 @@ local function find_vm_container(toks)
             end
             m = m + 1
           end
+          -- 计算while后到function结束的代码量
           local funcEnd = k
           local depth = 1
           while funcEnd <= #toks and depth > 0 do
@@ -5197,6 +5200,306 @@ M.Structurer_new = Structurer_new
 -- 代码生成
 -- ============================================================
 
+-- ============================================================
+-- 运行时代码消除器
+-- ============================================================
+
+local function eliminate_runtime_code(body, R)
+  local runtime_vars = {
+    [R.posvar] = true, [R.returnvar] = true,
+    [R.cont.argsvar] = true, [R.vm.upvalsvar] = true,
+    [R.vm.gcvar] = true, [R.constinfo.arrvar] = true,
+    [R.constinfo.wrapper] = true,
+    V = true, W = true, M = true,
+  }
+  local runtime_func_names = {
+    pcall=true, xpcall=true, error=true, assert=true,
+    tostring=true, tonumber=true, type=true, select=true, unpack=true,
+    rawget=true, rawset=true, rawequal=true,
+    setmetatable=true, getmetatable=true, newproxy=true,
+    pairs=true, ipairs=true, next=true,
+  }
+  local runtime_lib_funcs = {
+    ["string.gmatch"]=true, ["string.gsub"]=true, ["string.byte"]=true,
+    ["string.char"]=true, ["string.sub"]=true, ["string.len"]=true,
+    ["string.format"]=true, ["string.find"]=true, ["string.rep"]=true,
+    ["math.random"]=true, ["math.randomseed"]=true, ["math.floor"]=true,
+    ["math.ceil"]=true, ["math.abs"]=true, ["math.sqrt"]=true,
+    ["table.concat"]=true, ["table.insert"]=true, ["table.remove"]=true,
+    ["table.sort"]=true, ["os.clock"]=true, ["os.time"]=true,
+  }
+  local user_funcs = { print=true, warn=true }
+
+  local function dc(t)
+    if type(t) ~= "table" then return t end
+    local r = {}
+    for k, v in pairs(t) do r[k] = dc(v) end
+    return r
+  end
+  local function has_user_string(e)
+    if type(e) ~= "table" then return false end
+    if e[1] == "str" and type(e[2]) == "string" and e[2]:find("[^\x20-\x7e]") then return true end
+    for i = 2, #e do if type(e[i]) == "table" and has_user_string(e[i]) then return true end end
+    return false
+  end
+  local function get_func_name(e)
+    if type(e) ~= "table" or e[1] ~= "call" then return nil end
+    local fn = e[2]
+    if type(fn) ~= "table" then return nil end
+    if fn[1] == "var" then return fn[2] end
+    if fn[1] == "index" then
+      local base, key = fn[2], fn[3]
+      if type(base)=="table" and base[1]=="var" and type(key)=="table" and key[1]=="str" then
+        return base[2] .. "." .. key[2]
+      end
+    end
+    return nil
+  end
+  local function is_upval_func_call(e)
+    if type(e)~="table" or e[1]~="call" then return false end
+    local fn = e[2]
+    if type(fn)~="table" or fn[1]~="index" then return false end
+    local base, key = fn[2], fn[3]
+    if type(base)=="table" and base[1]=="var" and runtime_vars[base[2]] then
+      if type(key)=="table" and key[1]=="index" then
+        local kbase = key[2]
+        if type(kbase)=="table" and kbase[1]=="var" then return true end
+      end
+    end
+    return false
+  end
+  local function has_user_func_call(e)
+    if type(e) ~= "table" then return false end
+    if e[1] == "call" then
+      local name = get_func_name(e)
+      if name and user_funcs[name] then return true end
+    end
+    for i = 2, #e do if type(e[i]) == "table" and has_user_func_call(e[i]) then return true end end
+    return false
+  end
+  local function has_only_runtime_funcs(e)
+    if type(e) ~= "table" then return false end
+    local found = false
+    if e[1] == "call" then
+      local name = get_func_name(e)
+      if name then
+        if user_funcs[name] then return false end
+        if runtime_func_names[name] or runtime_lib_funcs[name] then found = true end
+      end
+      if is_upval_func_call(e) then found = true end
+      local fn = e[2]
+      if type(fn)=="table" and fn[1]=="index" then
+        local base = fn[2]
+        if type(base)=="table" and base[1]=="var" and runtime_vars[base[2]] then found = true end
+      end
+    end
+    for i = 2, #e do
+      if type(e[i]) == "table" then
+        local r = has_only_runtime_funcs(e[i])
+        if r == false then return false end
+        if r == true then found = true end
+      end
+    end
+    return found
+  end
+  local function stmt_has_user(s)
+    if s.tag == "if" then
+      if has_user_string(s.cond) or has_user_func_call(s.cond) then return true end
+      for _, x in ipairs(s["then"] or {}) do if stmt_has_user(x) then return true end end
+      for _, x in ipairs(s.els or {}) do if stmt_has_user(x) then return true end end
+      return false
+    elseif s.tag == "while" then
+      if has_user_string(s.cond) or has_user_func_call(s.cond) then return true end
+      for _, x in ipairs(s.body or {}) do if stmt_has_user(x) then return true end end
+      return false
+    elseif s.tag == "return" then
+      for _, a in ipairs(s.args or {}) do if has_user_string(a) or has_user_func_call(a) then return true end end
+      return false
+    else
+      for i = 2, #s do
+        if type(s[i]) == "table" then if has_user_string(s[i]) or has_user_func_call(s[i]) then return true end end
+      end
+      return false
+    end
+  end
+  local function expr_has_side_effect(e)
+    if type(e) ~= "table" then return false end
+    if e[1]=="call" or e[1]=="selfcall" or e[1]=="table" or e[1]=="func" or e[1]=="mkclosure" then return true end
+    for i = 2, #e do if type(e[i])=="table" and expr_has_side_effect(e[i]) then return true end end
+    return false
+  end
+  local function is_inlinable(val)
+    if type(val) ~= "table" then return type(val) == "number" end
+    local k = val[1]
+    if k == "num" then return true end
+    if k == "str" and type(val[2])=="string" and #val[2] <= 20 then return true end
+    if k == "boolean" or k == "nil" then return true end
+    return false
+  end
+  local function expr_vars(e, vars)
+    if type(e) ~= "table" then return end
+    if e[1]=="var" and type(e[2])=="string" then vars[e[2]]=true end
+    for i = 2, #e do if type(e[i])=="table" then expr_vars(e[i], vars) end end
+  end
+  local function stmt_read_vars(s, vars)
+    if s.tag=="if" then
+      expr_vars(s.cond, vars)
+      for _, x in ipairs(s["then"] or {}) do stmt_read_vars(x, vars) end
+      for _, x in ipairs(s.els or {}) do stmt_read_vars(x, vars) end
+    elseif s.tag=="while" then
+      expr_vars(s.cond, vars)
+      for _, x in ipairs(s.body or {}) do stmt_read_vars(x, vars) end
+    elseif s.tag=="return" then
+      for _, a in ipairs(s.args or {}) do expr_vars(a, vars) end
+    else
+      for i = 2, #s do if type(s[i])=="table" then expr_vars(s[i], vars) end end
+    end
+  end
+  local function stmt_write_vars(s, writes)
+    local k = s[1] or s.tag
+    if k=="let" or k=="setvar" then if type(s[2])=="string" then writes[s[2]]=true end
+    elseif k=="assign" then
+      for _, l in ipairs(s[2] or {}) do if type(l)=="table" and l[1]=="var" then writes[l[2]]=true end end
+    elseif k=="local" then for _, n in ipairs(s[2] or {}) do writes[n]=true end end
+  end
+  local function expr_subst(e, subst)
+    if type(e) ~= "table" then return e end
+    if e[1]=="var" and subst[e[2]] then return dc(subst[e[2]]) end
+    local r = {e[1]}
+    for i = 2, #e do r[i] = type(e[i])=="table" and expr_subst(e[i], subst) or e[i] end
+    return r
+  end
+  local function is_pure_runtime(s)
+    if stmt_has_user(s) then return false end
+    local k = s[1] or s.tag
+    if k == "callstmt" then return has_only_runtime_funcs(s[2]) == true end
+    if k=="let" or k=="setvar" then
+      local name, val = s[2], s[3]
+      if type(name) ~= "string" then return false end
+      if has_user_func_call(val) or has_user_string(val) then return false end
+      if has_only_runtime_funcs(val) == true then return true end
+      if not expr_has_side_effect(val) then
+        local vars = {}
+        expr_vars(val, vars)
+        for v in pairs(vars) do if not runtime_vars[v] then return false end end
+        return true
+      end
+      return false
+    end
+    if k == "assign" then
+      for _, r in ipairs(s[3] or {}) do
+        if has_user_func_call(r) or has_user_string(r) then return false end
+      end
+      for _, r in ipairs(s[3] or {}) do
+        if has_only_runtime_funcs(r) == true then return true end
+        if not expr_has_side_effect(r) then
+          local vars = {}
+          expr_vars(r, vars)
+          for v in pairs(vars) do if not runtime_vars[v] then return false end end
+        else return false end
+      end
+      return true
+    end
+    if k == "local" then
+      for _, r in ipairs(s[3] or {}) do if has_user_func_call(r) or has_user_string(r) then return false end end
+      return true
+    end
+    if s.tag == "return" then
+      for _, a in ipairs(s.args or {}) do if has_user_func_call(a) or has_user_string(a) then return false end end
+      return true
+    end
+    if s.tag == "loopctrl" then return true end
+    return false
+  end
+
+  local current = body
+  for iter = 1, 50 do
+    local changed = false
+    local function remove_runtime(stmts_list)
+      local result = {}
+      for _, s in ipairs(stmts_list) do
+        if s.tag == "if" then
+          s["then"] = remove_runtime(s["then"] or {})
+          s.els = remove_runtime(s.els or {})
+          if #s["then"]==0 and #s.els==0 and not stmt_has_user(s) then changed=true else result[#result+1]=s end
+        elseif s.tag == "while" then
+          s.body = remove_runtime(s.body or {})
+          if #s.body==0 and not stmt_has_user(s) then changed=true else result[#result+1]=s end
+        else
+          if is_pure_runtime(s) then changed=true else result[#result+1]=s end
+        end
+      end
+      return result
+    end
+    current = remove_runtime(current)
+
+    local subst = {}
+    local function propagate(stmts_list)
+      local result = {}
+      for _, s in ipairs(stmts_list) do
+        if s.tag == "if" then
+          s.cond = expr_subst(s.cond, subst)
+          s["then"] = propagate(s["then"] or {})
+          s.els = propagate(s.els or {})
+          result[#result+1] = s
+        elseif s.tag == "while" then
+          s.cond = expr_subst(s.cond, subst)
+          s.body = propagate(s.body or {})
+          result[#result+1] = s
+        else
+          local k = s[1] or s.tag
+          if k=="let" or k=="setvar" then s[3]=expr_subst(s[3], subst)
+          elseif k=="assign" then
+            local nr={}; for _,r in ipairs(s[3] or {}) do nr[#nr+1]=expr_subst(r,subst) end; s[3]=nr
+          elseif k=="local" then
+            local nr={}; for _,r in ipairs(s[3] or {}) do nr[#nr+1]=expr_subst(r,subst) end; s[3]=nr
+          elseif s.tag=="return" then
+            local na={}; for _,a in ipairs(s.args or {}) do na[#na+1]=expr_subst(a,subst) end; s.args=na
+          elseif k=="callstmt" then s[2]=expr_subst(s[2], subst) end
+
+          if k=="let" or k=="setvar" then
+            local name, val = s[2], s[3]
+            if type(name)=="string" and is_inlinable(val) and not expr_has_side_effect(val) then
+              subst[name]=val; changed=true
+            else result[#result+1]=s end
+          elseif k=="assign" and #s[2]==1 and type(s[2][1])=="table" and s[2][1][1]=="var" then
+            local name, val = s[2][1][2], s[3][1]
+            if type(name)=="string" and is_inlinable(val) and not expr_has_side_effect(val) then
+              subst[name]=val; changed=true
+            else result[#result+1]=s end
+          else result[#result+1]=s end
+        end
+      end
+      return result
+    end
+    current = propagate(current)
+
+    local read_vars = {}
+    local function collect_reads(sl) for _, s in ipairs(sl) do stmt_read_vars(s, read_vars) end end
+    collect_reads(current)
+    local function dce(stmts_list)
+      local result = {}
+      for _, s in ipairs(stmts_list) do
+        if s.tag=="if" then s["then"]=dce(s["then"] or {}); s.els=dce(s.els or {}); result[#result+1]=s
+        elseif s.tag=="while" then s.body=dce(s.body or {}); result[#result+1]=s
+        else
+          local k = s[1] or s.tag
+          local writes = {}; stmt_write_vars(s, writes)
+          local is_dead = true
+          for v in pairs(writes) do if read_vars[v] then is_dead=false break end end
+          if k=="callstmt" or s.tag=="return" then is_dead=false end
+          if (k=="let" or k=="setvar") and expr_has_side_effect(s[3]) then is_dead=false end
+          if is_dead and next(writes)~=nil then changed=true else result[#result+1]=s end
+        end
+      end
+      return result
+    end
+    current = dce(current)
+    if not changed then break end
+  end
+  return current
+end
+
 local function CodeGen_new(decompiler, param_names, indent)
   local self = {
     dc=decompiler,
@@ -5329,6 +5632,7 @@ local function CodeGen_new(decompiler, param_names, indent)
   end
   function self:gen_top()
     local narg, body, rest, reach = self.dc:decompile_func(self.dc.top)
+    body = eliminate_runtime_code(body, self.dc.R)
     return table.concat(self:_stmts(body, 0), "\n")
   end
   return self
@@ -5379,6 +5683,7 @@ end
 
 local function Decompiler_new(R)
   local self = {
+    R=R,
     blocks=R.blocks,
     cont=R.cont,
     retvar=R.returnvar,
@@ -5528,6 +5833,7 @@ end
 
 -- 全局导出（兼容 dofile 后直接调用）
 deobfWeAreDevFull = M.deobfWeAreDevFull
+
 
 --[[
 WeAreDev V2 通用反编译器（完整管线，基于 Prometheus Vmify VM 逆向）

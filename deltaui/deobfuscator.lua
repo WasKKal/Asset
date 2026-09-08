@@ -5271,6 +5271,18 @@ local function eliminate_runtime_code(body, R)
         local kbase = key[2]
         if type(kbase)=="table" and kbase[1]=="var" then return true end
       end
+      -- 识别 a[v]、a[n]、a[M[1]] 等形式的上值函数调用
+      if type(key)=="table" and key[1]=="var" then return true end
+      if type(key)=="table" and key[1]=="index" then return true end
+    end
+    -- 识别单字母变量的索引调用（如 a[v](...)、U(K)(...)）
+    if type(base)=="table" and base[1]=="var" and type(base[2])=="string" and #base[2]<=2 then
+      if type(key)=="table" and (key[1]=="var" or key[1]=="index" or key[1]=="num") then
+        -- 检查是否是运行时变量（单字母大写）
+        if base[2]:match("^%u$") or base[2]:match("^%u%u$") then
+          return true
+        end
+      end
     end
     return false
   end
@@ -5867,17 +5879,71 @@ function M.extract_user_code(decompiled)
     "%[X%]%(\"[^\"]*[\x80-\xff][^\"]*\"%s*,%s*%d",
     "%[f%]%(\"[^\"]*[\x80-\xff][^\"]*\"%s*,%s*%d",
     "^%s*%u%s*=%s*%u%(\"[^\"]*[\x00-\x1f\x80-\xff][^\"]*\"%s*,%s*%d+%)",
+    -- 上值函数调用（如 a[M[1]](、a[l](、U(K)(等）
+    "%a%[M%[%d+%]%]%(",
+    "%a%[%l%]%(",
+    "^%s*%u%(%{?%u%(",
+    -- 运行时函数定义（如 local _pt = function()、local z = function()等）
+    "^%s*local %u+ = function%(",
+    "^%s*local _%a+ = function%(",
+    -- 嵌套的if/while语句（单字母变量条件）
+    "^%s*if %u then$",
+    "^%s*if %l then$",
+    "^%s*if %u and %u >= %u or not %u and %u <= %u then$",
+    "^%s*while %u and %u >= %u or not %u and %u <= %u do$",
+    -- 字符串解密函数（return "xxx" / (num - "yyy" ^ num)）
+    "return \"[^\"]*\" / %(%d+ - \"[^\"]*\" %^ %d+%)",
+    -- 运行时变量赋值（单字母大写变量）
+    "^%s*%u = %u%[",
+    "^%s*%u = %u%(",
+    -- 反检测相关
+    "b = true",
+    "string%.gmatch",
+    "string%.gsub",
+    "string%.byte",
+    "string%.char",
   }
   
-  -- 用户代码特征
+  -- 用户代码特征（更严格，只保留明确的用户代码调用）
   local user_patterns = {
-    "[^\x20-\x7e]",  -- 非ASCII字符（中文等）
     "print%(", "warn%(",
     "FireServer", "task%.spawn", "task%.wait",
     "WindUI", "CreateWindow", "Toggle", "Tab",
-    "while .* do", "if .* then", "for .* do",
-    "function%(",
+    "Button", "Dropdown", "Input", "Paragraph", "Section",
+    "setLoop", "CreateWindow",
+    -- 中文字符串（但需要排除字符串解密调用）
+    "[^\x20-\x7e]",
   }
+  
+  -- 严格的用户代码识别：必须包含明确的用户代码调用，或者包含中文字符串且不包含运行时代码特征
+  local function has_user_strict(line)
+    -- 明确的用户代码调用
+    local explicit_user = {
+      "print%(", "warn%(", "FireServer", "task%.spawn", "task%.wait",
+      "WindUI", "CreateWindow", "Toggle", "Tab", "Button", "Dropdown",
+      "Input", "Paragraph", "Section", "setLoop",
+    }
+    for _, pat in ipairs(explicit_user) do
+      if line:find(pat) then return true end
+    end
+    -- 中文字符串（排除字符串解密调用和运行时函数定义）
+    if line:find("[^\x20-\x7e]") then
+      -- 排除字符串解密调用（如 g("xxx", num)、a[l]("xxx", num)等）
+      if line:find("^%s*%u+%s*=%s*%u+%(\"[^\"]*[\x00-\x1f\x80-\xff][^\"]*\"%s*,%s*%d+%)") then
+        return false
+      end
+      -- 排除运行时函数定义（如 local z = function()、local x = function()等）
+      if line:find("^%s*local %u+ = function%(") then
+        return false
+      end
+      -- 排除嵌套的if/while语句（如 if table then、while p and O >= R等）
+      if line:find("^%s*if %u+ then$") or line:find("^%s*while %u+ and") then
+        return false
+      end
+      return true
+    end
+    return false
+  end
   
   local function is_runtime(line)
     for _, pat in ipairs(runtime_patterns) do
@@ -5947,10 +6013,9 @@ function M.extract_user_code(decompiled)
     return line:find("^%s*end$") or line:find("^%s*until .*$")
   end
   
-  -- 提取用户代码块
-  local user_blocks = {}
-  local current_block = {}
-  local in_user_block = false
+  -- 提取用户代码块（只保留包含明确用户特征的行，不保留控制流结构）
+  local user_lines = {}
+  local seen = {}
   
   for i, line in ipairs(lines) do
     local trimmed = line:match("^%s*(.-)%s*$")
@@ -5960,47 +6025,20 @@ function M.extract_user_code(decompiled)
     if #simplified == 0 then goto continue end
     if not is_valid(simplified) then goto continue end
     
-    local user = has_user(simplified)
+    local user = has_user_strict(simplified)
     local runtime = is_runtime(simplified)
     
     if user and not runtime then
-      if not in_user_block then
-        in_user_block = true
-        current_block = {}
-      end
-      table.insert(current_block, simplified)
-    elseif in_user_block then
-      -- 检查是否是控制流结构的一部分
-      if is_func_def(simplified) or is_control_start(simplified) or is_control_end(simplified) then
-        table.insert(current_block, simplified)
-      else
-        -- 结束当前块
-        if #current_block > 0 then
-          table.insert(user_blocks, table.concat(current_block, "\n"))
-        end
-        in_user_block = false
-        current_block = {}
+      if not seen[simplified] then
+        seen[simplified] = true
+        table.insert(user_lines, simplified)
       end
     end
     
     ::continue::
   end
   
-  if in_user_block and #current_block > 0 then
-    table.insert(user_blocks, table.concat(current_block, "\n"))
-  end
-  
-  -- 去重
-  local seen = {}
-  local unique_blocks = {}
-  for _, block in ipairs(user_blocks) do
-    if not seen[block] then
-      seen[block] = true
-      table.insert(unique_blocks, block)
-    end
-  end
-  
-  return table.concat(unique_blocks, "\n\n")
+  return table.concat(user_lines, "\n")
 end
 
 -- 完全反混淆并提取用户代码
@@ -6014,6 +6052,11 @@ function M.deobfWeAreDevClean(code)
 end
 
 -- 全局导出（兼容 dofile 后直接调用）
+deobfWeAreDevFull = M.deobfWeAreDevFull
+extract_user_code = M.extract_user_code
+deobfWeAreDevClean = M.deobfWeAreDevClean
+
+
 deobfWeAreDevFull = M.deobfWeAreDevFull
 extract_user_code = M.extract_user_code
 deobfWeAreDevClean = M.deobfWeAreDevClean

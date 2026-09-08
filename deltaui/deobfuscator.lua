@@ -3,7 +3,7 @@ DeltaPageInfo = {
     title = "反混淆工具",
     icon = "shield-check",
     dataFolder = "deobfuscator",
-    version = "1.0.2",
+    version = "1.0.3",
 }
 local pageInfo = DeltaPageInfo
 
@@ -475,6 +475,7 @@ local deobfBehaviorArmed = nil
 local DEOBF_TOOLS = {
     { id = "detect_obf", name = "混淆检测", icon = "scan-search", desc = "检测代码使用的混淆器类型", color = "accent2" },
     { id = "wearedev_full", name = "WeAreDev 完全反混淆", icon = "wand-sparkles", desc = "一键完全反混淆 WeAreDev 脚本", color = "green" },
+    { id = "wearedev_raw", name = "WeAreDev 原始VM结构", icon = "boxes", desc = "输出未清理的完整 VM 反编译结构（排障用）", color = "warn" },
     { id = "hook_loadstring", name = "Hook Loadstring", icon = "link", desc = "拦截并记录所有 loadstring 调用", color = "accent" },
     { id = "rename_vars", name = "变量重命名", icon = "pencil", desc = "将混淆变量名替换为可读名称", color = "accent2" },
     { id = "string_decrypt", name = "字符串解密", icon = "key-round", desc = "解密加密的字符串常量", color = "green" },
@@ -6743,6 +6744,11 @@ end
 
 -- 完全反混淆并提取用户代码
 function M.deobfWeAreDevClean(code)
+  -- 优先走 IR 级智能提取；失败时退回旧的逐行启发式
+  local ok, smart = pcall(M.deobfWeAreDevSmart, code)
+  if ok and type(smart) == "string" and #smart > 0 and #smart < 200000 then
+    return smart
+  end
   local decompiled = M.deobfWeAreDevFull(code)
   local user_code = M.extract_user_code(decompiled)
   if #user_code > 0 then
@@ -6750,6 +6756,712 @@ function M.deobfWeAreDevClean(code)
   end
   return decompiled
 end
+
+-- ============================================================
+-- WeAreDev 输出优化器（IR 级）
+--   1) 同构 if/else 分支合并   2) 块内重复语句去重
+--   3) 常量折叠                4) 用户全局别名内联
+--   5) 语义化用户代码提取（种子 + 冷变量依赖闭包 + 死存储消除）
+--   6) 空分支剪除 / VM 不透明谓词解包
+-- 解决：反混淆结果里穿插大量 VM 垃圾运算、有效代码被埋到文件末尾
+-- ============================================================
+do
+local __WD_OPT_BUILD__ = function()
+
+local function isA(e) return type(e) == "table" and type(e[1]) == "string" end
+
+------------------------------------------------------------------ 表达式工具
+local function walk_expr(e, fn)
+  if not isA(e) then return end
+  fn(e)
+  if e[1] == "table" then
+    for _, kv in ipairs(e[2]) do
+      if kv[1] then walk_expr(kv[1], fn) end
+      walk_expr(kv[2], fn)
+    end
+  else
+    for i = 2, #e do
+      if type(e[i]) == "table" then walk_expr(e[i], fn) end
+    end
+  end
+end
+
+local function expr_reads(e, out)
+  walk_expr(e, function(n) if n[1] == "var" then out[n[2]] = true end end)
+end
+
+local function map_expr(e, fn)
+  -- 自底向上重写表达式
+  if not isA(e) then return e end
+  if e[1] == "table" then
+    local t = { "table", {} }
+    for _, kv in ipairs(e[2]) do
+      t[2][#t[2] + 1] = { kv[1] and map_expr(kv[1], fn) or nil, map_expr(kv[2], fn) }
+    end
+    return fn(t)
+  end
+  local n = { e[1] }
+  for i = 2, #e do
+    n[i] = type(e[i]) == "table" and map_expr(e[i], fn) or e[i]
+  end
+  return fn(n)
+end
+
+------------------------------------------------------------------ 语句读写集
+local function stmt_rw(s, r, w)
+  if s.tag == "if" then
+    expr_reads(s.cond, r)
+  elseif s.tag == "while" then
+    expr_reads(s.cond, r)
+  elseif s.tag == "return" then
+    for _, a in ipairs(s.args or {}) do expr_reads(a, r) end
+  elseif s.tag == "loopctrl" then
+    -- nop
+  else
+    local k = s[1]
+    if k == "let" then
+      if type(s[2]) == "string" then w[s[2]] = true end
+      expr_reads(s[3], r)
+    elseif k == "setvar" then
+      if type(s[2]) == "string" then w[s[2]] = true end
+      expr_reads(s[3], r)
+    elseif k == "local" then
+      for _, n in ipairs(s[2] or {}) do w[n] = true end
+      for _, e in ipairs(s[3] or {}) do expr_reads(e, r) end
+    elseif k == "assign" then
+      for _, e in ipairs(s[2] or {}) do
+        if isA(e) and e[1] == "var" then w[e[2]] = true else expr_reads(e, r) end
+      end
+      for _, e in ipairs(s[3] or {}) do expr_reads(e, r) end
+    elseif k == "callstmt" then
+      expr_reads(s[2], r)
+    elseif k == "return" then
+      for _, e in ipairs(s[2] or {}) do expr_reads(e, r) end
+    end
+  end
+end
+
+------------------------------------------------------------------ 规范化 key
+local function key(e)
+  if type(e) ~= "table" then return type(e) .. ":" .. tostring(e) end
+  local buf = {}
+  for i, v in ipairs(e) do buf[#buf + 1] = key(v) end
+  local ks = {}
+  for k in pairs(e) do if type(k) == "string" then ks[#ks + 1] = k end end
+  table.sort(ks)
+  for _, k in ipairs(ks) do buf[#buf + 1] = k .. "=" .. key(e[k]) end
+  return "{" .. table.concat(buf, ",") .. "}"
+end
+
+local function body_key(stmts)
+  local buf = {}
+  for _, s in ipairs(stmts) do buf[#buf + 1] = key(s) end
+  return table.concat(buf, ";")
+end
+
+local function children(s)
+  local r = {}
+  if s.tag == "if" then
+    r[#r + 1] = s["then"]
+    if s.els then r[#r + 1] = s.els end
+  elseif s.tag == "while" then
+    r[#r + 1] = s.body
+  end
+  return r
+end
+
+------------------------------------------------------------------ P1 同构分支合并
+local function dedup_branches(stmts)
+  local changed = false
+  for i, s in ipairs(stmts) do
+    if s.tag == "if" and s.els then
+      if dedup_branches(s["then"]) then changed = true end
+      if dedup_branches(s.els) then changed = true end
+      if body_key(s["then"]) == body_key(s.els) then
+        local repl = s["then"]
+        table.remove(stmts, i)
+        for j = #repl, 1, -1 do table.insert(stmts, i, repl[j]) end
+        return true
+      end
+    elseif s.tag == "while" then
+      if dedup_branches(s.body) then changed = true end
+    end
+  end
+  return changed
+end
+
+------------------------------------------------------------------ P2 块内重复语句去重
+local function dedup_stmts(stmts)
+  local changed = false
+  local seen, out = {}, {}
+  for _, s in ipairs(stmts) do
+    local k = key(s)
+    if seen[k] then changed = true else seen[k] = true; out[#out + 1] = s end
+  end
+  if changed then
+    for i = 1, #stmts do stmts[i] = nil end
+    for i, v in ipairs(out) do stmts[i] = v end
+  end
+  for _, s in ipairs(stmts) do
+    for _, c in ipairs(children(s)) do if dedup_stmts(c) then changed = true end end
+  end
+  return changed
+end
+
+------------------------------------------------------------------ P3 常量折叠
+local CONST_OPS = {
+  ["+"] = true, ["-"] = true, ["*"] = true, ["/"] = true, ["%"] = true, ["^"] = true,
+  [".."] = true, ["=="] = true, ["~="] = true, ["<"] = true, ["<="] = true,
+  [">"] = true, [">="] = true, ["and"] = true, ["or"] = true,
+}
+local function const_value(e)
+  if not isA(e) then return nil end
+  local k = e[1]
+  if k == "num" or k == "str" then return e[2] end
+  if k == "true" then return true end
+  if k == "false" then return false end
+  if k == "nil" then return nil end
+  return nil
+end
+local function has_metamethod_risk(a, b) return false end
+local function fold_consts_stmts(stmts)
+  local changed = false
+  local function fold(e)
+    if not isA(e) then return e end
+    if e[1] == "bin" and CONST_OPS[e[2]] then
+      local a, b = const_value(e[3]), const_value(e[4])
+      if a ~= nil and b ~= nil and not (e[2] == "and" or e[2] == "or") then
+        local vals = { a, b }
+        local ok, res
+        if e[2] == "+" then ok, res = pcall(function() return a + b end)
+        elseif e[2] == "-" then ok, res = pcall(function() return a - b end)
+        elseif e[2] == "*" then ok, res = pcall(function() return a * b end)
+        elseif e[2] == "/" then ok, res = pcall(function() return a / b end)
+        elseif e[2] == "%" then ok, res = pcall(function() return a % b end)
+        elseif e[2] == "^" then ok, res = pcall(function() return a ^ b end)
+        elseif e[2] == ".." then ok, res = pcall(function() return a .. b end)
+        elseif e[2] == "==" then ok, res = true, (a == b)
+        elseif e[2] == "~=" then ok, res = true, (a ~= b)
+        elseif e[2] == "<" then ok, res = pcall(function() return a < b end)
+        elseif e[2] == "<=" then ok, res = pcall(function() return a <= b end)
+        elseif e[2] == ">" then ok, res = pcall(function() return a > b end)
+        elseif e[2] == ">=" then ok, res = pcall(function() return a >= b end)
+        end
+        if ok and res ~= nil then
+          changed = true
+          if type(res) == "number" then return { "num", res }
+          elseif type(res) == "string" then return { "str", res }
+          elseif type(res) == "boolean" then return { res and "true" or "false" }
+          else return { "nil" } end
+        end
+      end
+    end
+    if e[1] == "un" then
+      local a = const_value(e[3])
+      if a ~= nil then
+        local ok, res
+        if e[2] == "-" then ok, res = pcall(function() return -a end)
+        elseif e[2] == "not" then ok, res = true, (not a)
+        elseif e[2] == "#" then ok, res = pcall(function() return #a end) end
+        if ok and res ~= nil then
+          changed = true
+          if type(res) == "number" then return { "num", res }
+          elseif type(res) == "string" then return { "str", res }
+          elseif type(res) == "boolean" then return { res and "true" or "false" }
+          else return { "nil" } end
+        end
+      end
+    end
+    return e
+  end
+  local function visit(s)
+    if s.tag == "if" then
+      s.cond = map_expr(s.cond, fold)
+      for _, c in ipairs({ s["then"], s.els }) do if c then fold_consts_stmts(c) end end
+    elseif s.tag == "while" then
+      s.cond = map_expr(s.cond, fold)
+      fold_consts_stmts(s.body)
+    else
+      local k = s[1]
+      if k == "let" or k == "setvar" then s[3] = map_expr(s[3], fold)
+      elseif k == "local" then for i, e in ipairs(s[3] or {}) do s[3][i] = map_expr(e, fold) end
+      elseif k == "assign" then
+        for i, e in ipairs(s[2] or {}) do s[2][i] = map_expr(e, fold) end
+        for i, e in ipairs(s[3] or {}) do s[3][i] = map_expr(e, fold) end
+      elseif k == "callstmt" then s[2] = map_expr(s[2], fold)
+      elseif k == "return" then for i, e in ipairs(s[2] or {}) do s[2][i] = map_expr(e, fold) end
+      end
+    end
+  end
+  for _, s in ipairs(stmts) do visit(s) end
+  return changed
+end
+
+------------------------------------------------------------------ 用户级全局（种子）
+local USER_G = {}
+for _, n in ipairs({
+  "print", "warn", "require", "loadstring", "load", "dofile",
+  "game", "workspace", "Workspace", "script", "Instance", "Enum", "task", "plugin",
+  "Vector2", "Vector3", "CFrame", "Color3", "BrickColor", "UDim", "UDim2", "TweenInfo",
+  "Ray", "Region3", "NumberRange", "NumberSequence", "ColorSequence", "PhysicalProperties",
+  "Axes", "Faces", "Rect", "Font", "RaycastParams", "OverlapParams", "DateTime", "Random",
+  "Players", "LocalPlayer", "ReplicatedStorage", "ServerScriptService", "StarterGui",
+  "CoreGui", "RunService", "UserInputService", "TweenService", "HttpService",
+  "TeleportService", "MarketplaceService", "VirtualUser", "Debris", "SoundService",
+  "wait", "spawn", "delay", "tick", "elapsedTime", "FireServer", "InvokeServer",
+  "gethui", "getgenv", "getrenv", "hookfunction", "Drawing", "syn", "http",
+}) do USER_G[n] = true end
+
+local function is_user_global(name) return USER_G[name] == true end
+
+------------------------------------------------------------------ 语句文本（用于种子识别）
+local function make_seeder(cg)
+  local src_cache = setmetatable({}, { __mode = "k" })
+  local function src_of(s)
+    if src_cache[s] then return src_cache[s] end
+    local ok, txt = pcall(function() return cg:gen_from_ir({ s }) end)
+    txt = (ok and type(txt) == "string") and txt or ""
+    src_cache[s] = txt
+    return txt
+  end
+  return function(s)
+    local txt = src_of(s)
+    if txt == "" then return false end
+    for name in pairs(USER_G) do
+      if txt:find("%f[%w_]" .. name .. "%f[^%w_]") then return true end
+    end
+    return false
+  end
+end
+
+------------------------------------------------------------------ 打平（保留树结构信息）
+-- flat[i] = { s=stmt, parent=pi, block=table, pos=index }
+local function flatten(stmts, parent, flat)
+  flat = flat or {}
+  for i, s in ipairs(stmts) do
+    local idx = #flat + 1
+    flat[idx] = { s = s, parent = parent, block = stmts, pos = i }
+    for _, c in ipairs(children(s)) do flatten(c, idx, flat) end
+  end
+  return flat
+end
+
+-- 用户全局别名内联
+local function deepcopy(e)
+  if type(e) ~= "table" then return e end
+  local n = {}
+  for k, v in pairs(e) do n[k] = deepcopy(v) end
+  return n
+end
+
+local function safe_to_dup(e)
+  local ok = true
+  walk_expr(e, function(n)
+    if n[1] == "call" or n[1] == "selfcall" or n[1] == "mkclosure" or n[1] == "table" or n[1] == "func" then ok = false end
+  end)
+  return ok
+end
+
+local function contains_user_global(e)
+  local found = false
+  walk_expr(e, function(n) if n[1] == "var" and is_user_global(n[2]) then found = true end end)
+  return found
+end
+
+local sub_stmts
+local function sub_expr(e, target, rhs, DEF)
+  if not isA(e) then return e end
+  if e[1] == "var" and e[2] == target then return deepcopy(rhs) end
+  if e[1] == "table" then
+    for _, kv in ipairs(e[2]) do
+      if kv[1] then kv[1] = sub_expr(kv[1], target, rhs, DEF) end
+      kv[2] = sub_expr(kv[2], target, rhs, DEF)
+    end
+    return e
+  end
+  for i = 2, #e do if type(e[i]) == "table" then e[i] = sub_expr(e[i], target, rhs, DEF) end end
+  return e
+end
+
+local function sub_stmt(s, target, rhs, DEF)
+  if s.tag == "if" then
+    if s ~= DEF then s.cond = sub_expr(s.cond, target, rhs, DEF) end
+    for _, c in ipairs({ s["then"], s.els }) do if c then sub_stmts(c, target, rhs, DEF) end end
+  elseif s.tag == "while" then
+    if s ~= DEF then s.cond = sub_expr(s.cond, target, rhs, DEF) end
+    sub_stmts(s.body, target, rhs, DEF)
+  elseif s.tag == "return" then
+    for i, e in ipairs(s.args or {}) do s.args[i] = sub_expr(e, target, rhs, DEF) end
+  elseif s ~= DEF then
+    local k = s[1]
+    if k == "let" or k == "setvar" then s[3] = sub_expr(s[3], target, rhs, DEF)
+    elseif k == "local" then for i, e in ipairs(s[3] or {}) do s[3][i] = sub_expr(e, target, rhs, DEF) end
+    elseif k == "assign" then
+      for i, e in ipairs(s[2] or {}) do s[2][i] = sub_expr(e, target, rhs, DEF) end
+      for i, e in ipairs(s[3] or {}) do s[3][i] = sub_expr(e, target, rhs, DEF) end
+    elseif k == "callstmt" then s[2] = sub_expr(s[2], target, rhs, DEF)
+    elseif k == "return" then for i, e in ipairs(s[2] or {}) do s[2][i] = sub_expr(e, target, rhs, DEF) end
+    end
+  end
+end
+
+sub_stmts = function(ss, target, rhs, DEF)
+  for _, s in ipairs(ss) do sub_stmt(s, target, rhs, DEF) end
+end
+
+local function collect_defs(stmts, wc, defs)
+  for _, s in ipairs(stmts) do
+    local r, w = {}, {}
+    stmt_rw(s, r, w)
+    for v in pairs(w) do wc[v] = (wc[v] or 0) + 1 end
+    if not s.tag and (s[1] == "let" or s[1] == "setvar") and type(s[2]) == "string" then
+      defs[s[2]] = s
+    elseif not s.tag and s[1] == "local" and #(s[2] or {}) == 1 and #(s[3] or {}) == 1 then
+      defs[s[2][1]] = s
+    end
+    for _, c in ipairs(children(s)) do collect_defs(c, wc, defs) end
+  end
+end
+
+local function subst_user_aliases(ir)
+  local done = {}
+  for _ = 1, 12 do
+    local wc, defs = {}, {}
+    collect_defs(ir, wc, defs)
+    local target, rhs, DEF = nil, nil, nil
+    for v, s in pairs(defs) do
+      if wc[v] == 1 and not done[v] then
+        local e = (s[1] == "local") and s[3][1] or s[3]
+        if isA(e) and (e[1] ~= "var" or is_user_global(e[2])) and safe_to_dup(e) and contains_user_global(e) then
+          target, rhs, DEF = v, e, s; break
+        end
+      end
+    end
+    if not target then break end
+    done[target] = true
+    sub_stmts(ir, target, rhs, DEF)
+  end
+end
+
+------------------------------------------------------------------ 种子 + 闭包选择
+-- 规则：
+--   * 种子 = 叶子语句源代码中命中「用户级全局」
+--   * 前向传播只允许走「污点变量」：被单一语句赋值、且该赋值语句本身是种子
+--     （避免 VM 里被反复复用的寄存器名，如 b / r / X，把整个运行时拖进来）
+--   * 后向传播：保留下来的语句读到的变量，其所有赋值语句都要保留
+local function select_user(ir, cg, opts)
+  local is_seed = make_seeder(cg)
+  local flat = flatten(ir, nil)
+  local R, W = {}, {}
+  local writeCount = {}
+  for i, n in ipairs(flat) do
+    R[i], W[i] = {}, {}
+    stmt_rw(n.s, R[i], W[i])
+    for v in pairs(W[i]) do writeCount[v] = (writeCount[v] or 0) + 1 end
+  end
+
+  local keep = {}
+  local seedset = {}
+  for i, n in ipairs(flat) do
+    if #children(n.s) == 0 and is_seed(n.s) then keep[i] = true; seedset[n.s] = true end
+  end
+
+  local function mark_ancestors(i)
+    local p = flat[i].parent
+    while p and not keep[p] do keep[p] = true; p = flat[p].parent end
+  end
+  for i = 1, #flat do if keep[i] then mark_ancestors(i) end end
+
+  -- 顶层调用是否有副作用（可安全降级为语句）
+  local function top_call(e) return isA(e) and (e[1] == "call" or e[1] == "selfcall") end
+  local function rhs_of(s)
+    local k = s.tag and "struct" or s[1]
+    if k == "let" or k == "setvar" then return s[3] end
+    if k == "local" then return (s[3] or {})[1] end
+    return nil
+  end
+
+  -- 后向：BFS，限制跳数（防止把整个 VM 状态机拉进来）
+  local MAX_HOP = 3
+  local hop = {}
+  local order = {}
+  for i in pairs(keep) do order[#order + 1] = i; hop[i] = 0 end
+  table.sort(order)
+  local qi, q = 1, order
+  local function bfs_step(i)
+    if (hop[i] or 0) >= MAX_HOP then return end
+    for v in pairs(R[i]) do
+      -- 只跟随"冷"变量：VM 里被反复赋值的寄存器（写次数多）一律不跟，否则会级联拖入整个运行时
+      if not USER_G[v] and (writeCount[v] or 0) <= 3 then
+        for j = 1, #flat do
+          if not keep[j] and W[j][v] then
+            keep[j] = true; hop[j] = (hop[i] or 0) + 1
+            q[#q + 1] = j
+          end
+        end
+      end
+    end
+  end
+  while qi <= #q do
+    local i = q[qi]; qi = qi + 1
+    bfs_step(i)
+  end
+  for j = 1, #flat do if keep[j] then mark_ancestors(j) end end
+  -- 前向 + 后向交替
+  for round = 1, 6 do
+    local added = false
+    local taint = {}
+    for i in pairs(keep) do
+      if not flat[i].s.tag then
+        for v in pairs(W[i]) do if writeCount[v] == 1 then taint[v] = true end end
+      end
+    end
+    for j = 1, #flat do
+      if not keep[j] then
+        for v in pairs(R[j]) do if taint[v] then keep[j] = true; hop[j] = 0; q[#q + 1] = j; added = true; break end end
+      end
+    end
+    while qi <= #q do
+      local i = q[qi]; qi = qi + 1
+      local before = #q
+      bfs_step(i)
+      if #q > before then added = true end
+    end
+    for j = 1, #flat do if keep[j] then mark_ancestors(j) end end
+    if not added then break end
+  end
+
+  local nseed = 0
+  for i in pairs(keep) do if #children(flat[i].s) == 0 then nseed = nseed + 1 end end
+  if nseed == 0 then return nil end
+
+  -- 重建树
+  local function rebuild(stmts)
+    local out = {}
+    for i, s in ipairs(stmts) do
+      local idx = nil
+      for k = 1, #flat do
+        if flat[k].s == s and flat[k].block == stmts and flat[k].pos == i then idx = k; break end
+      end
+      if idx and keep[idx] then
+        local ns = s
+        if s.tag == "if" then
+          ns = { tag = "if", cond = s.cond, ["then"] = rebuild(s["then"]) }
+          if s.els then ns.els = rebuild(s.els) end
+        elseif s.tag == "while" then
+          ns = { tag = "while", kind = s.kind, cond = s.cond, body = rebuild(s.body) }
+        end
+        out[#out + 1] = ns
+      end
+    end
+    return out
+  end
+  return rebuild(ir), seedset
+end
+
+------------------------------------------------------------------ DCE（小集合上做）
+local function expr_has_side_effect(e)
+  if not isA(e) then return false end
+  if e[1] == "call" or e[1] == "selfcall" then return true end
+  if e[1] == "table" then
+    for _, kv in ipairs(e[2]) do
+      if expr_has_side_effect(kv[1]) or expr_has_side_effect(kv[2]) then return true end
+    end
+    return false
+  end
+  for i = 2, #e do if type(e[i]) == "table" and expr_has_side_effect(e[i]) then return true end end
+  return false
+end
+
+local function top_call(e) return isA(e) and (e[1] == "call" or e[1] == "selfcall") end
+
+-- 叶子语句的死存储消除：返回替换后的语句，nil 表示删除
+local function leaf_dce(s, later, protect)
+  local k = s[1]
+  if (k == "let" or k == "setvar") and type(s[2]) == "string" and not later[s[2]] then
+    if top_call(s[3]) then
+      return { [1] = "callstmt", [2] = s[3] }   -- 调用本身保留，只丢掉无用赋值
+    elseif expr_has_side_effect(s[3]) then
+      return s                                   -- 有副作用但不是纯调用，保守保留
+    elseif protect and protect[s] then
+      return s                                   -- 种子语句不允许整条删除
+    end
+    return nil
+  end
+  return s
+end
+
+local function dce(stmts, protect)
+  -- 收集后续读取集（不考虑遮蔽，保守）
+  local function all_reads(ss, out)
+    for _, s in ipairs(ss) do
+      local r, w = {}, {}
+      stmt_rw(s, r, w)
+      for v in pairs(r) do out[v] = true end
+      for _, c in ipairs(children(s)) do all_reads(c, out) end
+    end
+  end
+  local function go(ss)
+    local out = {}
+    for i = #ss, 1, -1 do
+      local s = ss[i]
+      if s.tag == "if" or s.tag == "while" then
+        s["then"] = s["then"] and go(s["then"]) or nil
+        if s.els then s.els = go(s.els) end
+        if s.body then s.body = go(s.body) end
+        out[i] = s
+      else
+        local rest = {}
+        for _, v in ipairs(out) do if v then rest[#rest + 1] = v end end
+        local later = {}
+        all_reads(rest, later)
+        local ns = leaf_dce(s, later, protect)
+        out[i] = ns or false
+      end
+    end
+    local res = {}
+    for _, v in ipairs(out) do if v then res[#res + 1] = v end end
+    return res
+  end
+  return go(stmts)
+end
+
+------------------------------------------------------------------ 空分支剪除 / 死 if 解包
+local function prune_branches(stmts)
+  local out = {}
+  for _, s in ipairs(stmts) do
+    if s.tag == "if" then
+      s["then"] = prune_branches(s["then"])
+      if s.els then s.els = prune_branches(s.els) end
+      local nt, ne = #s["then"], s.els and #s.els or 0
+      if nt == 0 and ne == 0 then
+        -- 整块丢弃
+      elseif ne == 0 then
+        s.els = nil
+        out[#out + 1] = s
+      elseif nt == 0 then
+        -- then 空：取反条件，用 else 分支
+        out[#out + 1] = { tag = "if", cond = { "un", "not", s.cond }, ["then"] = s.els }
+      else
+        out[#out + 1] = s
+      end
+    elseif s.tag == "while" then
+      s.body = prune_branches(s.body)
+      if #s.body > 0 then out[#out + 1] = s end
+    else
+      out[#out + 1] = s
+    end
+  end
+  return out
+end
+
+-- 若 if 的条件是「输出里从未被赋值的裸变量」，另一分支为空 → 直接解包（VM 不透明谓词）
+local function unwrap_dead_if(stmts, assigned)
+  local out = {}
+  for _, s in ipairs(stmts) do
+    if s.tag == "if" then
+      s["then"] = unwrap_dead_if(s["then"], assigned)
+      if s.els then s.els = unwrap_dead_if(s.els, assigned) end
+      local cond = s.cond
+      local bare = isA(cond) and cond[1] == "var" and type(cond[2]) == "string" and cond[2] or nil
+      if bare and not USER_G[bare] and not assigned[bare]
+         and not s.els and #s["then"] > 0 then
+        for _, x in ipairs(s["then"]) do out[#out + 1] = x end
+      elseif #s["then"] > 0 or (s.els and #s.els > 0) then
+        out[#out + 1] = s
+      end
+    elseif s.tag == "while" then
+      s.body = unwrap_dead_if(s.body, assigned)
+      out[#out + 1] = s
+    else
+      out[#out + 1] = s
+    end
+  end
+  return out
+end
+
+local function collect_assigned(stmts, out)
+  out = out or {}
+  for _, s in ipairs(stmts) do
+    local r, w = {}, {}
+    stmt_rw(s, r, w)
+    for v in pairs(w) do out[v] = true end
+    for _, c in ipairs(children(s)) do collect_assigned(c, out) end
+  end
+  return out
+end
+
+------------------------------------------------------------------ 主流程
+local function run(code, opts)
+  opts = opts or {}
+  local R = M.deobfuscate(code)
+  local dc = M.Decompiler_new(R)
+  local cg = M.CodeGen_new(dc)
+  local ir = cg:gen_top_ir()
+  if not ir then return nil end
+
+  for _ = 1, 15 do
+    local c1 = dedup_branches(ir)
+    local c2 = dedup_stmts(ir)
+    local c3 = fold_consts_stmts(ir)
+    if not (c1 or c2 or c3) then break end
+  end
+
+  subst_user_aliases(ir)
+  for _ = 1, 5 do
+    local c1 = dedup_branches(ir)
+    local c2 = dedup_stmts(ir)
+    local c3 = fold_consts_stmts(ir)
+    if not (c1 or c2 or c3) then break end
+  end
+
+  if opts and opts.stats then
+    local function cnt(ss)
+      local n = 0
+      for _, s in ipairs(ss) do n = n + 1 + (function() local t = 0; for _, c in ipairs(children(s)) do t = t + cnt(c) end; return t end)() end
+      return n
+    end
+    opts.stats.ir_after = cnt(ir)
+  end
+
+  local full = cg:gen_from_ir(ir)
+  if opts.full then return full end
+
+  local sel, seedset = select_user(ir, cg, opts)
+  if not sel then return full end
+  sel = dce(sel, seedset)
+  sel = prune_branches(sel)
+  sel = unwrap_dead_if(sel, collect_assigned(sel))
+  sel = dce(sel, seedset)
+  sel = prune_branches(sel)
+  local out = cg:gen_from_ir(sel)
+  if #out:gsub("%s", "") == 0 then return full end
+  return out
+end
+
+return { run = run }
+end
+local __wdopt = __WD_OPT_BUILD__()
+
+-- 智能清理版反混淆：返回"用户代码"，剔除 VM 运行时垃圾
+function M.deobfWeAreDevSmart(code, opts)
+  local ok, res = pcall(__wdopt.run, code, opts)
+  if ok and type(res) == "string" and #res > 0 then return res end
+  local ok2, full = pcall(M.deobfWeAreDevFull, code)
+  if ok2 and type(full) == "string" and #full > 0 then return full end
+  return code
+end
+
+-- 只做结构去重/常量折叠，不做用户代码提取（保留完整 VM 结构）
+function M.deobfWeAreDevReduced(code)
+  local ok, res = pcall(__wdopt.run, code, { full = true })
+  if ok and type(res) == "string" and #res > 0 then return res end
+  local ok2, full = pcall(M.deobfWeAreDevFull, code)
+  if ok2 and type(full) == "string" and #full > 0 then return full end
+  return code
+end
+end
+
 
 -- ============================================================
 -- VM解释器：识别并消除VM运行时代码
@@ -7530,10 +8242,14 @@ local function deobfWeAreDevV2(code)
     end
     -- 执行完整反编译管线
     local ok, result = pcall(function()
-        return deobfWeAreDevFull(code)
+        return M.deobfWeAreDevSmart(code)
     end)
     if not ok or type(result) ~= "string" or #result == 0 then
-        return nil, "完整反编译失败: " .. tostring(result)
+        local ok2, raw = pcall(function() return deobfWeAreDevFull(code) end)
+        if not ok2 or type(raw) ~= "string" or #raw == 0 then
+            return nil, "完整反编译失败: " .. tostring(result)
+        end
+        result = raw
     end
     -- 体积 sanity check：输出超过输入10倍时警告
     local ratio = #result / #code
@@ -8306,6 +9022,37 @@ local function deobfRunTool(toolId)
             deobfNotify("反混淆完成", "输出 " .. #result.source .. " 字节")
         end
         AddLog("=== 反混淆完成 ===", "info")
+        return
+    end
+
+    if toolId == "wearedev_raw" then
+        local content = ""
+        if deobfSelectedFile and dataApi then
+            content = dataApi.readFile(deobfSelectedFile) or ""
+        end
+        if content == "" then
+            content = deobfEditorTextBox and deobfEditorTextBox.Text or ""
+        end
+        if content == "" then
+            AddLog("请先选择文件或输入代码", "warn")
+            return
+        end
+        AddLog("=== WeAreDev 原始 VM 结构输出 ===", "info")
+        local okr, rawsrc = pcall(M.deobfWeAreDevReduced, content)
+        if not okr or type(rawsrc) ~= "string" or #rawsrc == 0 then
+            AddLog("输出失败: " .. tostring(rawsrc), "warn")
+            return
+        end
+        local outName = (deobfSelectedFile or "output"):gsub("%.lua$", "") .. "_vmraw.lua"
+        if dataApi then
+            dataApi.writeFile(outName, rawsrc)
+            AddLog("结果已写入: " .. outName, "info")
+        end
+        if deobfEditorTextBox then
+            deobfEditorTextBox.Text = rawsrc
+        end
+        AddLog("原始结构输出长度: " .. #rawsrc .. " 字节", "info")
+        AddLog("=== 完成 ===", "info")
         return
     end
 

@@ -2007,6 +2007,34 @@ local function deobfExtractDecodedStrings(trace)
     return decoded
 end
 
+local function deobfTraceVMStates(code)
+    if type(code) ~= "string" or #code == 0 then return nil, 0, "空代码" end
+    local whilePos = code:find("while D do")
+    if not whilePos then return nil, 0, "未找到 VM 主循环" end
+    local traceCode = code:sub(1, whilePos + #"while D do" - 1)
+        .. ' string.len("S"..tostring(D)) '
+        .. code:sub(whilePos + #"while D do" + 1)
+    local result = deobfSandboxExecute(traceCode)
+    local states = {}
+    local seen = {}
+    for _, entry in ipairs(result.trace) do
+        if entry.op == "str.len" and entry.a and entry.a[1] then
+            local arg = entry.a[1]
+            if type(arg) == "string" then
+                local inner = arg:match('^"(.*)"$') or arg
+                if inner:sub(1,1) == "S" and #inner > 1 then
+                    local state = inner:sub(2)
+                    states[#states + 1] = state
+                    if not seen[state] then seen[state] = true end
+                end
+            end
+        end
+    end
+    local uniqueCount = 0
+    for _ in pairs(seen) do uniqueCount = uniqueCount + 1 end
+    return states, uniqueCount, result.count
+end
+
 local function deobfWeAreDevTrace(code)
     if type(code) ~= "string" or #code == 0 then return nil, nil, "空代码" end
     local result = deobfSandboxExecute(code)
@@ -2756,14 +2784,34 @@ local function deobfRunTool(toolId)
             sandboxResult.duration or 0), "info")
         if #sandboxDecoded > 0 then
             AddLog("  沙箱解码字符串 " .. #sandboxDecoded .. " 条: " .. table.concat(sandboxDecoded, ", "):sub(1, 300), "info")
-            -- 用沙箱解码的字符串增强反混淆结果：替换残留的混淆字符串引用
-            local sandboxReplaceCount = 0
-            for _, s in ipairs(sandboxDecoded) do
-                if #s >= 2 and #s < 100 then
-                    -- 搜索可能的混淆引用（如取串器调用、base64字符串等）
-                    -- 这里简单记录，不做激进替换以避免破坏代码
+        end
+
+        -- VM 状态追踪：在 while 循环中插入 string.len 标记，从沙箱轨迹提取状态转换序列
+        AddLog("VM 状态追踪（控制流扁平化还原）...", "info")
+        local vmStates, vmUniqueCount, vmTraceCount = deobfTraceVMStates(content)
+        if vmStates and #vmStates > 0 then
+            AddLog(string.format("  捕获 %d 个状态转换，%d 个唯一状态，%d 条轨迹", #vmStates, vmUniqueCount, vmTraceCount), "info")
+            -- 检测循环结构（交替出现的状态对）
+            local loops = {}
+            for i = 1, #vmStates - 1 do
+                if vmStates[i] ~= vmStates[i+1] then
+                    local pair = vmStates[i] .. "<->" .. vmStates[i+1]
+                    loops[pair] = (loops[pair] or 0) + 1
                 end
             end
+            for pair, count in pairs(loops) do
+                if count >= 3 then
+                    AddLog("  检测到循环: " .. pair .. " (迭代" .. count .. "次)", "info")
+                end
+            end
+            -- 输出前20个状态
+            local stateSample = {}
+            for i = 1, math.min(20, #vmStates) do
+                stateSample[#stateSample + 1] = vmStates[i]
+            end
+            AddLog("  状态序列: " .. table.concat(stateSample, " -> "), "info")
+        else
+            AddLog("  未捕获到 VM 状态（可能不是控制流扁平化格式）", "warn")
         end
 
         local r1b, c1b = deobfGlobalNumSimplify(deobfResult)

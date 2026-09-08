@@ -2330,8 +2330,6 @@ deobfExprLua（表达式渲染）、deobfB64Decode（base64解码）、deobfLcg�
 -- ============================================================
 -- ============================================================
 -- prom_decomp.lua — Prometheus Vmify 完整反编译器（内联）
--- ============================================================
-
 local M = {}
 
 -- ============================================================
@@ -5831,8 +5829,80 @@ function M.deobfWeAreDevFull(code)
   return cg:gen_top()
 end
 
+-- 用户代码提取器：从反编译输出中提取并去重用户代码
+function M.extract_user_code(decompiled)
+  local user_lines = {}
+  local seen = {}
+  
+  -- 运行时代码特征
+  local runtime_patterns = {
+    "pcall", "xpcall", "error%(", "assert%(",
+    "math%.random",
+    "__metatable", "__index", "__gc", "__len", "__newindex",
+    "setmetatable", "getmetatable", "newproxy",
+    "Tamper Detected", "mkclosure", "alloc%(",
+    "V%[v%[", "V%[F%]", "V%[U%]", "V%[D%]",
+    "tostring", "tonumber", "type%(", "select%(", "unpack",
+    "rawget", "rawset", "rawequal", "pairs", "ipairs", "next",
+    "bit32%.%a+", "coroutine%.%a+",
+    -- 明确的字符串解密调用（A[v]("加密字符串", 数字)）
+    "%[v%]%(\"[^\"]*[\x80-\xff][^\"]*\"%s*,%s*%d",
+    "%[W%]%(\"[^\"]*[\x80-\xff][^\"]*\"%s*,%s*%d",
+    "%[X%]%(\"[^\"]*[\x80-\xff][^\"]*\"%s*,%s*%d",
+    "%[f%]%(\"[^\"]*[\x80-\xff][^\"]*\"%s*,%s*%d",
+    -- 单字母变量调用加密字符串（f("...", num), m("...", num)等）
+    "^%s*%u%s*=%s*%u%(\"[^\"]*[\x00-\x1f\x80-\xff][^\"]*\"%s*,%s*%d+%)",
+  }
+  
+  -- 用户代码特征
+  local user_patterns = {
+    "[^\x20-\x7e]",  -- 非ASCII字符（中文等）
+    "print%(", "warn%(",
+  }
+  
+  for line in decompiled:gmatch("[^\n]+") do
+    local trimmed = line:match("^%s*(.-)%s*$")
+    if #trimmed > 0 and #trimmed < 1000 then
+      -- 检查是否包含用户特征
+      local has_user = false
+      for _, pat in ipairs(user_patterns) do
+        if trimmed:find(pat) then has_user = true; break end
+      end
+      
+      if has_user and not seen[trimmed] then
+        -- 排除运行时代码
+        local is_runtime = false
+        for _, pat in ipairs(runtime_patterns) do
+          if trimmed:find(pat) then is_runtime = true; break end
+        end
+        
+        if not is_runtime then
+          seen[trimmed] = true
+          table.insert(user_lines, trimmed)
+        end
+      end
+    end
+  end
+  
+  return table.concat(user_lines, "\n")
+end
+
+-- 完全反混淆并提取用户代码
+function M.deobfWeAreDevClean(code)
+  local decompiled = M.deobfWeAreDevFull(code)
+  local user_code = M.extract_user_code(decompiled)
+  if #user_code > 0 then
+    return user_code
+  end
+  return decompiled
+end
+
 -- 全局导出（兼容 dofile 后直接调用）
 deobfWeAreDevFull = M.deobfWeAreDevFull
+extract_user_code = M.extract_user_code
+deobfWeAreDevClean = M.deobfWeAreDevClean
+
+
 
 
 --[[

@@ -6610,66 +6610,249 @@ function M.deobfWeAreDevClean(code)
   return decompiled
 end
 
+-- ============================================================
+-- VM解释器：识别并消除VM运行时代码
+-- ============================================================
+
+local vm_runtime_funcs = {
+  alloc = true, setmetatable = true, getmetatable = true, newproxy = true,
+  pcall = true, xpcall = true, error = true, assert = true,
+  tostring = true, tonumber = true, type = true, select = true, unpack = true,
+  rawget = true, rawset = true, rawequal = true,
+  pairs = true, ipairs = true, next = true,
+  string = true, math = true, table = true, os = true, bit32 = true, coroutine = true,
+}
+
+local vm_special_runtime_funcs = {
+  W = true,
+}
+
+local vm_runtime_var_names = {
+  V = true, v = true, W = true, z = true, K = true,
+  g = true, j = true, G = true, S = true,
+}
+
+local function vm_is_runtime_expr(e, runtime_vars, depth)
+  depth = depth or 0
+  if depth > 20 then return false end
+  if type(e) ~= "table" then return false end
+  local k = e[1]
+  
+  if k == "alloc" or k == "mkclosure" then return true end
+  
+  if k == "var" then
+    return runtime_vars[e[2]] == true or vm_runtime_var_names[e[2]] == true
+  end
+  
+  if k == "num" or k == "boolean" or k == "nil" then return true end
+  
+  if k == "str" then
+    local s = e[2]
+    local runtime_strs = {
+      ["__index"] = true, ["__metatable"] = true, ["__gc"] = true,
+      ["__len"] = true, ["__newindex"] = true, ["__tostring"] = true,
+      ["__call"] = true, ["__concat"] = true, ["__unm"] = true,
+      ["__add"] = true, ["__sub"] = true, ["__mul"] = true,
+      ["__div"] = true, ["__mod"] = true, ["__pow"] = true,
+      ["__eq"] = true, ["__lt"] = true, ["__le"] = true,
+      ["Tamper Detected!"] = true,
+      ["gmatch"] = true, ["gsub"] = true, ["byte"] = true,
+      ["char"] = true, ["len"] = true, ["sub"] = true,
+      ["format"] = true, ["find"] = true, ["rep"] = true,
+      ["random"] = true, ["randomseed"] = true, ["floor"] = true,
+      ["ceil"] = true, ["abs"] = true, ["sqrt"] = true,
+      ["concat"] = true, ["insert"] = true, ["remove"] = true,
+      ["sort"] = true, ["clock"] = true, ["time"] = true,
+    }
+    return runtime_strs[s] == true
+  end
+  
+  if k == "table" then
+    if e[2] == nil or (type(e[2]) == "table" and #e[2] == 0) then
+      return true
+    end
+    
+    if type(e[2]) == "table" then
+      for i = 1, #e[2] do
+        local entry = e[2][i]
+        if type(entry) == "table" and type(entry[1]) == "table" and entry[1][1] == "str" then
+          local key = entry[1][2]
+          if key == "__index" or key == "__metatable" or key == "__gc" or
+             key == "__len" or key == "__newindex" or key == "__tostring" or
+             key == "__call" or key == "__concat" then
+            return true
+          end
+        end
+      end
+    end
+    
+    if type(e[2]) == "table" then
+      for i = 1, #e[2] do
+        if type(e[2][i]) == "table" then
+          if not vm_is_runtime_expr(e[2][i], runtime_vars, depth + 1) then
+            return false
+          end
+        end
+      end
+    end
+    return true
+  end
+  
+  if k == "index" then
+    local base = e[2]
+    if type(base) == "table" and base[1] == "var" then
+      if runtime_vars[base[2]] or vm_runtime_var_names[base[2]] then
+        return true
+      end
+    end
+    if type(base) == "table" and vm_is_runtime_expr(base, runtime_vars, depth + 1) then
+      return true
+    end
+    return false
+  end
+  
+  if k == "call" then
+    local fn = e[2]
+    local args = e[3]
+    
+    if type(fn) == "table" and fn[1] == "var" then
+      if vm_special_runtime_funcs[fn[2]] then
+        return true
+      end
+      
+      if vm_runtime_funcs[fn[2]] then
+        if type(args) == "table" then
+          for i = 1, #args do
+            if type(args[i]) == "table" and not vm_is_runtime_expr(args[i], runtime_vars, depth + 1) then
+              return false
+            end
+          end
+        end
+        return true
+      end
+      
+      if fn[2] == "print" or fn[2] == "warn" then
+        return false
+      end
+    end
+    
+    if type(fn) == "table" and fn[1] == "index" then
+      local base = fn[2]
+      if type(base) == "table" and base[1] == "var" and vm_runtime_funcs[base[2]] then
+        return true
+      end
+    end
+    
+    return false
+  end
+  
+  if k == "bin" or k == "un" then
+    for i = 3, #e do
+      if type(e[i]) == "table" and not vm_is_runtime_expr(e[i], runtime_vars, depth + 1) then
+        return false
+      end
+    end
+    return true
+  end
+  
+  return false
+end
+
+local function vm_is_runtime_stmt(stmt, runtime_vars)
+  if type(stmt) ~= "table" then return false end
+  local k = stmt[1] or stmt.tag
+  
+  if k == "let" or k == "setvar" then
+    local val = stmt[3]
+    if type(val) == "table" then
+      return vm_is_runtime_expr(val, runtime_vars)
+    end
+    return false
+  end
+  
+  if k == "assign" then
+    local lhs = stmt[2]
+    local rhs = stmt[3]
+    
+    if type(lhs) == "table" and #lhs >= 1 then
+      local l = lhs[1]
+      if type(l) == "table" and l[1] == "index" then
+        local base = l[2]
+        if type(base) == "table" and base[1] == "var" then
+          if runtime_vars[base[2]] or vm_runtime_var_names[base[2]] then
+            return true
+          end
+        end
+      end
+    end
+    
+    if type(rhs) == "table" then
+      for i = 1, #rhs do
+        if type(rhs[i]) == "table" and not vm_is_runtime_expr(rhs[i], runtime_vars) then
+          return false
+        end
+      end
+      return true
+    end
+    return false
+  end
+  
+  if k == "callstmt" then
+    local call = stmt[2]
+    if type(call) == "table" then
+      return vm_is_runtime_expr(call, runtime_vars)
+    end
+    return false
+  end
+  
+  if k == "local" then
+    local rhs = stmt[3]
+    if type(rhs) == "table" then
+      for i = 1, #rhs do
+        if type(rhs[i]) == "table" and not vm_is_runtime_expr(rhs[i], runtime_vars) then
+          return false
+        end
+      end
+      return true
+    end
+    return false
+  end
+  
+  return false
+end
+
+function M.interpret_block(block, runtime_vars)
+  runtime_vars = runtime_vars or {}
+  
+  local rv = {}
+  for k, v in pairs(vm_runtime_var_names) do rv[k] = v end
+  for k, v in pairs(runtime_vars) do rv[k] = v end
+  
+  local user_stmts = {}
+  local runtime_stmts = {}
+  
+  for i, stmt in ipairs(block.body) do
+    if vm_is_runtime_stmt(stmt, rv) then
+      table.insert(runtime_stmts, stmt)
+      local k = stmt[1] or stmt.tag
+      if (k == "let" or k == "setvar") and type(stmt[2]) == "string" then
+        rv[stmt[2]] = true
+      end
+    else
+      table.insert(user_stmts, stmt)
+    end
+  end
+  
+  return user_stmts, runtime_stmts
+end
+
 -- 全局导出（兼容 dofile 后直接调用）
 deobfWeAreDevFull = M.deobfWeAreDevFull
 extract_user_code = M.extract_user_code
 deobfWeAreDevClean = M.deobfWeAreDevClean
+interpret_block = M.interpret_block
 
-
-deobfWeAreDevFull = M.deobfWeAreDevFull
-extract_user_code = M.extract_user_code
-deobfWeAreDevClean = M.deobfWeAreDevClean
-
-
-deobfWeAreDevFull = M.deobfWeAreDevFull
-extract_user_code = M.extract_user_code
-deobfWeAreDevClean = M.deobfWeAreDevClean
-
-
-deobfWeAreDevFull = M.deobfWeAreDevFull
-extract_user_code = M.extract_user_code
-deobfWeAreDevClean = M.deobfWeAreDevClean
-
-
-deobfWeAreDevFull = M.deobfWeAreDevFull
-extract_user_code = M.extract_user_code
-deobfWeAreDevClean = M.deobfWeAreDevClean
-
-
-deobfWeAreDevFull = M.deobfWeAreDevFull
-extract_user_code = M.extract_user_code
-deobfWeAreDevClean = M.deobfWeAreDevClean
-
-
-deobfWeAreDevFull = M.deobfWeAreDevFull
-extract_user_code = M.extract_user_code
-deobfWeAreDevClean = M.deobfWeAreDevClean
-
-
-deobfWeAreDevFull = M.deobfWeAreDevFull
-extract_user_code = M.extract_user_code
-deobfWeAreDevClean = M.deobfWeAreDevClean
-
-
-deobfWeAreDevFull = M.deobfWeAreDevFull
-extract_user_code = M.extract_user_code
-deobfWeAreDevClean = M.deobfWeAreDevClean
-
-
-deobfWeAreDevFull = M.deobfWeAreDevFull
-extract_user_code = M.extract_user_code
-deobfWeAreDevClean = M.deobfWeAreDevClean
-
-
-deobfWeAreDevFull = M.deobfWeAreDevFull
-extract_user_code = M.extract_user_code
-deobfWeAreDevClean = M.deobfWeAreDevClean
-
-
-deobfWeAreDevFull = M.deobfWeAreDevFull
-extract_user_code = M.extract_user_code
-deobfWeAreDevClean = M.deobfWeAreDevClean
-
+return M
 
 
 

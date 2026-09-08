@@ -5922,9 +5922,26 @@ function M.extract_user_code(decompiled)
   local function has_user_strict(line)
     -- 明确的用户代码调用
     local explicit_user = {
-      "print%(", "warn%(", "FireServer", "task%.spawn", "task%.wait",
+      "print%(", "warn%(", "FireServer", "InvokeServer", "task%.spawn", "task%.wait",
       "WindUI", "CreateWindow", "Toggle", "Tab", "Button", "Dropdown",
-      "Input", "Paragraph", "Section", "setLoop",
+      "Input", "Paragraph", "Section", "setLoop", "Notify",
+      -- 服务获取
+      "GetService", "game%.HttpGet", "loadstring",
+      -- 玩家属性访问
+      "LocalPlayer", "Character", "Humanoid", "ReplicatedStorage", "Workspace",
+      "Players", "VirtualUser",
+      -- 实例方法调用
+      "FindFirstChild", "FindFirstChildOfClass", "IsA", "GetChildren", "GetDescendants",
+      "WaitForChild", "Clone", "Destroy",
+      -- Roblox API
+      "Vector2", "Vector3", "CFrame", "Color3", "ColorSequence", "UDim2",
+      "Enum", "Instance%.new",
+      -- 远程事件
+      "RemoteEvent", "RemoteFunction", "rEvents",
+      -- 宠物/物品相关
+      "petsFolder", "PetShop", "cPetShop", "Backpack", "Tool",
+      -- 任务/循环
+      "task%.delay", "coroutine%.wrap",
     }
     for _, pat in ipairs(explicit_user) do
       if line:find(pat) then return true end
@@ -6135,6 +6152,11 @@ function M.deobfWeAreDevClean(code)
 end
 
 -- 全局导出（兼容 dofile 后直接调用）
+deobfWeAreDevFull = M.deobfWeAreDevFull
+extract_user_code = M.extract_user_code
+deobfWeAreDevClean = M.deobfWeAreDevClean
+
+
 deobfWeAreDevFull = M.deobfWeAreDevFull
 extract_user_code = M.extract_user_code
 deobfWeAreDevClean = M.deobfWeAreDevClean

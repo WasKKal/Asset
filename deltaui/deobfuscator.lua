@@ -2036,11 +2036,288 @@ local function deobfTraceVMStates(code)
     return states, uniqueCount, result.count
 end
 
+-- ==================== V2 反编译器核心模块（词法/解析/AST/base64/LCG） ====================
+local function deobfLex(src)
+    local toks = {}
+    local i = 1
+    local n = #src
+    local function peek(o) return src:sub(i + (o or 0), i + (o or 0)) end
+    local function isSpace(c) return c:match("%s") ~= nil end
+    local function isDigit(c) return c:match("%d") ~= nil end
+    local function isAlpha(c) return c:match("[%a_]") ~= nil end
+    local function isAlnum(c) return c:match("[%w_]") ~= nil end
+    while i <= n do
+        local c = peek()
+        if isSpace(c) then i = i + 1
+        elseif c == "-" and peek(1) == "-" then
+            if peek(2) == "[" and peek(3) == "[" then
+                local depth = 0; i = i + 4
+                while i <= n do
+                    if peek() == "]" and peek(1) == "]" then
+                        if depth == 0 then i = i + 2; break end
+                        depth = depth - 1; i = i + 2
+                    elseif peek() == "[" and peek(1) == "[" then depth = depth + 1; i = i + 2
+                    else i = i + 1 end
+                end
+            else while i <= n and peek() ~= "\n" do i = i + 1 end end
+        elseif isDigit(c) then
+            local j = i
+            while i <= n and (isAlnum(peek()) or peek() == ".") do i = i + 1 end
+            table.insert(toks, {k = "num", v = tonumber(src:sub(j, i - 1))})
+        elseif c == '"' or c == "'" then
+            local q = c; i = i + 1; local buf = {}
+            while i <= n and peek() ~= q do
+                if peek() == "\\" then
+                    i = i + 1; local nc = peek()
+                    if nc == "n" then table.insert(buf, "\n")
+                    elseif nc == "t" then table.insert(buf, "\t")
+                    elseif nc == "r" then table.insert(buf, "\r")
+                    elseif nc == "\\" then table.insert(buf, "\\")
+                    elseif nc == '"' then table.insert(buf, '"')
+                    elseif nc == "'" then table.insert(buf, "'")
+                    elseif nc == "0" then table.insert(buf, "\0")
+                    elseif isDigit(nc) then
+                        local d = ""; while isDigit(peek()) and #d < 3 do d = d .. peek(); i = i + 1 end
+                        table.insert(buf, string.char(tonumber(d))); i = i - 1
+                    else table.insert(buf, nc) end
+                    i = i + 1
+                else table.insert(buf, peek()); i = i + 1 end
+            end
+            i = i + 1; table.insert(toks, {k = "str", v = table.concat(buf)})
+        elseif c == "[" and (peek(1) == "[" or peek(1) == "=") then
+            local eq = ""; i = i + 1
+            while peek() == "=" do eq = eq .. "="; i = i + 1 end
+            i = i + 1
+            if peek() == "\n" then i = i + 1 end
+            local close = "]" .. eq .. "]"
+            local j = src:find(close, i, true)
+            local s = src:sub(i, j and j - 1 or n)
+            i = (j or n) + #close; table.insert(toks, {k = "str", v = s})
+        elseif isAlpha(c) then
+            local j = i
+            while i <= n and isAlnum(peek()) do i = i + 1 end
+            local w = src:sub(j, i - 1)
+            if w == "and" or w == "or" or w == "not" or w == "true" or w == "false" or w == "nil" then
+                table.insert(toks, {k = "kw", v = w})
+            else table.insert(toks, {k = "id", v = w}) end
+        elseif c == "." and peek(1) == "." and peek(2) == "." then
+            table.insert(toks, {k = "op", v = "..."}); i = i + 3
+        else
+            local two = c .. (peek(1) or "")
+            local ops = {"==", "~=", "<=", ">=", "..", "::"}; local matched = false
+            for _, op in ipairs(ops) do
+                if two == op then table.insert(toks, {k = "op", v = op}); i = i + 2; matched = true; break end
+            end
+            if not matched then table.insert(toks, {k = "op", v = c}); i = i + 1 end
+        end
+    end
+    table.insert(toks, {k = "eof", v = ""})
+    return toks
+end
+
+local deobfParser = {}
+deobfParser.__index = deobfParser
+function deobfParser.new(toks) return setmetatable({toks = toks, pos = 1}, deobfParser) end
+function deobfParser:cur() return self.toks[self.pos] end
+function deobfParser:next() local t = self.toks[self.pos]; self.pos = self.pos + 1; return t end
+function deobfParser:expect(k, v)
+    local t = self:cur()
+    if t.k ~= k or (v and t.v ~= v) then error("expected " .. k .. " got " .. t.k, 0) end
+    return self:next()
+end
+function deobfParser:match(k, v)
+    local t = self:cur()
+    if t.k == k and (not v or t.v == v) then self:next(); return true end
+    return false
+end
+function deobfParser:parseExpr() return self:parseOr() end
+function deobfParser:parseOr()
+    local left = self:parseAnd()
+    while self:cur().v == "or" do self:next(); left = {type = "bin", op = "or", left = left, right = self:parseAnd()} end
+    return left
+end
+function deobfParser:parseAnd()
+    local left = self:parseCmp()
+    while self:cur().v == "and" do self:next(); left = {type = "bin", op = "and", left = left, right = self:parseCmp()} end
+    return left
+end
+function deobfParser:parseCmp()
+    local left = self:parseConcat()
+    local ops = {["=="] = true, ["~="] = true, ["<"] = true, [">"] = true, ["<="] = true, [">="] = true}
+    if ops[self:cur().v] then local op = self:next().v; return {type = "bin", op = op, left = left, right = self:parseConcat()} end
+    return left
+end
+function deobfParser:parseConcat()
+    local left = self:parseAdd()
+    while self:cur().v == ".." do self:next(); left = {type = "bin", op = "..", left = left, right = self:parseAdd()} end
+    return left
+end
+function deobfParser:parseAdd()
+    local left = self:parseMul()
+    while self:cur().v == "+" or self:cur().v == "-" do local op = self:next().v; left = {type = "bin", op = op, left = left, right = self:parseMul()} end
+    return left
+end
+function deobfParser:parseMul()
+    local left = self:parseUnary()
+    while self:cur().v == "*" or self:cur().v == "/" or self:cur().v == "%" or self:cur().v == "^" do local op = self:next().v; left = {type = "bin", op = op, left = left, right = self:parseUnary()} end
+    return left
+end
+function deobfParser:parseUnary()
+    if self:cur().v == "not" or self:cur().v == "-" or self:cur().v == "#" then local op = self:next().v; return {type = "un", op = op, operand = self:parseUnary()} end
+    return self:parsePrimary()
+end
+function deobfParser:parsePrimary()
+    local t = self:cur()
+    if t.k == "num" then self:next(); return {type = "num", value = t.v} end
+    if t.k == "str" then self:next(); return {type = "str", value = t.v} end
+    if t.k == "kw" then
+        if t.v == "true" then self:next(); return {type = "bool", value = true} end
+        if t.v == "false" then self:next(); return {type = "bool", value = false} end
+        if t.v == "nil" then self:next(); return {type = "nil"} end
+    end
+    if t.k == "op" and t.v == "..." then self:next(); return {type = "vararg"} end
+    if t.k == "op" and t.v == "{" then return self:parseTable() end
+    if t.k == "op" and t.v == "(" then self:next(); local e = self:parseExpr(); self:expect("op", ")"); return e end
+    if t.k == "id" then self:next(); return self:parsePostfix({type = "var", name = t.v}) end
+    error("unexpected token " .. t.k, 0)
+end
+function deobfParser:parsePostfix(node)
+    while true do
+        local t = self:cur()
+        if t.k == "op" and t.v == "." then self:next(); node = {type = "index", base = node, key = {type = "str", value = self:expect("id").v}}
+        elseif t.k == "op" and t.v == "[" then self:next(); local key = self:parseExpr(); self:expect("op", "]"); node = {type = "index", base = node, key = key}
+        elseif t.k == "op" and t.v == "(" then
+            self:next(); local args = {}
+            if not (self:cur().k == "op" and self:cur().v == ")") then
+                table.insert(args, self:parseExpr())
+                while self:cur().k == "op" and self:cur().v == "," do self:next(); table.insert(args, self:parseExpr()) end
+            end
+            self:expect("op", ")"); node = {type = "call", func = node, args = args}
+        elseif t.k == "op" and t.v == ":" then
+            self:next(); local method = self:expect("id").v; self:expect("op", "("); local args = {}
+            if not (self:cur().k == "op" and self:cur().v == ")") then
+                table.insert(args, self:parseExpr())
+                while self:cur().k == "op" and self:cur().v == "," do self:next(); table.insert(args, self:parseExpr()) end
+            end
+            self:expect("op", ")"); node = {type = "selfcall", base = node, method = method, args = args}
+        elseif t.k == "str" then local s = self:next().v; node = {type = "call", func = node, args = {{type = "str", value = s}}}
+        elseif t.k == "op" and t.v == "{" then node = {type = "call", func = node, args = {self:parseTable()}}
+        else break end
+    end
+    return node
+end
+function deobfParser:parseTable()
+    self:expect("op", "{"); local entries = {}
+    while not (self:cur().k == "op" and self:cur().v == "}") do
+        if self:cur().k == "op" and self:cur().v == "[" then
+            self:next(); local key = self:parseExpr(); self:expect("op", "]"); self:expect("op", "=")
+            table.insert(entries, {key = key, value = self:parseExpr()})
+        elseif self:cur().k == "id" and self.toks[self.pos + 1].k == "op" and self.toks[self.pos + 1].v == "=" then
+            local key = self:next().v; self:next(); table.insert(entries, {key = {type = "str", value = key}, value = self:parseExpr()})
+        else table.insert(entries, {key = nil, value = self:parseExpr()}) end
+        if self:cur().k == "op" and (self:cur().v == "," or self:cur().v == ";") then self:next() end
+    end
+    self:expect("op", "}"); return {type = "table", entries = entries}
+end
+
+local function deobfEvalConst(node)
+    if node.type == "num" then return node.value end
+    if node.type == "bool" then return node.value and 1 or 0 end
+    if node.type == "un" then
+        local v = deobfEvalConst(node.operand); if v == nil then return nil end
+        if node.op == "-" then return -v end
+        if node.op == "not" then return (v == 0 or v == false) and 1 or 0 end
+    end
+    if node.type == "bin" then
+        local l = deobfEvalConst(node.left); local r = deobfEvalConst(node.right)
+        if l == nil or r == nil then return nil end
+        if node.op == "+" then return l + r end
+        if node.op == "-" then return l - r end
+        if node.op == "*" then return l * r end
+        if node.op == "/" then return l / r end
+        if node.op == "%" then return l % r end
+        if node.op == "^" then return l ^ r end
+        if node.op == "==" then return l == r and 1 or 0 end
+        if node.op == "~=" then return l ~= r and 1 or 0 end
+    end
+    return nil
+end
+
+local function deobfExprLua(node)
+    if node.type == "num" then return tostring(node.value) end
+    if node.type == "str" then return '"' .. node.value:gsub("\\", "\\\\"):gsub('"', '\\"') .. '"' end
+    if node.type == "bool" then return node.value and "true" or "false" end
+    if node.type == "nil" then return "nil" end
+    if node.type == "var" then return node.name end
+    if node.type == "vararg" then return "..." end
+    if node.type == "un" then return node.op .. deobfExprLua(node.operand) end
+    if node.type == "bin" then return "(" .. deobfExprLua(node.left) .. " " .. node.op .. " " .. deobfExprLua(node.right) .. ")" end
+    if node.type == "index" then return deobfExprLua(node.base) .. "[" .. deobfExprLua(node.key) .. "]" end
+    if node.type == "call" then
+        local args = {}
+        for _, a in ipairs(node.args) do table.insert(args, deobfExprLua(a)) end
+        return deobfExprLua(node.func) .. "(" .. table.concat(args, ", ") .. ")"
+    end
+    if node.type == "table" then
+        local parts = {}
+        for _, e in ipairs(node.entries) do table.insert(parts, e.key and "[" .. deobfExprLua(e.key) .. "]=" .. deobfExprLua(e.value) or deobfExprLua(e.value)) end
+        return "{" .. table.concat(parts, ",") .. "}"
+    end
+    return "<?>"
+end
+
+local function deobfB64Decode(s, lookup)
+    local out = {}; local i = 1
+    while i <= #s do
+        local c1 = lookup[s:sub(i, i)] or 0
+        local c2 = lookup[s:sub(i + 1, i + 1)] or 0
+        local c3 = lookup[s:sub(i + 2, i + 2)]
+        local c4 = lookup[s:sub(i + 3, i + 3)]
+        local v = c1 * 262144 + c2 * 4096 + (c3 or 0) * 64 + (c4 or 0)
+        if c3 == nil then table.insert(out, math.floor(v / 65536))
+        elseif c4 == nil then table.insert(out, math.floor(v / 65536)); table.insert(out, math.floor((v % 65536) / 256))
+        else table.insert(out, math.floor(v / 65536)); table.insert(out, math.floor((v % 65536) / 256)); table.insert(out, v % 256) end
+        i = i + 4
+    end
+    return out
+end
+
+local deobfLcg = {}
+deobfLcg.__index = deobfLcg
+function deobfLcg.new(mul45, add45, mul8, key8)
+    return setmetatable({mul45 = mul45, add45 = add45, mul8 = mul8, key8 = key8}, deobfLcg)
+end
+function deobfLcg:decrypt(encBytes, seed)
+    local s45 = seed % 35184372088832
+    local s8 = seed % 255 + 2
+    local prevVal = self.key8
+    local out = {}
+    local prevValues = {}
+    local function getNextByte()
+        if #prevValues == 0 then
+            s45 = (s45 * self.mul45 + self.add45) % 35184372088832
+            repeat s8 = s8 * self.mul8 % 257 until s8 ~= 1
+            local r = s8 % 32
+            local shift = 13 - (s8 - r) / 32
+            local n = math.floor(s45 / 2 ^ shift) % 4294967296 / 2 ^ r
+            local rnd = math.floor(n % 1 * 4294967296) + math.floor(n)
+            local low16 = rnd % 65536
+            local high16 = (rnd - low16) / 65536
+            prevValues = {(high16 - high16 % 256) / 256, high16 % 256, (low16 - low16 % 256) / 256, low16 % 256}
+        end
+        return table.remove(prevValues)
+    end
+    for i = 1, #encBytes do
+        prevVal = (encBytes[i] + getNextByte() + prevVal) % 256
+        table.insert(out, prevVal)
+    end
+    return out
+end
+
 --[[
 WeAreDev V2 通用反编译器（基于 Prometheus Vmify VM 逆向）
-管线：词法分析 → 解析 → 基本块提取 → 寄存器折叠 → CFG → 常量数组恢复
-     → LCG 字符串解密 → 容器角色解析 → 语义层 → upvalue还原 → 短路折叠
-     → 控制流结构化 → 代码生成
+核心模块已内联到本文件：deobfLex（词法）、deobfParser（解析）、deobfEvalConst（常量折叠）、
+deobfExprLua（表达式渲染）、deobfB64Decode（base64解码）、deobfLcg（LCG字符串解密器）
 完整 Python 参考原型见仓库 prom_decomp/ 目录
 ]]
 local function deobfWeAreDevV2(code)

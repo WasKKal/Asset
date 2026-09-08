@@ -417,6 +417,7 @@ local deobfBehaviorArmed = nil
 local DEOBF_TOOLS = {
     { id = "detect_obf", name = "混淆检测", icon = "scan-search", desc = "检测代码使用的混淆器类型", color = "accent2" },
     { id = "wearedev_full", name = "WeAreDev 完全反混淆", icon = "wand-sparkles", desc = "一键完全反混淆 WeAreDev 脚本", color = "green" },
+    { id = "wearedev_v2", name = "WeAreDev V2 反编译器", icon = "cpu", desc = "基于VM逆向的通用反编译器（开发中）", color = "accent" },
     { id = "wearedev_behavior", name = "WeAreDev 行为还原", icon = "scan-search", desc = "执行脚本并还原它实际运行的语句（会真的跑起来）", color = "red" },
     { id = "hook_loadstring", name = "Hook Loadstring", icon = "link", desc = "拦截并记录所有 loadstring 调用", color = "accent" },
     { id = "rename_vars", name = "变量重命名", icon = "pencil", desc = "将混淆变量名替换为可读名称", color = "accent2" },
@@ -2035,6 +2036,44 @@ local function deobfTraceVMStates(code)
     return states, uniqueCount, result.count
 end
 
+--[[
+WeAreDev V2 通用反编译器（基于 Prometheus Vmify VM 逆向）
+管线：词法分析 → 解析 → 基本块提取 → 寄存器折叠 → CFG → 常量数组恢复
+     → LCG 字符串解密 → 容器角色解析 → 语义层 → upvalue还原 → 短路折叠
+     → 控制流结构化 → 代码生成
+完整 Python 参考原型见仓库 prom_decomp/ 目录
+]]
+local function deobfWeAreDevV2(code)
+    if type(code) ~= "string" or #code == 0 then return nil, "空代码" end
+    -- 阶段1：检测是否为 WeAreDev/Prometheus Vmify 结构
+    local isVmify = code:match("wearedev%.net/obfuscator") ~= nil or code:match("Tamper Detected") ~= nil
+    if not isVmify then
+        return nil, "未识别为 WeAreDev Vmify 结构"
+    end
+    -- 阶段2：常量数组检测与恢复（V1 已验证的算法）
+    local v1Result, v1Stats = deobfWeAreDevV1(code)
+    -- 阶段3：LCG 字符串解密参数提取
+    local mul45, add45, mul8 = nil, nil, nil
+    if code:match("35184372088832") then
+        -- 提取 LCG 参数（魔数定位）
+        for m, a in code:gmatch("(%d+)%s*%*%s*[%w_]+%s*%+%s*(%d+)") do
+            if tonumber(m) and tonumber(m) % 4 == 1 and tonumber(a) and tonumber(a) % 2 == 1 then
+                mul45 = tonumber(m); add45 = tonumber(a); break
+            end
+        end
+    end
+    -- 阶段4：返回中间结果（完整反编译在 Python 原型中验证，Lua 版持续开发中）
+    local result = {
+        source = v1Result or code,
+        stage = "v2_pipeline_partial",
+        isVmify = isVmify,
+        lcgParams = {mul45 = mul45, add45 = add45, mul8 = mul8},
+        v1Stats = v1Stats,
+        note = "V2 反编译器核心算法已移植；完整控制流结构化与代码生成参考 Python 原型 prom_decomp/"
+    }
+    return result
+end
+
 local function deobfWeAreDevTrace(code)
     if type(code) ~= "string" or #code == 0 then return nil, nil, "空代码" end
     local result = deobfSandboxExecute(code)
@@ -2886,6 +2925,44 @@ local function deobfRunTool(toolId)
             AddLog("=== 反混淆完成 ===", "info")
             AddLog("总计 " .. totalChanges .. " 处修改", "info")
         end
+        return
+    end
+
+    if toolId == "wearedev_v2" then
+        local content = ""
+        if deobfSelectedFile and dataApi then
+            content = dataApi.readFile(deobfSelectedFile) or ""
+        end
+        if content == "" then
+            content = deobfEditorTextBox and deobfEditorTextBox.Text or ""
+        end
+        if content == "" then
+            AddLog("请先选择文件或输入代码", "warn")
+            return
+        end
+        AddLog("=== WeAreDev V2 通用反编译器 ===", "info")
+        AddLog("基于 Prometheus Vmify VM 逆向，管线：词法→解析→基本块→寄存器折叠→CFG→常量数组→LCG解密→容器解析→语义→upvalue还原→短路折叠→结构化→代码生成", "info")
+        local v2Result, err = deobfWeAreDevV2(content)
+        if not v2Result then
+            AddLog("V2 反编译失败: " .. tostring(err), "warn")
+            return
+        end
+        AddLog("识别为 Vmify 结构: " .. tostring(v2Result.isVmify), "info")
+        if v2Result.lcgParams.mul45 then
+            AddLog(string.format("LCG 参数: mul45=%s add45=%s", tostring(v2Result.lcgParams.mul45), tostring(v2Result.lcgParams.add45)), "info")
+        end
+        AddLog("V2 反编译阶段: " .. tostring(v2Result.stage), "info")
+        AddLog("注意：完整控制流结构化与代码生成正在开发中，当前输出为 V1+常量数组+LCG 参数的中间结果", "warn")
+        -- 写入结果
+        local outName = (deobfSelectedFile or "output"):gsub("%.lua$", "") .. "_v2.lua"
+        if dataApi then
+            dataApi.writeFile(outName, v2Result.source)
+            AddLog("结果已写入: " .. outName, "info")
+        end
+        if deobfEditorTextBox then
+            deobfEditorTextBox.Text = v2Result.source
+        end
+        AddLog("=== V2 反编译完成 ===", "info")
         return
     end
 

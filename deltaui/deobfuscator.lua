@@ -3470,11 +3470,21 @@ local function brute_key8(mul45, add45, mul8, pairs)
     end
     return false
   end
-  local _common_pat = "[%p%d%a，。！？：；、的一是在有和等不了人我他这中大为上个国以到说们要你会着没那好自也很去时过家学只如起把还多小都就她从想实看正心样仍比或但质气第向道命此变条没结解问意建月青边红听则完却千吃做叫当住给活走先师写快]"
+  local _common_chars = {}
+  for _, c in ipairs({"，","。","！","？","：","；","、","的","一","是","在","有","和","等","不","了","人","我","他","这","中","大","为","上","个","国","以","到","说","们","要","你","会","着","没","那","好","自","也","很","去","时","过","家","学","只","如","起","把","还","多","小","都","就","她","从","想","实","看","正","心","样","仍","比","或","但","质","气","第","向","道","命","此","变","条","结","解","问","意","建","月","青","边","红","听","则","完","却","千","吃","做","叫","当","住","给","活","走","先","师","写","快","功","能","正","常","暴","力","升","级","声","誉","自","动","开","关","文","件","保","存","删","除","选","择","确","定","取","消","完","成","失","败","错","误","警","告","提","示","信","息","代","码","脚","本","模","块","页","面","工","具","菜","单","按","钮","标","题","内","容","数","据","变","量","函","数","循","环","条","件","返","回","调","用","引","用","声","明","定","义","声","明"}) do
+    _common_chars[c] = true
+  end
   local function _meaning_score(s)
     local sc = 0
-    for _ in s:gmatch(_common_pat) do sc = sc + 0.1 end
-    return math.min(sc, 1.0)
+    local ok, err = pcall(function()
+      for p, c in utf8.codes(s) do
+        local ch = utf8.char(c)
+        if _common_chars[ch] then sc = sc + 0.3 end
+        if c >= 32 and c <= 126 then sc = sc + 0.1 end
+        if c >= 0x4E00 and c <= 0x9FFF then sc = sc + 0.05 end
+      end
+    end)
+    return math.min(sc, 3.0)
   end
   for k = 0, 255 do
     local d = LcgDecryptor_new(mul45, add45, mul8, k)
@@ -4269,6 +4279,8 @@ local function simplify_block(stats, posvar, retvar, decrypt, special_globals, i
         if name == posvar then
           out[#out+1] = {"setvar", name, val}
           known[name] = nil
+        elseif not special_globals[name] and isAst(val) and (val[1] == "num" or val[1] == "str") and not expr_has_call(val) then
+          known[name] = val
         elseif role[name] == "temp" and not special_globals[name] then
           local plain = try_decrypt(val, decrypt)
           if plain ~= nil then
@@ -4299,6 +4311,53 @@ local function simplify_block(stats, posvar, retvar, decrypt, special_globals, i
       out[#out+1] = {"return", rhs}
     elseif k == "callstmt" then
       out[#out+1] = {"callstmt", sub(st[2])}
+    elseif k == "setvar" then
+      local name = st[2]
+      local val = sub(st[3])
+      if name == posvar then
+        out[#out+1] = {"setvar", name, val}
+        known[name] = nil
+      elseif not special_globals[name] and isAst(val) and (val[1] == "num" or val[1] == "str") and not expr_has_call(val) then
+        known[name] = val
+      elseif role[name] == "temp" and not special_globals[name] then
+        local plain = try_decrypt(val, decrypt)
+        if plain ~= nil then
+          known[name] = {"str", plain}
+        elseif expr_has_call(val) then
+          out[#out+1] = {"setvar", name, val}
+          known[name] = nil
+        elseif isAst(val) and val[1] == "table" then
+          out[#out+1] = {"setvar", name, val}
+          known[name] = nil
+        else
+          known[name] = val
+        end
+      else
+        out[#out+1] = {"setvar", name, val}
+        known[name] = nil
+      end
+    elseif k == "let" then
+      local name = st[2]
+      local val = sub(st[3])
+      if not special_globals[name] and isAst(val) and (val[1] == "num" or val[1] == "str") and not expr_has_call(val) then
+        known[name] = val
+      elseif role[name] == "temp" and not special_globals[name] then
+        local plain = try_decrypt(val, decrypt)
+        if plain ~= nil then
+          known[name] = {"str", plain}
+        elseif expr_has_call(val) then
+          out[#out+1] = {"let", name, val}
+          known[name] = nil
+        elseif isAst(val) and val[1] == "table" then
+          out[#out+1] = {"let", name, val}
+          known[name] = nil
+        else
+          known[name] = val
+        end
+      else
+        out[#out+1] = {"let", name, val}
+        known[name] = nil
+      end
     else
       out[#out+1] = st
     end

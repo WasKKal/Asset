@@ -198,8 +198,16 @@ local function deobfHouseSaveNow()
         pcall(task.cancel, deobfHouseSaveTimer)
         deobfHouseSaveTimer = nil
     end
+    -- 获取完整内容（处理分页显示的情况）
+    local fullContent = cb.Text
+    if _G.__DeltaUI_getCurrentTabFullContent then
+        local ok, content = pcall(_G.__DeltaUI_getCurrentTabFullContent)
+        if ok and content and #content > 0 then
+            fullContent = content
+        end
+    end
     pcall(function()
-        dataApi.writeFile(fileName, cb.Text)
+        dataApi.writeFile(fileName, fullContent)
     end)
 end
 
@@ -226,8 +234,16 @@ local function deobfSetupHouseSync()
         end
         deobfHouseSaveTimer = task.delay(0.3, function()
             deobfHouseSaveTimer = nil
+            -- 获取完整内容（处理分页显示的情况）
+            local fullContent = cb.Text
+            if _G.__DeltaUI_getCurrentTabFullContent then
+                local ok, content = pcall(_G.__DeltaUI_getCurrentTabFullContent)
+                if ok and content and #content > 0 then
+                    fullContent = content
+                end
+            end
             pcall(function()
-                dataApi.writeFile(fileName, cb.Text)
+                dataApi.writeFile(fileName, fullContent)
             end)
         end)
     end)

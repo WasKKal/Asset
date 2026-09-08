@@ -454,8 +454,15 @@ local function deobfRefreshFileList()
     end
     deobfFileItems = {}
 
+    local oldFiles = {}
+    for _, f in ipairs(deobfFiles) do table.insert(oldFiles, f) end
     deobfFiles = deobfLoadFiles()
     local count = #deobfFiles
+
+    if count == 0 and #oldFiles > 0 then
+        deobfFiles = oldFiles
+        count = #deobfFiles
+    end
 
     if count == 0 then
         local EMPTY_H = 130
@@ -792,8 +799,9 @@ local function deobfCreateNewFile()
                 table.insert(deobfFiles, fname)
                 table.sort(deobfFiles, function(a, b) return a:lower() < b:lower() end)
             end
+            pcall(function() deobfRefreshFileList() end)
             task.spawn(function()
-                task.wait(0.15)
+                task.wait(0.3)
                 pcall(function() deobfRefreshFileList() end)
             end)
         else
@@ -6400,6 +6408,7 @@ local function buildUI()
         Size = UDim2.new(1, 0, 0, 44),
         Position = UDim2.new(0, 0, 0, 0),
         BackgroundTransparency = 1,
+        ClipsDescendants = true,
         ZIndex = 4,
     })
     leftHeader.Parent = deobfLeftPanel

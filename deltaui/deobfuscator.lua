@@ -5644,7 +5644,7 @@ local function eliminate_runtime_code(body, R)
     if e[1] == "str" and type(e[2]) == "string" then
       local s = e[2]
       -- 非ASCII字符（中文字符串等）
-      if s:find("[^\x20-\x7e]") then return true end
+      if s:find("[^ -~]") then return true end
       -- 用户定义的ASCII字符串特征
       local user_str_patterns = {
         "DeltaUI", "rbxassetid", "rbxasset", "http", "https",
@@ -6318,11 +6318,11 @@ function M.extract_user_code(decompiled)
     "tostring", "tonumber", "type%(", "select%(", "unpack",
     "rawget", "rawset", "rawequal", "pairs", "ipairs", "next",
     "bit32%.%a+", "coroutine%.%a+",
-    "%[v%]%(\"[^\"]*[\x80-\xff][^\"]*\"%s*,%s*%d",
-    "%[W%]%(\"[^\"]*[\x80-\xff][^\"]*\"%s*,%s*%d",
-    "%[X%]%(\"[^\"]*[\x80-\xff][^\"]*\"%s*,%s*%d",
-    "%[f%]%(\"[^\"]*[\x80-\xff][^\"]*\"%s*,%s*%d",
-    "^%s*%u%s*=%s*%u%(\"[^\"]*[\x00-\x1f\x80-\xff][^\"]*\"%s*,%s*%d+%)",
+    "%[v%]%(\"[^\"]*[\128-\255][^\"]*\"%s*,%s*%d",
+    "%[W%]%(\"[^\"]*[\128-\255][^\"]*\"%s*,%s*%d",
+    "%[X%]%(\"[^\"]*[\128-\255][^\"]*\"%s*,%s*%d",
+    "%[f%]%(\"[^\"]*[\128-\255][^\"]*\"%s*,%s*%d",
+    "^%s*%u%s*=%s*%u%(\"[^\"]*[\000-\031\128-\255][^\"]*\"%s*,%s*%d+%)",
     -- 上值函数调用（如 a[M[1]](、a[l](、U(K)(等）
     "%a%[M%[%d+%]%]%(",
     "%a%[%l%]%(",
@@ -6356,7 +6356,7 @@ function M.extract_user_code(decompiled)
     "Button", "Dropdown", "Input", "Paragraph", "Section",
     "setLoop", "CreateWindow",
     -- 中文字符串（但需要排除字符串解密调用）
-    "[^\x20-\x7e]",
+    "[^ -~]",
   }
   
   -- 严格的用户代码识别：必须包含明确的用户代码调用，或者包含中文字符串且不包含运行时代码特征
@@ -6406,9 +6406,9 @@ function M.extract_user_code(decompiled)
       if line:find(pat) then return true end
     end
     -- 中文字符串（排除字符串解密调用和运行时函数定义）
-    if line:find("[^\x20-\x7e]") then
+    if line:find("[^ -~]") then
       -- 排除字符串解密调用（如 g("xxx", num)、a[l]("xxx", num)等）
-      if line:find("^%s*%u+%s*=%s*%u+%(\"[^\"]*[\x00-\x1f\x80-\xff][^\"]*\"%s*,%s*%d+%)") then
+      if line:find("^%s*%u+%s*=%s*%u+%(\"[^\"]*[\000-\031\128-\255][^\"]*\"%s*,%s*%d+%)") then
         return false
       end
       -- 排除运行时函数定义（如 local z = function()、local x = function()等）

@@ -6499,13 +6499,13 @@ function M.extract_user_code(decompiled)
   
   -- 第一步：标记所有包含用户特征的行
   local user_marks = {}
-  for i, line in ipairs(lines) do
+  local function process_mark(i, line)
     local trimmed = line:match("^%s*(.-)%s*$")
-    if #trimmed == 0 then goto continue_mark end
+    if #trimmed == 0 then return end
     
     local simplified = simplify(trimmed)
-    if #simplified == 0 then goto continue_mark end
-    if not is_valid(simplified) then goto continue_mark end
+    if #simplified == 0 then return end
+    if not is_valid(simplified) then return end
     
     local user = has_user_strict(simplified)
     local runtime = is_runtime(simplified)
@@ -6513,8 +6513,9 @@ function M.extract_user_code(decompiled)
     if user and not runtime then
       user_marks[i] = true
     end
-    
-    ::continue_mark::
+  end
+  for i, line in ipairs(lines) do
+    process_mark(i, line)
   end
   
   -- 第二步：扩展上下文（保留用户特征行前后的相关代码，包括函数定义和控制流结构）
@@ -6567,15 +6568,15 @@ function M.extract_user_code(decompiled)
   end
   
   -- 第四步：提取扩展后的行，过滤掉纯运行时代码
-  for i, line in ipairs(lines) do
-    if not extended_marks[i] then goto continue_extract end
+  local function process_extract(i, line)
+    if not extended_marks[i] then return end
     
     local trimmed = line:match("^%s*(.-)%s*$")
-    if #trimmed == 0 then goto continue_extract end
+    if #trimmed == 0 then return end
     
     local simplified = simplify(trimmed)
-    if #simplified == 0 then goto continue_extract end
-    if not is_valid(simplified) then goto continue_extract end
+    if #simplified == 0 then return end
+    if not is_valid(simplified) then return end
     
     -- 过滤掉纯运行时代码（但保留用户特征行和函数定义/控制流结构）
     if not user_marks[i] and is_runtime(simplified) then
@@ -6585,7 +6586,7 @@ function M.extract_user_code(decompiled)
               simplified:find("^if .* then$") or simplified:find("^while .* do$") or
               simplified:find("^for .* do$") or simplified == "else" or
               simplified:find("^elseif .* then$") or simplified:find("^until .*$")) then
-        goto continue_extract
+        return
       end
     end
     
@@ -6593,8 +6594,9 @@ function M.extract_user_code(decompiled)
       seen[simplified] = true
       table.insert(user_lines, simplified)
     end
-    
-    ::continue_extract::
+  end
+  for i, line in ipairs(lines) do
+    process_extract(i, line)
   end
   
   return table.concat(user_lines, "\n")

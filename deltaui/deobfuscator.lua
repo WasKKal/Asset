@@ -5929,12 +5929,12 @@ function M.extract_user_code(decompiled)
       "GetService", "game%.HttpGet", "loadstring",
       -- 玩家属性访问
       "LocalPlayer", "Character", "Humanoid", "ReplicatedStorage", "Workspace",
-      "Players", "VirtualUser",
+      "Players", "VirtualUser", "UserInputService", "CoreGui",
       -- 实例方法调用
       "FindFirstChild", "FindFirstChildOfClass", "IsA", "GetChildren", "GetDescendants",
       "WaitForChild", "Clone", "Destroy",
       -- Roblox API
-      "Vector2", "Vector3", "CFrame", "Color3", "ColorSequence", "UDim2",
+      "Vector2", "Vector3", "CFrame", "Color3", "ColorSequence", "UDim2", "UDim",
       "Enum", "Instance%.new",
       -- 远程事件
       "RemoteEvent", "RemoteFunction", "rEvents",
@@ -5942,6 +5942,24 @@ function M.extract_user_code(decompiled)
       "petsFolder", "PetShop", "cPetShop", "Backpack", "Tool",
       -- 任务/循环
       "task%.delay", "coroutine%.wrap",
+      -- Roblox UI组件
+      "ScreenGui", "Frame", "TextLabel", "TextButton", "ScrollingFrame",
+      "UIListLayout", "UICorner", "UIGridLayout", "UIStroke", "UIPadding",
+      -- 输入事件
+      "InputBegan", "InputChanged", "InputEnded", "MouseButton1Click",
+      "MouseButton1Down", "MouseButton1Up", "MouseEnter", "MouseLeave",
+      -- 衣服/角色
+      "Shirt", "Pants", "ShirtTemplate", "PantsTemplate", "rbxassetid",
+      "HumanoidRootPart", "Torso",
+      -- UI属性
+      "BackgroundColor3", "BorderSizePixel", "ClipsDescendants",
+      "TextColor3", "TextSize", "TextXAlignment", "TextYAlignment",
+      "ZIndexBehavior", "CornerRadius", "CanvasSize", "ScrollBarThickness",
+      "ScrollingDirection", "Padding", "HorizontalAlignment", "VerticalAlignment",
+      "AutoLocalize", "BackgroundTransparency", "TextTransparency",
+      -- 通用属性
+      "Size", "Position", "Parent", "Name", "Visible", "Active",
+      "AutoButtonColor", "ZIndex",
     }
     for _, pat in ipairs(explicit_user) do
       if line:find(pat) then return true end
@@ -6152,6 +6170,11 @@ function M.deobfWeAreDevClean(code)
 end
 
 -- 全局导出（兼容 dofile 后直接调用）
+deobfWeAreDevFull = M.deobfWeAreDevFull
+extract_user_code = M.extract_user_code
+deobfWeAreDevClean = M.deobfWeAreDevClean
+
+
 deobfWeAreDevFull = M.deobfWeAreDevFull
 extract_user_code = M.extract_user_code
 deobfWeAreDevClean = M.deobfWeAreDevClean

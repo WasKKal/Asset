@@ -59,8 +59,6 @@ local function deobfSanitizeTypeAnnotations(src)
     for _, line in ipairs(deobfSplitLines(src)) do
         local s = line
 
-
-
         s = s:gsub("%)%s*:%s*%d[%d%.]*", ")")
 
         s = s:gsub(":%s*%d[%d%.]*", function(m)
@@ -249,7 +247,6 @@ local function deobfSetupHouseSync()
         end
     end)
 end
-
 
 local function deobfOpenInHouseEditor(name, content)
     name = tostring(name or "untitled")
@@ -730,7 +727,6 @@ local function deobfHideNewFileInput(reset)
         end)
     end
 end
-
 
 local function deobfCreateNewFile()
     if deobfCreatingFile then return end
@@ -1800,7 +1796,6 @@ local WEAREDEV_RUNTIME_GLOBALS = {
     string = true, table = true, math = true, os = true, coroutine = true, io = true,
 }
 
--- 全能沙箱执行器：所有操作不报错，所有调用被记录
 local function deobfCreateSandbox()
     local trace = {}
     local traceCount = 0
@@ -2036,7 +2031,6 @@ local function deobfTraceVMStates(code)
     return states, uniqueCount, result.count
 end
 
--- ==================== V2 反编译器核心模块（词法/解析/AST/base64/LCG） ====================
 local function deobfLex(src)
     local toks = {}
     local i = 1
@@ -2314,32 +2308,26 @@ function deobfLcg:decrypt(encBytes, seed)
     return out
 end
 
---[[
-WeAreDev V2 通用反编译器（基于 Prometheus Vmify VM 逆向）
-核心模块已内联到本文件：deobfLex（词法）、deobfParser（解析）、deobfEvalConst（常量折叠）、
-deobfExprLua（表达式渲染）、deobfB64Decode（base64解码）、deobfLcg（LCG字符串解密器）
-完整 Python 参考原型见仓库 prom_decomp/ 目录
-]]
 local function deobfWeAreDevV2(code)
     if type(code) ~= "string" or #code == 0 then return nil, "空代码" end
-    -- 阶段1：检测是否为 WeAreDev/Prometheus Vmify 结构
+    
     local isVmify = code:match("wearedev%.net/obfuscator") ~= nil or code:match("Tamper Detected") ~= nil
     if not isVmify then
         return nil, "未识别为 WeAreDev Vmify 结构"
     end
-    -- 阶段2：常量数组检测与恢复（V1 已验证的算法）
+    
     local v1Result, v1Stats = deobfWeAreDevV1(code)
-    -- 阶段3：LCG 字符串解密参数提取
+    
     local mul45, add45, mul8 = nil, nil, nil
     if code:match("35184372088832") then
-        -- 提取 LCG 参数（魔数定位）
+        
         for m, a in code:gmatch("(%d+)%s*%*%s*[%w_]+%s*%+%s*(%d+)") do
             if tonumber(m) and tonumber(m) % 4 == 1 and tonumber(a) and tonumber(a) % 2 == 1 then
                 mul45 = tonumber(m); add45 = tonumber(a); break
             end
         end
     end
-    -- 阶段4：返回中间结果（完整反编译在 Python 原型中验证，Lua 版持续开发中）
+    
     local result = {
         source = v1Result or code,
         stage = "v2_pipeline_partial",
@@ -3090,7 +3078,6 @@ local function deobfRunTool(toolId)
             AddLog("未识别为 WeAreDev v1.0 结构（缺 64 键字母表或常量数组），仅执行后续通用清理", "warn")
         end
 
-        -- 沙箱执行：从运行轨迹中提取解码字符串和外部行为
         AddLog("沙箱执行追踪（全能代理环境，不触发真实游戏 API）...", "info")
         local sandboxResult = deobfSandboxExecute(content)
         local sandboxDecoded = deobfExtractDecodedStrings(sandboxResult.trace)
@@ -3102,12 +3089,11 @@ local function deobfRunTool(toolId)
             AddLog("  沙箱解码字符串 " .. #sandboxDecoded .. " 条: " .. table.concat(sandboxDecoded, ", "):sub(1, 300), "info")
         end
 
-        -- VM 状态追踪：在 while 循环中插入 string.len 标记，从沙箱轨迹提取状态转换序列
         AddLog("VM 状态追踪（控制流扁平化还原）...", "info")
         local vmStates, vmUniqueCount, vmTraceCount = deobfTraceVMStates(content)
         if vmStates and #vmStates > 0 then
             AddLog(string.format("  捕获 %d 个状态转换，%d 个唯一状态，%d 条轨迹", #vmStates, vmUniqueCount, vmTraceCount), "info")
-            -- 检测循环结构（交替出现的状态对）
+            
             local loops = {}
             for i = 1, #vmStates - 1 do
                 if vmStates[i] ~= vmStates[i+1] then
@@ -3120,7 +3106,7 @@ local function deobfRunTool(toolId)
                     AddLog("  检测到循环: " .. pair .. " (迭代" .. count .. "次)", "info")
                 end
             end
-            -- 输出前20个状态
+            
             local stateSample = {}
             for i = 1, math.min(20, #vmStates) do
                 stateSample[#stateSample + 1] = vmStates[i]
@@ -3144,7 +3130,6 @@ local function deobfRunTool(toolId)
         deobfResult = r3
         totalChanges = totalChanges + c3
         if c3 > 0 then AddLog("分割字符串合并: " .. c3 .. " 处", "info") end
-
 
         local r4, c4 = deobfUnwrapFunction(deobfResult)
         deobfResult = r4
@@ -3230,7 +3215,7 @@ local function deobfRunTool(toolId)
         end
         AddLog("V2 反编译阶段: " .. tostring(v2Result.stage), "info")
         AddLog("注意：完整控制流结构化与代码生成正在开发中，当前输出为 V1+常量数组+LCG 参数的中间结果", "warn")
-        -- 写入结果
+        
         local outName = (deobfSelectedFile or "output"):gsub("%.lua$", "") .. "_v2.lua"
         if dataApi then
             dataApi.writeFile(outName, v2Result.source)
@@ -3828,10 +3813,6 @@ function pageDef.build(frame, helpers)
         deobfNotify = helpers.ShowNotification
     end
 
-
-
-
-
     local function tryCompile(src)
         return loadstring(src, "@deobfuscator")
     end
@@ -3845,7 +3826,6 @@ function pageDef.build(frame, helpers)
             local cur = src
             local changed = false
 
-
             if e:find("Expected type", 1, true) then
                 local cleaned = deobfSanitizeTypeAnnotations(cur)
                 if cleaned ~= cur then
@@ -3853,7 +3833,6 @@ function pageDef.build(frame, helpers)
                     changed = true
                 end
             end
-
 
             if e:find("const variable", 1, true) or e:find("Expected type", 1, true) then
                 local fixed = deobfFixForInConstAssign(cur)

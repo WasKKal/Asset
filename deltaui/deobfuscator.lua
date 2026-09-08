@@ -7251,9 +7251,91 @@ function M.is_runtime_stmt_pattern(stmt)
         assert = true, setmetatable = true, getmetatable = true,
         rawget = true, rawset = true, rawequal = true,
         pairs = true, ipairs = true, next = true,
+        l = true,  -- 上值解析函数
       }
       if runtime_call_funcs[fn[2]] then
         return true
+      end
+    end
+  end
+  
+  -- 7. 上值解析函数调用：setvar X, {call, {var, l}, {{var, X}}}
+  if k == "setvar" and type(stmt[3]) == "table" and stmt[3][1] == "call" then
+    local fn = stmt[3][2]
+    if type(fn) == "table" and fn[1] == "var" and fn[2] == "l" then
+      return true
+    end
+  end
+  
+  -- 8. 上值表函数调用：setvar X, {call, {index, ...}, ...}
+  if k == "setvar" and type(stmt[3]) == "table" and stmt[3][1] == "call" then
+    local fn = stmt[3][2]
+    if type(fn) == "table" and fn[1] == "index" then
+      return true
+    end
+  end
+  
+  -- 9. 表创建：setvar X, {table, ...}
+  if k == "setvar" and type(stmt[3]) == "table" and stmt[3][1] == "table" then
+    return true
+  end
+  
+  -- 10. 变量赋值：setvar X, {var, Y}
+  if k == "setvar" and type(stmt[3]) == "table" and stmt[3][1] == "var" then
+    return true
+  end
+  
+  -- 11. 简单值赋值：setvar X, {false/true/nil/num/boolean}
+  if k == "setvar" and type(stmt[3]) == "table" then
+    local vk = stmt[3][1]
+    if vk == "false" or vk == "true" or vk == "nil" or vk == "num" or vk == "boolean" then
+      return true
+    end
+  end
+  
+  -- 12. 运行时函数调用：setvar X, {call, {var, tonumber/tostring/...}, ...}
+  if k == "setvar" and type(stmt[3]) == "table" and stmt[3][1] == "call" then
+    local fn = stmt[3][2]
+    if type(fn) == "table" and fn[1] == "var" then
+      local runtime_call_funcs = {
+        pcall = true, xpcall = true, tostring = true, tonumber = true,
+        type = true, select = true, unpack = true, error = true,
+        assert = true, setmetatable = true, getmetatable = true,
+        rawget = true, rawset = true, rawequal = true,
+        pairs = true, ipairs = true, next = true,
+        l = true,
+      }
+      if runtime_call_funcs[fn[2]] then
+        return true
+      end
+    end
+  end
+  
+  -- 13. 多变量赋值+函数调用：assign {{var, X}, {var, Y}}, {{call, ...}}
+  if k == "assign" and type(stmt[2]) == "table" and #stmt[2] >= 2 then
+    local all_vars = true
+    for i = 1, #stmt[2] do
+      if type(stmt[2][i]) ~= "table" or stmt[2][i][1] ~= "var" then
+        all_vars = false
+      end
+    end
+    if all_vars and type(stmt[3]) == "table" and #stmt[3] >= 1 then
+      local first_rhs = stmt[3][1]
+      if type(first_rhs) == "table" and first_rhs[1] == "call" then
+        return true
+      end
+    end
+  end
+  
+  -- 14. 索引赋值：assign {{index, {var, X}, {var, Y}}}, {{var, Z}}
+  if k == "assign" and type(stmt[2]) == "table" and #stmt[2] == 1 then
+    local lhs = stmt[2][1]
+    if type(lhs) == "table" and lhs[1] == "index" then
+      if type(stmt[3]) == "table" and #stmt[3] == 1 then
+        local rhs = stmt[3][1]
+        if type(rhs) == "table" and rhs[1] == "var" then
+          return true
+        end
       end
     end
   end

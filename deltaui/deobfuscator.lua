@@ -5864,6 +5864,16 @@ function M.extract_user_code(decompiled)
     "^%s*%u%s*=%s*%u%(\"[^\"]*[\x00-\x1f\x80-\xff][^\"]*\"%s*,%s*%d+%)",
   }
   
+  -- 用户代码特征
+  local user_patterns = {
+    "[^\x20-\x7e]",  -- 非ASCII字符（中文等）
+    "print%(", "warn%(",
+    "FireServer", "task%.spawn", "task%.wait",
+    "WindUI", "CreateWindow", "Toggle", "Tab",
+    "while .* do", "if .* then", "for .* do",
+    "function%(",
+  }
+  
   local function is_runtime(line)
     for _, pat in ipairs(runtime_patterns) do
       if line:find(pat) then return true end
@@ -5872,14 +5882,54 @@ function M.extract_user_code(decompiled)
   end
   
   local function has_user(line)
-    if line:find("[^\x20-\x7e]") then return true end
-    if line:find("print%(") or line:find("warn%(") then return true end
+    for _, pat in ipairs(user_patterns) do
+      if line:find(pat) then return true end
+    end
     return false
+  end
+  
+  -- 简化用户代码表达式
+  local function simplify(line)
+    -- P[W[2]].FireServer(W[2]) -> FireServer()
+    line = line:gsub("P%[W%[%d+%]%]%.FireServer%([^%)]*%)", "FireServer()")
+    -- task[P[W[3]].wait]() -> task.wait()
+    line = line:gsub("task%[P%[W%[%d+%]%]%.wait%]%(?[^%)]*%)?", "task.wait()")
+    line = line:gsub("task%[P%[%u%]%.wait%]%(?[^%)]*%)?", "task.wait()")
+    -- task[P[k].spawn](b) -> task.spawn(b)
+    line = line:gsub("task%[P%[%u%]%.spawn%]%(([^%)]*)%)", "task.spawn(%1)")
+    -- e.Toggle(e, u) -> Toggle(u)
+    line = line:gsub("%a+:Toggle%([^,]+,%s*", "Toggle(")
+    -- e.Tab(e, u) -> Tab(u)
+    line = line:gsub("%a+:Tab%([^,]+,%s*", "Tab(")
+    -- WindUI:CreateWindow({...}) -> CreateWindow({...})
+    line = line:gsub("%a+:CreateWindow%(", "CreateWindow(")
+    -- 移除repeat...until true包装（continue语句）
+    line = line:gsub("^%s*repeat%s*$", "")
+    line = line:gsub("^%s*until true%s*$", "")
+    line = line:gsub("^%s*break%s*$", "")
+    -- 移除local B = 前缀（临时变量）
+    line = line:gsub("^%s*local %u = ", "")
+    -- 移除空行
+    line = line:match("^%s*(.-)%s*$")
+    return line
+  end
+  
+  -- 过滤无效代码行
+  local function is_valid(line)
+    if #line == 0 then return false end
+    -- 过滤单独的function()（没有函数体）
+    if line == "function()" then return false end
+    -- 过滤运行时字符串解密调用
+    if line:find("^%u+ = [A-Z]+%[%u+%]%(\"") then return false end
+    -- 过滤无效的FireServer())
+    if line:find("^FireServer%)%)$") then return false end
+    -- 过滤只有else/end的行（在块提取中会处理）
+    return true
   end
   
   -- 识别函数定义和控制流
   local function is_func_def(line)
-    return line:find("^%s*local function %u+%(") or line:find("^%s*function %u+%(")
+    return line:find("^%s*local function %u+%(") or line:find("^%s*function %u+%(") or line:find("^%s*local %u+ = function%(")
   end
   
   local function is_control_start(line)
@@ -5896,25 +5946,28 @@ function M.extract_user_code(decompiled)
   local user_blocks = {}
   local current_block = {}
   local in_user_block = false
-  local brace_depth = 0
   
   for i, line in ipairs(lines) do
     local trimmed = line:match("^%s*(.-)%s*$")
     if #trimmed == 0 then goto continue end
     
-    local user = has_user(trimmed)
-    local runtime = is_runtime(trimmed)
+    local simplified = simplify(trimmed)
+    if #simplified == 0 then goto continue end
+    if not is_valid(simplified) then goto continue end
+    
+    local user = has_user(simplified)
+    local runtime = is_runtime(simplified)
     
     if user and not runtime then
       if not in_user_block then
         in_user_block = true
         current_block = {}
       end
-      table.insert(current_block, trimmed)
+      table.insert(current_block, simplified)
     elseif in_user_block then
       -- 检查是否是控制流结构的一部分
-      if is_func_def(trimmed) or is_control_start(trimmed) or is_control_end(trimmed) then
-        table.insert(current_block, trimmed)
+      if is_func_def(simplified) or is_control_start(simplified) or is_control_end(simplified) then
+        table.insert(current_block, simplified)
       else
         -- 结束当前块
         if #current_block > 0 then
@@ -5956,6 +6009,11 @@ function M.deobfWeAreDevClean(code)
 end
 
 -- 全局导出（兼容 dofile 后直接调用）
+deobfWeAreDevFull = M.deobfWeAreDevFull
+extract_user_code = M.extract_user_code
+deobfWeAreDevClean = M.deobfWeAreDevClean
+
+
 deobfWeAreDevFull = M.deobfWeAreDevFull
 extract_user_code = M.extract_user_code
 deobfWeAreDevClean = M.deobfWeAreDevClean

@@ -6019,7 +6019,7 @@ function M.extract_user_code(decompiled)
   -- 提取用户代码块（上下文感知：保留用户特征行前后的相关代码）
   local user_lines = {}
   local seen = {}
-  local context_range = 3  -- 保留用户特征行前后3行的上下文
+  local context_range = 5  -- 保留用户特征行前后5行的上下文
   
   -- 第一步：标记所有包含用户特征的行
   local user_marks = {}
@@ -6041,7 +6041,7 @@ function M.extract_user_code(decompiled)
     ::continue_mark::
   end
   
-  -- 第二步：扩展上下文（保留用户特征行前后的相关代码）
+  -- 第二步：扩展上下文（保留用户特征行前后的相关代码，包括函数定义和控制流结构）
   local extended_marks = {}
   for i, _ in pairs(user_marks) do
     for j = math.max(1, i - context_range), math.min(#lines, i + context_range) do
@@ -6049,7 +6049,48 @@ function M.extract_user_code(decompiled)
     end
   end
   
-  -- 第三步：提取扩展后的行，过滤掉纯运行时代码
+  -- 第三步：扩展函数定义和控制流结构（如果用户特征行在函数内部，保留整个函数）
+  local function expand_function_scope(start_idx)
+    local depth = 0
+    local in_function = false
+    local function_start = start_idx
+    for i = start_idx, 1, -1 do
+      local trimmed = lines[i]:match("^%s*(.-)%s*$")
+      if trimmed:find("function%(") or trimmed:find("local .* = function") or trimmed:find("local function") then
+        if depth == 0 then
+          function_start = i
+          in_function = true
+          break
+        end
+        depth = depth - 1
+      elseif trimmed == "end" then
+        depth = depth + 1
+      end
+    end
+    if in_function then
+      depth = 0
+      for i = function_start, #lines do
+        local trimmed = lines[i]:match("^%s*(.-)%s*$")
+        if trimmed:find("function%(") or trimmed:find("local .* = function") or trimmed:find("local function") then
+          depth = depth + 1
+        elseif trimmed == "end" then
+          depth = depth - 1
+          if depth == 0 then
+            for j = function_start, i do
+              extended_marks[j] = true
+            end
+            break
+          end
+        end
+      end
+    end
+  end
+  
+  for i, _ in pairs(user_marks) do
+    expand_function_scope(i)
+  end
+  
+  -- 第四步：提取扩展后的行，过滤掉纯运行时代码
   for i, line in ipairs(lines) do
     if not extended_marks[i] then goto continue_extract end
     
@@ -6060,9 +6101,16 @@ function M.extract_user_code(decompiled)
     if #simplified == 0 then goto continue_extract end
     if not is_valid(simplified) then goto continue_extract end
     
-    -- 过滤掉纯运行时代码（但保留用户特征行）
+    -- 过滤掉纯运行时代码（但保留用户特征行和函数定义/控制流结构）
     if not user_marks[i] and is_runtime(simplified) then
-      goto continue_extract
+      -- 保留函数定义和控制流结构
+      if not (simplified:find("function%(") or simplified:find("local .* = function") or 
+              simplified:find("local function") or simplified == "end" or
+              simplified:find("^if .* then$") or simplified:find("^while .* do$") or
+              simplified:find("^for .* do$") or simplified == "else" or
+              simplified:find("^elseif .* then$") or simplified:find("^until .*$")) then
+        goto continue_extract
+      end
     end
     
     if not seen[simplified] then
@@ -6087,6 +6135,11 @@ function M.deobfWeAreDevClean(code)
 end
 
 -- 全局导出（兼容 dofile 后直接调用）
+deobfWeAreDevFull = M.deobfWeAreDevFull
+extract_user_code = M.extract_user_code
+deobfWeAreDevClean = M.deobfWeAreDevClean
+
+
 deobfWeAreDevFull = M.deobfWeAreDevFull
 extract_user_code = M.extract_user_code
 deobfWeAreDevClean = M.deobfWeAreDevClean

@@ -659,8 +659,12 @@ local function deobfRefreshFileList()
             cancelLongPress()
             if deobfSelectedFile ~= fname then
                 deobfTween(row, {BackgroundColor3 = theme.surface, BackgroundTransparency = 0.4}, 0.15)
+                delBtn.Visible = false
             end
-            delBtn.Visible = false
+            -- 选中文件时删除按钮常驻显示
+            if deobfSelectedFile == fname then
+                delBtn.Visible = true
+            end
         end)
         row.MouseButton1Down:Connect(function()
             startLongPress()
@@ -672,9 +676,21 @@ local function deobfRefreshFileList()
                     if fn == fname then
                         r.BackgroundColor3 = theme.accent
                         r.BackgroundTransparency = 0.75
+                        -- 选中文件时删除按钮常驻显示
+                        for _, child in ipairs(r:GetChildren()) do
+                            if child:IsA("TextButton") and child.Name ~= "" then
+                                child.Visible = true
+                            end
+                        end
                     else
                         r.BackgroundColor3 = theme.surface
                         r.BackgroundTransparency = 0.4
+                        -- 非选中文件时隐藏删除按钮
+                        for _, child in ipairs(r:GetChildren()) do
+                            if child:IsA("TextButton") and child.Name ~= "" then
+                                child.Visible = false
+                            end
+                        end
                     end
                 end
             end
@@ -695,6 +711,8 @@ local function deobfRefreshFileList()
         if deobfSelectedFile == fname then
             row.BackgroundColor3 = theme.accent
             row.BackgroundTransparency = 0.75
+            -- 选中文件时删除按钮常驻显示
+            delBtn.Visible = true
         end
 
         row.Parent = deobfFileList

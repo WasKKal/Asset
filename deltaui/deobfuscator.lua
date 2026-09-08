@@ -2330,6 +2330,9 @@ deobfExprLua（表达式渲染）、deobfB64Decode（base64解码）、deobfLcg�
 -- ============================================================
 -- ============================================================
 -- prom_decomp.lua — Prometheus Vmify 完整反编译器（内联）
+-- prom_decomp.lua — Prometheus Vmify 反编译器（Lua 5.3 / Luau 自包含模块）
+-- 提供 deobfWeAreDevFull(code) -> 反编译后的 Lua 源码字符串
+
 local M = {}
 
 -- ============================================================
@@ -5633,6 +5636,13 @@ local function CodeGen_new(decompiler, param_names, indent)
     body = eliminate_runtime_code(body, self.dc.R)
     return table.concat(self:_stmts(body, 0), "\n")
   end
+  function self:gen_top_ir()
+    local narg, body, rest, reach = self.dc:decompile_func(self.dc.top)
+    return body
+  end
+  function self:gen_from_ir(body)
+    return table.concat(self:_stmts(body, 0), "\n")
+  end
   return self
 end
 
@@ -5831,8 +5841,10 @@ end
 
 -- 用户代码提取器：从反编译输出中提取并去重用户代码
 function M.extract_user_code(decompiled)
-  local user_lines = {}
-  local seen = {}
+  local lines = {}
+  for line in decompiled:gmatch("[^\n]+") do
+    table.insert(lines, line)
+  end
   
   -- 运行时代码特征
   local runtime_patterns = {
@@ -5845,46 +5857,92 @@ function M.extract_user_code(decompiled)
     "tostring", "tonumber", "type%(", "select%(", "unpack",
     "rawget", "rawset", "rawequal", "pairs", "ipairs", "next",
     "bit32%.%a+", "coroutine%.%a+",
-    -- 明确的字符串解密调用（A[v]("加密字符串", 数字)）
     "%[v%]%(\"[^\"]*[\x80-\xff][^\"]*\"%s*,%s*%d",
     "%[W%]%(\"[^\"]*[\x80-\xff][^\"]*\"%s*,%s*%d",
     "%[X%]%(\"[^\"]*[\x80-\xff][^\"]*\"%s*,%s*%d",
     "%[f%]%(\"[^\"]*[\x80-\xff][^\"]*\"%s*,%s*%d",
-    -- 单字母变量调用加密字符串（f("...", num), m("...", num)等）
     "^%s*%u%s*=%s*%u%(\"[^\"]*[\x00-\x1f\x80-\xff][^\"]*\"%s*,%s*%d+%)",
   }
   
-  -- 用户代码特征
-  local user_patterns = {
-    "[^\x20-\x7e]",  -- 非ASCII字符（中文等）
-    "print%(", "warn%(",
-  }
+  local function is_runtime(line)
+    for _, pat in ipairs(runtime_patterns) do
+      if line:find(pat) then return true end
+    end
+    return false
+  end
   
-  for line in decompiled:gmatch("[^\n]+") do
+  local function has_user(line)
+    if line:find("[^\x20-\x7e]") then return true end
+    if line:find("print%(") or line:find("warn%(") then return true end
+    return false
+  end
+  
+  -- 识别函数定义和控制流
+  local function is_func_def(line)
+    return line:find("^%s*local function %u+%(") or line:find("^%s*function %u+%(")
+  end
+  
+  local function is_control_start(line)
+    return line:find("^%s*if .* then$") or line:find("^%s*while .* do$") or 
+           line:find("^%s*for .* do$") or line:find("^%s*repeat$") or
+           line:find("^%s*else$") or line:find("^%s*elseif .* then$")
+  end
+  
+  local function is_control_end(line)
+    return line:find("^%s*end$") or line:find("^%s*until .*$")
+  end
+  
+  -- 提取用户代码块
+  local user_blocks = {}
+  local current_block = {}
+  local in_user_block = false
+  local brace_depth = 0
+  
+  for i, line in ipairs(lines) do
     local trimmed = line:match("^%s*(.-)%s*$")
-    if #trimmed > 0 and #trimmed < 1000 then
-      -- 检查是否包含用户特征
-      local has_user = false
-      for _, pat in ipairs(user_patterns) do
-        if trimmed:find(pat) then has_user = true; break end
+    if #trimmed == 0 then goto continue end
+    
+    local user = has_user(trimmed)
+    local runtime = is_runtime(trimmed)
+    
+    if user and not runtime then
+      if not in_user_block then
+        in_user_block = true
+        current_block = {}
       end
-      
-      if has_user and not seen[trimmed] then
-        -- 排除运行时代码
-        local is_runtime = false
-        for _, pat in ipairs(runtime_patterns) do
-          if trimmed:find(pat) then is_runtime = true; break end
+      table.insert(current_block, trimmed)
+    elseif in_user_block then
+      -- 检查是否是控制流结构的一部分
+      if is_func_def(trimmed) or is_control_start(trimmed) or is_control_end(trimmed) then
+        table.insert(current_block, trimmed)
+      else
+        -- 结束当前块
+        if #current_block > 0 then
+          table.insert(user_blocks, table.concat(current_block, "\n"))
         end
-        
-        if not is_runtime then
-          seen[trimmed] = true
-          table.insert(user_lines, trimmed)
-        end
+        in_user_block = false
+        current_block = {}
       end
+    end
+    
+    ::continue::
+  end
+  
+  if in_user_block and #current_block > 0 then
+    table.insert(user_blocks, table.concat(current_block, "\n"))
+  end
+  
+  -- 去重
+  local seen = {}
+  local unique_blocks = {}
+  for _, block in ipairs(user_blocks) do
+    if not seen[block] then
+      seen[block] = true
+      table.insert(unique_blocks, block)
     end
   end
   
-  return table.concat(user_lines, "\n")
+  return table.concat(unique_blocks, "\n\n")
 end
 
 -- 完全反混淆并提取用户代码
@@ -5898,6 +5956,11 @@ function M.deobfWeAreDevClean(code)
 end
 
 -- 全局导出（兼容 dofile 后直接调用）
+deobfWeAreDevFull = M.deobfWeAreDevFull
+extract_user_code = M.extract_user_code
+deobfWeAreDevClean = M.deobfWeAreDevClean
+
+
 deobfWeAreDevFull = M.deobfWeAreDevFull
 extract_user_code = M.extract_user_code
 deobfWeAreDevClean = M.deobfWeAreDevClean

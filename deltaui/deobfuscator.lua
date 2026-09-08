@@ -2492,10 +2492,10 @@ local function lex(s)
     if idx > n then return nil end
     return s:byte(idx)
   end
-  while i <= n do
+  local function processOne()
     local c = s:byte(i)
     -- 空白
-    if isSpace(c) then i = i + 1; goto __cont end
+    if isSpace(c) then i = i + 1; return end
     -- 注释
     if c == 45 and i + 1 <= n and s:byte(i + 1) == 45 then
       -- 长注释?
@@ -2512,12 +2512,12 @@ local function lex(s)
         local close = "]" .. string.rep("=", lb_eq) .. "]"
         local k = s:find(close, lb_start, true)
         if k then i = k + #close else i = n + 1 end
-        goto __cont
+        return
       end
       -- 行注释
       local j = s:find("\n", i, true)
       if j then i = j else i = n + 1 end
-      goto __cont
+      return
     end
     -- 数字
     if isDigit(c) or (c == 46 and i + 1 <= n and isDigit(s:byte(i + 1))) then
@@ -2539,7 +2539,7 @@ local function lex(s)
       local num = s:sub(i, j - 1)
       toks[#toks + 1] = {k = "NUMBER", v = num, p = i}
       i = j
-      goto __cont
+      return
     end
     -- 标识符/关键字
     if isAlpha(c) then
@@ -2549,7 +2549,7 @@ local function lex(s)
       local kind = KEYWORDS[w] and w or "NAME"
       toks[#toks + 1] = {k = kind, v = w, p = i}
       i = j
-      goto __cont
+      return
     end
     -- 字符串
     if c == 34 or c == 39 then
@@ -2568,21 +2568,20 @@ local function lex(s)
             local val = tonumber(s:sub(j + 1, k - 1))
             buf[#buf + 1] = string.char(val)
             j = k
-            goto strcont
+          else
+            local esc = {[110]="\n",[116]="\t",[114]="\r",[97]="\a",[98]="\b",
+              [102]="\f",[118]="\v",[92]="\\",[34]='"',[39]="'",[10]="\n"}
+            buf[#buf + 1] = esc[nx] or string.char(nx)
+            j = j + 2
           end
-          local esc = {[110]="\n",[116]="\t",[114]="\r",[97]="\a",[98]="\b",
-            [102]="\f",[118]="\v",[92]="\\",[34]='"',[39]="'",[10]="\n"}
-          buf[#buf + 1] = esc[nx] or string.char(nx)
-          j = j + 2
-          goto strcont
+        else
+          buf[#buf + 1] = string.char(ch)
+          j = j + 1
         end
-        buf[#buf + 1] = string.char(ch)
-        j = j + 1
-        ::strcont::
       end
       toks[#toks + 1] = {k = "STRING", v = table.concat(buf), p = i}
       i = j
-      goto __cont
+      return
     end
     -- 长字符串
     if c == 91 then
@@ -2596,7 +2595,7 @@ local function lex(s)
         local content = k and s:sub(start, k - 1) or ""
         toks[#toks + 1] = {k = "STRING", v = content, p = i}
         i = k and (k + #close) or (n + 1)
-        goto __cont
+        return
       end
     end
     -- 运算符
@@ -2612,7 +2611,9 @@ local function lex(s)
     if not matched then
       error("无法识别字符 @" .. i .. ": " .. s:sub(math.max(1, i - 20), i + 20))
     end
-    ::__cont::
+  end
+  while i <= n do
+    processOne()
   end
   toks[#toks + 1] = {k = "EOF", v = nil, p = n + 1}
   return toks
@@ -3267,35 +3268,34 @@ end
 local function find_lookup_table(code, toks)
   if not toks then toks = lex(code) end
   local best = nil
-  for i = 1, #toks do
-    if toks[i].k == "OP" and toks[i].v == "{" then
-      local subtoks = {}
-      for j = i, #toks do subtoks[#subtoks+1] = toks[j] end
-      local p = Parser.new(subtoks)
-      local ok, node = pcall(function() return p:parse_table() end)
-      if not ok or not isAst(node) or node[1] ~= "table" then goto cont end
-      local mp = {}
-      local cnt = 0
-      local ok2 = true
-      for _, kv in ipairs(node[2]) do
-        if kv[1] == nil or not isAst(kv[1]) or kv[1][1] ~= "str" or #kv[1][2] ~= 1 then
-          ok2 = false; break
-        end
-        local c = eval_const(kv[2])
-        if not c or c[1] ~= "num" then ok2 = false; break end
-        mp[kv[1][2]] = math.floor(c[2])
-        cnt = cnt + 1
+  local function checkTable(i)
+    if toks[i].k ~= "OP" or toks[i].v ~= "{" then return end
+    local subtoks = {}
+    for j = i, #toks do subtoks[#subtoks+1] = toks[j] end
+    local p = Parser.new(subtoks)
+    local ok, node = pcall(function() return p:parse_table() end)
+    if not ok or not isAst(node) or node[1] ~= "table" then return end
+    local mp = {}
+    local cnt = 0
+    local ok2 = true
+    for _, kv in ipairs(node[2]) do
+      if kv[1] == nil or not isAst(kv[1]) or kv[1][1] ~= "str" or #kv[1][2] ~= 1 then
+        ok2 = false; break
       end
-      if ok2 and cnt >= 60 then
-        local vals = {}
-        for _, v in pairs(mp) do vals[v] = true end
-        local all64 = true
-        for v = 0, 63 do if not vals[v] then all64 = false; break end end
-        if all64 then best = mp end
-      end
-      ::cont::
+      local c = eval_const(kv[2])
+      if not c or c[1] ~= "num" then ok2 = false; break end
+      mp[kv[1][2]] = math.floor(c[2])
+      cnt = cnt + 1
+    end
+    if ok2 and cnt >= 60 then
+      local vals = {}
+      for _, v in pairs(mp) do vals[v] = true end
+      local all64 = true
+      for v = 0, 63 do if not vals[v] then all64 = false; break end end
+      if all64 then best = mp end
     end
   end
+  for i = 1, #toks do checkTable(i) end
   return best
 end
 
@@ -4060,9 +4060,9 @@ local function extract_vm(code)
   local leaves = collect_leaves(tree)
   -- 入口块id
   local entry = nil
-  for idx = 1, #toks - 4 do
+  local function checkEntry(idx)
     if not (toks[idx].k == "OP" and toks[idx].v == "{" and toks[idx+1].k == "OP" and toks[idx+1].v == "}") then
-      goto next_entry
+      return
     end
     local q = idx + 2
     local nclose = 0
@@ -4070,7 +4070,7 @@ local function extract_vm(code)
       q = q + 1; nclose = nclose + 1
     end
     if not (nclose >= 1 and nclose <= 2 and q <= #toks and toks[q].k == "OP" and toks[q].v == "(") then
-      goto next_entry
+      return
     end
     local d = 0
     local j = idx - 1
@@ -4103,8 +4103,8 @@ local function extract_vm(code)
         entry = (v == math.floor(v)) and math.floor(v) or v
       end
     end
-    ::next_entry::
   end
+  for idx = 1, #toks - 4 do checkEntry(idx) end
   return {
     posvar=pv, argsvar=av, upvalsvar=uv, gcvar=gv,
     regnames=regnames, tree=tree, leaves=leaves,
@@ -4809,53 +4809,55 @@ end
 local function fold_short_circuits(blocks, postdom, loop_headers, maxround)
   maxround = maxround or 10000
   local folded = 0
+  local function tryFold(h)
+    if loop_headers[h] then return false end
+    if not blocks[h] then return false end
+    local b = blocks[h]
+    local t = b.term
+    if not (t and t[1] == "branch") then return false end
+    local cond, T, F = t[2], t[3], t[4]
+    if not blocks[T] or not blocks[F] then return false end
+    local join = postdom[h]
+    if join == nil or not blocks[join] then return false end
+    local tP = _pure_assign_block(blocks[T], join)
+    local fP = _pure_assign_block(blocks[F], join)
+    if tP == "IMPURE" or fP == "IMPURE" then return false end
+    if tP[1] == nil and fP[1] == nil then return false end
+    local newexpr, resreg
+    if tP[1] ~= nil and fP[1] == nil then
+      newexpr = {"bin", "and", cond, tP[2]}
+      resreg = tP[1]
+    elseif fP[1] ~= nil and tP[1] == nil then
+      newexpr = {"bin", "or", cond, fP[2]}
+      resreg = fP[1]
+    elseif tP[1] == fP[1] then
+      resreg = tP[1]
+      newexpr = {"bin", "or", {"bin", "and", cond, tP[2]}, fP[2]}
+    else
+      return false
+    end
+    local newbody = {}
+    for _, s in ipairs(b.body) do
+      local iswrite = (s[1] == "let" or s[1] == "setvar") and s[2] == resreg
+      if not iswrite then
+        iswrite = (s[1] == "assign" and #s[2] == 1 and isAst(s[2][1]) and s[2][1][1] == "var" and s[2][1][2] == resreg)
+      end
+      if not iswrite then newbody[#newbody+1] = s end
+    end
+    newbody[#newbody+1] = {"let", resreg, newexpr}
+    b.body = newbody
+    b.term = {"jmp", join}
+    blocks[T] = nil
+    blocks[F] = nil
+    folded = folded + 1
+    return true
+  end
   for _ = 1, maxround do
     local did = false
     local keys = {}
     for h in pairs(blocks) do keys[#keys+1] = h end
     for _, h in ipairs(keys) do
-      if loop_headers[h] then goto next_h end
-      if not blocks[h] then goto next_h end
-      local b = blocks[h]
-      local t = b.term
-      if not (t and t[1] == "branch") then goto next_h end
-      local cond, T, F = t[2], t[3], t[4]
-      if not blocks[T] or not blocks[F] then goto next_h end
-      local join = postdom[h]
-      if join == nil or not blocks[join] then goto next_h end
-      local tP = _pure_assign_block(blocks[T], join)
-      local fP = _pure_assign_block(blocks[F], join)
-      if tP == "IMPURE" or fP == "IMPURE" then goto next_h end
-      if tP[1] == nil and fP[1] == nil then goto next_h end
-      local newexpr, resreg
-      if tP[1] ~= nil and fP[1] == nil then
-        newexpr = {"bin", "and", cond, tP[2]}
-        resreg = tP[1]
-      elseif fP[1] ~= nil and tP[1] == nil then
-        newexpr = {"bin", "or", cond, fP[2]}
-        resreg = fP[1]
-      elseif tP[1] == fP[1] then
-        resreg = tP[1]
-        newexpr = {"bin", "or", {"bin", "and", cond, tP[2]}, fP[2]}
-      else
-        goto next_h
-      end
-      local newbody = {}
-      for _, s in ipairs(b.body) do
-        local iswrite = (s[1] == "let" or s[1] == "setvar") and s[2] == resreg
-        if not iswrite then
-          iswrite = (s[1] == "assign" and #s[2] == 1 and isAst(s[2][1]) and s[2][1][1] == "var" and s[2][1][2] == resreg)
-        end
-        if not iswrite then newbody[#newbody+1] = s end
-      end
-      newbody[#newbody+1] = {"let", resreg, newexpr}
-      b.body = newbody
-      b.term = {"jmp", join}
-      blocks[T] = nil
-      blocks[F] = nil
-      folded = folded + 1
-      did = true
-      ::next_h::
+      if tryFold(h) then did = true end
     end
     if not did then break end
   end
@@ -5205,9 +5207,10 @@ local function CodeGen_new(decompiler, param_names, indent)
         local lid = self._cont_counter
         self._loop_stack[#self._loop_stack+1] = lid
         local lines = {pad .. key .. " " .. self:expr(s.cond) .. " do"}
-        local body_lines = self:_stmts(s.body, depth + 1)
+        lines[#lines+1] = pad .. "  repeat"
+        local body_lines = self:_stmts(s.body, depth + 2)
         for _, l in ipairs(body_lines) do lines[#lines+1] = l end
-        lines[#lines+1] = pad .. "::__cont" .. lid .. "::"
+        lines[#lines+1] = pad .. "  until true"
         lines[#lines+1] = pad .. "end"
         table.remove(self._loop_stack)
         return lines
@@ -5220,7 +5223,7 @@ local function CodeGen_new(decompiler, param_names, indent)
     end
     if s.tag == "loopctrl" then
       if s.k == "continue" and #self._loop_stack > 0 then
-        return {pad .. "goto __cont" .. self._loop_stack[#self._loop_stack]}
+        return {pad .. "break"}
       end
       return {pad .. s.k}
     end

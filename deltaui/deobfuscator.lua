@@ -2411,7 +2411,7 @@ deobfExprLua（表达式渲染）、deobfB64Decode（base64解码）、deobfLcg�
 
 -- ============================================================
 -- ============================================================
-local M = {}
+M = {}
 
 -- ============================================================
 -- 工具函数
@@ -6527,6 +6527,30 @@ function M.extract_user_code(decompiled)
     for _, pat in ipairs(explicit_user) do
       if line:find(pat) then return true end
     end
+    -- 简单用户代码模式：全局函数赋值给局部变量（如 W = print）
+    -- 注意：只识别用户函数，不识别运行时库（math/table/string等）
+    local user_funcs = {
+      print = true, warn = true,
+    }
+    local var, func = line:match("^(%w+)%s*=%s*(%w+)$")
+    if var and func and user_funcs[func] then
+      return true
+    end
+    -- 简单用户代码模式：局部变量调用带数字/字符串常量（如 local f = W(123)）
+    -- 注意：只识别单字母大写变量（VM中用户函数被赋值给单字母大写变量）
+    if line:match("^local%s+%w+%s*=%s*%u%(%d+%)$") then
+      return true
+    end
+    if line:match("^local%s+%w+%s*=%s*%u%(%g+%)$") and line:find('"') then
+      return true
+    end
+    -- 简单用户代码模式：直接调用带数字/字符串常量（如 W(123)）
+    if line:match("^%u%(%d+%)$") then
+      return true
+    end
+    if line:match("^%u%(%g+%)$") and line:find('"') then
+      return true
+    end
     -- 中文字符串（排除字符串解密调用和运行时函数定义）
     if line:find("[^ -~]") then
       -- 排除字符串解密调用（如 g("xxx", num)、a[l]("xxx", num)等）
@@ -6617,7 +6641,7 @@ function M.extract_user_code(decompiled)
   -- 提取用户代码块（上下文感知：保留用户特征行前后的相关代码）
   local user_lines = {}
   local seen = {}
-  local context_range = 5  -- 保留用户特征行前后5行的上下文
+  local context_range = 0  -- 不保留上下文，只保留用户特征行本身
   
   -- 第一步：标记所有包含用户特征的行
   local user_marks = {}
@@ -6960,6 +6984,537 @@ function M.interpret_block(block, runtime_vars)
   
   return user_stmts, runtime_stmts
 end
+
+-- 全局导出（兼容 dofile 后直接调用）
+deobfWeAreDevFull = M.deobfWeAreDevFull
+extract_user_code = M.extract_user_code
+deobfWeAreDevClean = M.deobfWeAreDevClean
+interpret_block = M.interpret_block
+
+
+-- ============================================================
+-- VM解释器v2：基于使用模式和语句模式的运行时代码消除
+-- ============================================================
+
+local runtime_funcs = {
+  alloc = true, setmetatable = true, getmetatable = true, newproxy = true,
+  pcall = true, xpcall = true, error = true, assert = true,
+  tostring = true, tonumber = true, type = true, select = true, unpack = true,
+  rawget = true, rawset = true, rawequal = true,
+  pairs = true, ipairs = true, next = true,
+  string = true, math = true, table = true, os = true, bit32 = true, coroutine = true,
+}
+
+local special_runtime_funcs = {
+  W = true,
+}
+
+local runtime_var_names = {
+  V = true, v = true, W = true, z = true, K = true,
+  g = true, j = true, G = true, S = true,
+}
+
+-- 分析变量使用模式，识别运行时变量
+function M.analyze_runtime_vars_v2(blocks)
+  local var_index = {}  -- 被索引访问次数
+  local var_mod = {}  -- 参与模运算次数
+  local var_assign = {}  -- 被赋值次数
+  local var_usage = {}  -- 总使用次数
+  
+  local function analyze_expr(e)
+    if type(e) ~= "table" then return end
+    local k = e[1]
+    
+    if k == "var" then
+      var_usage[e[2]] = (var_usage[e[2]] or 0) + 1
+    end
+    
+    if k == "index" then
+      local base = e[2]
+      if type(base) == "table" and base[1] == "var" then
+        var_index[base[2]] = (var_index[base[2]] or 0) + 1
+      end
+    end
+    
+    if k == "bin" and e[2] == "%" then
+      for i = 3, 4 do
+        if type(e[i]) == "table" and e[i][1] == "var" then
+          var_mod[e[i][2]] = (var_mod[e[i][2]] or 0) + 1
+        end
+      end
+    end
+    
+    for i = 2, #e do
+      if type(e[i]) == "table" then
+        analyze_expr(e[i])
+      end
+    end
+  end
+  
+  local function analyze_stmt(stmt)
+    if type(stmt) ~= "table" then return end
+    local k = stmt[1] or stmt.tag
+    
+    if k == "let" or k == "setvar" then
+      if type(stmt[2]) == "string" then
+        var_assign[stmt[2]] = (var_assign[stmt[2]] or 0) + 1
+      end
+      if type(stmt[3]) == "table" then
+        analyze_expr(stmt[3])
+      end
+    elseif k == "assign" then
+      if type(stmt[3]) == "table" then
+        for i = 1, #stmt[3] do
+          if type(stmt[3][i]) == "table" then
+            analyze_expr(stmt[3][i])
+          end
+        end
+      end
+    elseif k == "callstmt" then
+      if type(stmt[2]) == "table" then
+        analyze_expr(stmt[2])
+      end
+    end
+  end
+  
+  for block_id, block in pairs(blocks) do
+    if block.body then
+      for _, stmt in ipairs(block.body) do
+        analyze_stmt(stmt)
+      end
+    end
+  end
+  
+  -- 识别运行时变量
+  local runtime_vars = {}
+  
+  -- 1. 被索引访问次数多的变量（>3次）：上值表或常量表
+  for name, count in pairs(var_index) do
+    if count >= 1 then
+      runtime_vars[name] = true
+    end
+  end
+  
+  -- 2. 参与模运算的变量：PC寄存器
+  for name, count in pairs(var_mod) do
+    if count >= 1 then
+      runtime_vars[name] = true
+    end
+  end
+  
+  -- 3. 硬编码的运行时变量
+  for name, _ in pairs(runtime_var_names) do
+    runtime_vars[name] = true
+  end
+  
+  return runtime_vars, {index=var_index, mod=var_mod, assign=var_assign, usage=var_usage}
+end
+
+local function v2_is_runtime_expr(e, runtime_vars, depth)
+  depth = depth or 0
+  if depth > 20 then return false end
+  if type(e) ~= "table" then return false end
+  local k = e[1]
+  
+  if k == "alloc" or k == "mkclosure" then return true end
+  
+  if k == "var" then
+    return runtime_vars[e[2]] == true
+  end
+  
+  if k == "num" or k == "boolean" or k == "nil" then return true end
+  
+  if k == "str" then
+    local s = e[2]
+    local runtime_strs = {
+      ["__index"] = true, ["__metatable"] = true, ["__gc"] = true,
+      ["__len"] = true, ["__newindex"] = true, ["__tostring"] = true,
+      ["__call"] = true, ["__concat"] = true, ["__unm"] = true,
+      ["__add"] = true, ["__sub"] = true, ["__mul"] = true,
+      ["__div"] = true, ["__mod"] = true, ["__pow"] = true,
+      ["__eq"] = true, ["__lt"] = true, ["__le"] = true,
+      ["Tamper Detected!"] = true,
+      ["gmatch"] = true, ["gsub"] = true, ["byte"] = true,
+      ["char"] = true, ["len"] = true, ["sub"] = true,
+      ["format"] = true, ["find"] = true, ["rep"] = true,
+      ["random"] = true, ["randomseed"] = true, ["floor"] = true,
+      ["ceil"] = true, ["abs"] = true, ["sqrt"] = true,
+      ["concat"] = true, ["insert"] = true, ["remove"] = true,
+      ["sort"] = true, ["clock"] = true, ["time"] = true,
+    }
+    return runtime_strs[s] == true
+  end
+  
+  if k == "table" then
+    if e[2] == nil or (type(e[2]) == "table" and #e[2] == 0) then
+      return true
+    end
+    
+    if type(e[2]) == "table" then
+      for i = 1, #e[2] do
+        local entry = e[2][i]
+        if type(entry) == "table" and type(entry[1]) == "table" and entry[1][1] == "str" then
+          local key = entry[1][2]
+          if key == "__index" or key == "__metatable" or key == "__gc" or
+             key == "__len" or key == "__newindex" or key == "__tostring" or
+             key == "__call" or key == "__concat" then
+            return true
+          end
+        end
+      end
+    end
+    
+    if type(e[2]) == "table" then
+      for i = 1, #e[2] do
+        if type(e[2][i]) == "table" then
+          if not v2_is_runtime_expr(e[2][i], runtime_vars, depth + 1) then
+            return false
+          end
+        end
+      end
+    end
+    return true
+  end
+  
+  if k == "index" then
+    local base = e[2]
+    if type(base) == "table" and base[1] == "var" then
+      if runtime_vars[base[2]] then
+        return true
+      end
+    end
+    if type(base) == "table" and v2_is_runtime_expr(base, runtime_vars, depth + 1) then
+      return true
+    end
+    return false
+  end
+  
+  if k == "call" then
+    local fn = e[2]
+    local args = e[3]
+    
+    if type(fn) == "table" and fn[1] == "var" then
+      if special_runtime_funcs[fn[2]] then
+        return true
+      end
+      
+      if runtime_funcs[fn[2]] then
+        if type(args) == "table" then
+          for i = 1, #args do
+            if type(args[i]) == "table" and not v2_is_runtime_expr(args[i], runtime_vars, depth + 1) then
+              return false
+            end
+          end
+        end
+        return true
+      end
+      
+      if fn[2] == "print" or fn[2] == "warn" then
+        return false
+      end
+    end
+    
+    if type(fn) == "table" and fn[1] == "index" then
+      local base = fn[2]
+      if type(base) == "table" and base[1] == "var" and runtime_funcs[base[2]] then
+        return true
+      end
+    end
+    
+    return false
+  end
+  
+  if k == "bin" or k == "un" then
+    for i = 3, #e do
+      if type(e[i]) == "table" and not v2_is_runtime_expr(e[i], runtime_vars, depth + 1) then
+        return false
+      end
+    end
+    return true
+  end
+  
+  return false
+end
+
+local function v2_is_runtime_stmt(stmt, runtime_vars)
+  if type(stmt) ~= "table" then return false end
+  local k = stmt[1] or stmt.tag
+  
+  if k == "let" or k == "setvar" then
+    local val = stmt[3]
+    if type(val) == "table" then
+      return v2_is_runtime_expr(val, runtime_vars)
+    end
+    return false
+  end
+  
+  if k == "assign" then
+    local lhs = stmt[2]
+    local rhs = stmt[3]
+    
+    if type(lhs) == "table" and #lhs >= 1 then
+      local l = lhs[1]
+      if type(l) == "table" and l[1] == "index" then
+        local base = l[2]
+        if type(base) == "table" and base[1] == "var" then
+          if runtime_vars[base[2]] then
+            return true
+          end
+        end
+      end
+    end
+    
+    if type(rhs) == "table" then
+      for i = 1, #rhs do
+        if type(rhs[i]) == "table" and not v2_is_runtime_expr(rhs[i], runtime_vars) then
+          return false
+        end
+      end
+      return true
+    end
+    return false
+  end
+  
+  if k == "callstmt" then
+    local call = stmt[2]
+    if type(call) == "table" then
+      return v2_is_runtime_expr(call, runtime_vars)
+    end
+    return false
+  end
+  
+  if k == "local" then
+    local rhs = stmt[3]
+    if type(rhs) == "table" then
+      for i = 1, #rhs do
+        if type(rhs[i]) == "table" and not v2_is_runtime_expr(rhs[i], runtime_vars) then
+          return false
+        end
+      end
+      return true
+    end
+    return false
+  end
+  
+  return false
+end
+
+function M.interpret_block(block, runtime_vars)
+  runtime_vars = runtime_vars or {}
+  
+  local rv = {}
+  for k, v in pairs(runtime_vars) do rv[k] = v end
+  
+  local user_stmts = {}
+  local runtime_stmts = {}
+  
+  for i, stmt in ipairs(block.body) do
+    if v2_is_runtime_stmt(stmt, rv) then
+      table.insert(runtime_stmts, stmt)
+      local k = stmt[1] or stmt.tag
+      if (k == "let" or k == "setvar") and type(stmt[2]) == "string" then
+        rv[stmt[2]] = true
+      end
+    else
+      table.insert(user_stmts, stmt)
+    end
+  end
+  
+  return user_stmts, runtime_stmts
+end
+
+-- 基于语句模式的运行时代码识别
+function M.is_runtime_stmt_pattern(stmt)
+  if type(stmt) ~= "table" then return false end
+  local k = stmt[1] or stmt.tag
+  
+  -- 1. PC寄存器操作：setvar X, {bin, %, ...}
+  if k == "setvar" and type(stmt[3]) == "table" and stmt[3][1] == "bin" and stmt[3][2] == "%" then
+    return true
+  end
+  
+  -- 2. 寄存器算术操作：setvar X, {bin, +/-, ...}
+  if k == "setvar" and type(stmt[3]) == "table" and stmt[3][1] == "bin" then
+    local op = stmt[3][2]
+    if op == "+" or op == "-" or op == "*" or op == "/" or op == "%" or op == "^" then
+      -- 检查操作数是否都是变量或数字
+      local all_simple = true
+      for i = 3, 4 do
+        if type(stmt[3][i]) == "table" then
+          if stmt[3][i][1] ~= "var" and stmt[3][i][1] ~= "num" then
+            all_simple = false
+          end
+        end
+      end
+      if all_simple then return true end
+    end
+  end
+  
+  -- 3. 表创建：let X, {table, ...}
+  if k == "let" and type(stmt[3]) == "table" and stmt[3][1] == "table" then
+    return true
+  end
+  
+  -- 4. 变量交换：assign {{var, l1}}, {{var, l2}}
+  if k == "assign" and type(stmt[2]) == "table" and #stmt[2] == 1 then
+    local lhs = stmt[2][1]
+    if type(lhs) == "table" and lhs[1] == "var" then
+      -- 检查右侧是否是变量
+      if type(stmt[3]) == "table" and #stmt[3] == 1 then
+        local rhs = stmt[3][1]
+        if type(rhs) == "table" and rhs[1] == "var" then
+          return true
+        end
+      end
+    end
+  end
+  
+  -- 5. 上值表函数调用：let X, {call, {index, {var, A}, ...}, ...}
+  if k == "let" and type(stmt[3]) == "table" and stmt[3][1] == "call" then
+    local fn = stmt[3][2]
+    if type(fn) == "table" and fn[1] == "index" then
+      local base = fn[2]
+      if type(base) == "table" and base[1] == "var" then
+        return true
+      end
+    end
+  end
+  
+  -- 6. 运行时函数调用：let X, {call, {var, pcall/tostring/tonumber/...}, ...}
+  if k == "let" and type(stmt[3]) == "table" and stmt[3][1] == "call" then
+    local fn = stmt[3][2]
+    if type(fn) == "table" and fn[1] == "var" then
+      local runtime_call_funcs = {
+        pcall = true, xpcall = true, tostring = true, tonumber = true,
+        type = true, select = true, unpack = true, error = true,
+        assert = true, setmetatable = true, getmetatable = true,
+        rawget = true, rawset = true, rawequal = true,
+        pairs = true, ipairs = true, next = true,
+        l = true,  -- 上值解析函数
+      }
+      if runtime_call_funcs[fn[2]] then
+        return true
+      end
+    end
+  end
+  
+  -- 7. 上值解析函数调用：setvar X, {call, {var, l}, {{var, X}}}
+  if k == "setvar" and type(stmt[3]) == "table" and stmt[3][1] == "call" then
+    local fn = stmt[3][2]
+    if type(fn) == "table" and fn[1] == "var" and fn[2] == "l" then
+      return true
+    end
+  end
+  
+  -- 8. 上值表函数调用：setvar X, {call, {index, ...}, ...}
+  if k == "setvar" and type(stmt[3]) == "table" and stmt[3][1] == "call" then
+    local fn = stmt[3][2]
+    if type(fn) == "table" and fn[1] == "index" then
+      return true
+    end
+  end
+  
+  -- 9. 表创建：setvar X, {table, ...}
+  if k == "setvar" and type(stmt[3]) == "table" and stmt[3][1] == "table" then
+    return true
+  end
+  
+  -- 10. 变量赋值：setvar X, {var, Y}
+  if k == "setvar" and type(stmt[3]) == "table" and stmt[3][1] == "var" then
+    return true
+  end
+  
+  -- 11. 简单值赋值：setvar X, {false/true/nil/num/boolean}
+  if k == "setvar" and type(stmt[3]) == "table" then
+    local vk = stmt[3][1]
+    if vk == "false" or vk == "true" or vk == "nil" or vk == "num" or vk == "boolean" then
+      return true
+    end
+  end
+  
+  -- 12. 运行时函数调用：setvar X, {call, {var, tonumber/tostring/...}, ...}
+  if k == "setvar" and type(stmt[3]) == "table" and stmt[3][1] == "call" then
+    local fn = stmt[3][2]
+    if type(fn) == "table" and fn[1] == "var" then
+      local runtime_call_funcs = {
+        pcall = true, xpcall = true, tostring = true, tonumber = true,
+        type = true, select = true, unpack = true, error = true,
+        assert = true, setmetatable = true, getmetatable = true,
+        rawget = true, rawset = true, rawequal = true,
+        pairs = true, ipairs = true, next = true,
+        l = true,
+      }
+      if runtime_call_funcs[fn[2]] then
+        return true
+      end
+    end
+  end
+  
+  -- 13. 多变量赋值+函数调用：assign {{var, X}, {var, Y}}, {{call, ...}}
+  if k == "assign" and type(stmt[2]) == "table" and #stmt[2] >= 2 then
+    local all_vars = true
+    for i = 1, #stmt[2] do
+      if type(stmt[2][i]) ~= "table" or stmt[2][i][1] ~= "var" then
+        all_vars = false
+      end
+    end
+    if all_vars and type(stmt[3]) == "table" and #stmt[3] >= 1 then
+      local first_rhs = stmt[3][1]
+      if type(first_rhs) == "table" and first_rhs[1] == "call" then
+        return true
+      end
+    end
+  end
+  
+  -- 14. 索引赋值：assign {{index, {var, X}, {var, Y}}}, {{var, Z}}
+  if k == "assign" and type(stmt[2]) == "table" and #stmt[2] == 1 then
+    local lhs = stmt[2][1]
+    if type(lhs) == "table" and lhs[1] == "index" then
+      if type(stmt[3]) == "table" and #stmt[3] == 1 then
+        local rhs = stmt[3][1]
+        if type(rhs) == "table" and rhs[1] == "var" then
+          return true
+        end
+      end
+    end
+  end
+  
+  return false
+end
+
+-- 改进的interpret_block：结合使用模式和语句模式
+function M.interpret_block_v2(block, runtime_vars)
+  runtime_vars = runtime_vars or {}
+  
+  local rv = {}
+  for k, v in pairs(runtime_vars) do rv[k] = v end
+  
+  local user_stmts = {}
+  local runtime_stmts = {}
+  
+  for i, stmt in ipairs(block.body) do
+    -- 先检查语句模式
+    if M.is_runtime_stmt_pattern(stmt) then
+      table.insert(runtime_stmts, stmt)
+      local k = stmt[1] or stmt.tag
+      if (k == "let" or k == "setvar") and type(stmt[2]) == "string" then
+        rv[stmt[2]] = true
+      end
+    -- 再检查使用模式
+    elseif v2_is_runtime_stmt(stmt, rv) then
+      table.insert(runtime_stmts, stmt)
+      local k = stmt[1] or stmt.tag
+      if (k == "let" or k == "setvar") and type(stmt[2]) == "string" then
+        rv[stmt[2]] = true
+      end
+    else
+      table.insert(user_stmts, stmt)
+    end
+  end
+  
+  return user_stmts, runtime_stmts
+end
+
 
 -- 全局导出（兼容 dofile 后直接调用）
 deobfWeAreDevFull = M.deobfWeAreDevFull
@@ -13100,4 +13655,13 @@ local function register()
 end
 
 local regOk = register()
+
+-- 导出反编译器到全局环境
+if M then
+    _G.deobfWeAreDevFull = M.deobfWeAreDevFull
+    _G.extract_user_code = M.extract_user_code
+    _G.deobfWeAreDevClean = M.deobfWeAreDevClean
+    _G.DeobfM = M
+end
+
 return pageDef

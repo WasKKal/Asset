@@ -4117,6 +4117,30 @@ function M.extract_user_code(decompiled)
     for _, pat in ipairs(explicit_user) do
       if line:find(pat) then return true end
     end
+    -- 简单用户代码模式：全局函数赋值给局部变量（如 W = print）
+    -- 注意：只识别用户函数，不识别运行时库（math/table/string等）
+    local user_funcs = {
+      print = true, warn = true,
+    }
+    local var, func = line:match("^(%w+)%s*=%s*(%w+)$")
+    if var and func and user_funcs[func] then
+      return true
+    end
+    -- 简单用户代码模式：局部变量调用带数字/字符串常量（如 local f = W(123)）
+    -- 注意：只识别单字母大写变量（VM中用户函数被赋值给单字母大写变量）
+    if line:match("^local%s+%w+%s*=%s*%u%(%d+%)$") then
+      return true
+    end
+    if line:match("^local%s+%w+%s*=%s*%u%(%g+%)$") and line:find('"') then
+      return true
+    end
+    -- 简单用户代码模式：直接调用带数字/字符串常量（如 W(123)）
+    if line:match("^%u%(%d+%)$") then
+      return true
+    end
+    if line:match("^%u%(%g+%)$") and line:find('"') then
+      return true
+    end
     -- 中文字符串（排除字符串解密调用和运行时函数定义）
     if line:find("[^ -~]") then
       -- 排除字符串解密调用（如 g("xxx", num)、a[l]("xxx", num)等）
@@ -4207,7 +4231,7 @@ function M.extract_user_code(decompiled)
   -- 提取用户代码块（上下文感知：保留用户特征行前后的相关代码）
   local user_lines = {}
   local seen = {}
-  local context_range = 5  -- 保留用户特征行前后5行的上下文
+  local context_range = 0  -- 不保留上下文，只保留用户特征行本身
   
   -- 第一步：标记所有包含用户特征的行
   local user_marks = {}

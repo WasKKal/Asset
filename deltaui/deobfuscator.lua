@@ -6623,20 +6623,16 @@ function M.extract_user_code(decompiled)
   local user_marks = {}
   for i, line in ipairs(lines) do
     local trimmed = line:match("^%s*(.-)%s*$")
-    if #trimmed == 0 then goto continue_mark end
-    
-    local simplified = simplify(trimmed)
-    if #simplified == 0 then goto continue_mark end
-    if not is_valid(simplified) then goto continue_mark end
-    
-    local user = has_user_strict(simplified)
-    local runtime = is_runtime(simplified)
-    
-    if user and not runtime then
-      user_marks[i] = true
+    if #trimmed > 0 then
+      local simplified = simplify(trimmed)
+      if #simplified > 0 and is_valid(simplified) then
+        local user = has_user_strict(simplified)
+        local runtime = is_runtime(simplified)
+        if user and not runtime then
+          user_marks[i] = true
+        end
+      end
     end
-    
-    ::continue_mark::
   end
   
   -- 第二步：扩展上下文（保留用户特征行前后的相关代码，包括函数定义和控制流结构）

@@ -5282,7 +5282,356 @@ local function eliminate_runtime_code(body, R)
     ["table.concat"]=true, ["table.insert"]=true, ["table.remove"]=true,
     ["table.sort"]=true, ["os.clock"]=true, ["os.time"]=true,
   }
-  local user_funcs = { print=true, warn=true }
+  local user_funcs = {
+    print=true, warn=true,
+    -- Roblox实例方法
+    ["Instance.new"]=true, ["game.GetService"]=true, ["game:HttpGet"]=true,
+    ["game.HttpGet"]=true, ["game:HttpPost"]=true, ["game.HttpPost"]=true,
+    ["workspace.FindFirstChild"]=true, ["workspace:FindFirstChild"]=true,
+    ["script.FindFirstChild"]=true, ["script:FindFirstChild"]=true,
+    -- Roblox事件
+    ["Connect"]=true, ["connect"]=true, ["Wait"]=true, ["wait"]=true,
+    -- 任务库
+    ["task.spawn"]=true, ["task.wait"]=true, ["task.delay"]=true, ["task.cancel"]=true,
+    -- 延迟函数
+    ["delay"]=true, ["spawn"]=true,
+    -- Delta UI库函数
+    ["LoadLucide"]=true, ["GetIcon"]=true, ["ParseImageAsset"]=true,
+    ["create"]=true, ["corner"]=true, ["updateCornerRadius"]=true, ["stroke"]=true,
+    ["loadConfig"]=true, ["getThemeGradientColors"]=true,
+    -- UI库函数
+    ["CreateWindow"]=true, ["Toggle"]=true, ["Tab"]=true, ["Button"]=true,
+    ["Dropdown"]=true, ["Input"]=true, ["Paragraph"]=true, ["Section"]=true,
+    ["setLoop"]=true, ["Notify"]=true,
+    -- 远程事件
+    ["FireServer"]=true, ["InvokeServer"]=true, ["FireClient"]=true, ["InvokeClient"]=true,
+    -- 文件操作（exploit函数，但也是用户代码常用）
+    ["isfile"]=true, ["readfile"]=true, ["writefile"]=true,
+    ["isfolder"]=true, ["makefolder"]=true, ["delfile"]=true, ["delfolder"]=true,
+    ["listfiles"]=true, ["listfolders"]=true,
+    -- 其他exploit函数
+    ["getcustomasset"]=true, ["getsynasset"]=true, ["request"]=true,
+    ["syn.request"]=true, ["http.request"]=true, ["http_request"]=true,
+    ["loadstring"]=true, ["LoadString"]=true,
+    -- 游戏相关
+    ["getgenv"]=true, ["getrenv"]=true, ["getgc"]=true, ["getrawmetatable"]=true,
+    ["setrawmetatable"]=true, ["hookfunction"]=true, ["hookmetamethod"]=true,
+    ["getnamecallmethod"]=true, ["setnamecallmethod"]=true,
+    -- 字符串/表操作（用户代码常用）
+    ["string.split"]=true, ["string.trim"]=true, ["string.upper"]=true, ["string.lower"]=true,
+    ["table.find"]=true, ["table.create"]=true, ["table.freeze"]=true, ["table.clone"]=true,
+    -- 数学函数（用户代码常用）
+    ["math.clamp"]=true, ["math.sign"]=true, ["math.round"]=true, ["math.noise"]=true,
+    -- 颜色函数
+    ["Color3.fromRGB"]=true, ["Color3.fromHSV"]=true, ["Color3.new"]=true,
+    ["Color3.fromHex"]=true,
+    -- CFrame函数
+    ["CFrame.new"]=true, ["CFrame.Angles"]=true, ["CFrame.fromEulerAnglesXYZ"]=true,
+    -- Vector函数
+    ["Vector2.new"]=true, ["Vector3.new"]=true,
+    -- UDim函数
+    ["UDim2.new"]=true, ["UDim.new"]=true,
+    -- Enum函数
+    ["Enum.new"]=true,
+    -- Tween函数
+    ["TweenInfo.new"]=true,
+    -- 实例方法
+    ["FindFirstChild"]=true, ["FindFirstChildOfClass"]=true, ["FindFirstAncestor"]=true,
+    ["FindFirstAncestorOfClass"]=true, ["FindFirstAncestorWhichIsA"]=true,
+    ["FindFirstChildWhichIsA"]=true, ["IsA"]=true, ["IsDescendantOf"]=true,
+    ["IsAncestorOf"]=true, ["GetChildren"]=true, ["GetDescendants"]=true,
+    ["WaitForChild"]=true, ["Clone"]=true, ["Destroy"]=true, ["ClearAllChildren"]=true,
+    ["GetAttribute"]=true, ["SetAttribute"]=true, ["GetAttributes"]=true,
+    ["GetPropertyChangedSignal"]=true, ["Changed"]=true, ["ChildAdded"]=true,
+    ["ChildRemoved"]=true, ["DescendantAdded"]=true, ["DescendantRemoved"]=true,
+    ["GetTouchingParts"]=true, ["Touched"]=true, ["TouchEnded"]=true,
+    ["MouseHit"]=true, ["MouseTarget"]=true, ["MouseOrigin"]=true,
+    ["ViewSizeX"]=true, ["ViewSizeY"]=true, ["WorldToScreenPoint"]=true,
+    ["ScreenPointToRay"]=true, ["ViewportPointToRay"]=true,
+    ["UnitRay"]=true, ["GetPartsInPart"]=true, ["GetPartBoundsInBox"]=true,
+    ["GetPartBoundsInRadius"]=true, ["GetPartsInPart"]=true,
+    -- 玩家方法
+    ["Kick"]=true, ["LoadCharacter"]=true, ["GetFriendsOnline"]=true,
+    ["GetRankInGroup"]=true, ["GetRoleInGroup"]=true, ["IsFriendsWith"]=true,
+    ["FollowUserId"]=true, ["BlockUserId"]=true, ["UnblockUserId"]=true,
+    -- 角色方法
+    ["MoveTo"]=true, ["ChangeState"]=true, ["LoadAnimation"]=true,
+    ["Play"]=true, ["Stop"]=true, ["AdjustSpeed"]=true, ["AdjustWeight"]=true,
+    -- 工具方法
+    ["EquipTool"]=true, ["UnequipTools"]=true, ["Activate"]=true, ["Deactivate"]=true,
+    -- 人体方法
+    ["AddForce"]=true, ["SetStateEnabled"]=true, ["GetStateEnabled"]=true,
+    ["ApplyDescription"]=true, ["GetAppliedDescription"]=true,
+    ["BreakJoints"]=true, ["MakeJoints"]=true,
+    -- 相机方法
+    ["ScreenPointToRay"]=true, ["ViewportPointToRay"]=true,
+    ["WorldToScreenPoint"]=true, ["WorldToViewportPoint"]=true,
+    ["GetPartsObscuringTarget"]=true, ["GetRenderCFrame"]=true,
+    -- 声音方法
+    ["Play"]=true, ["Pause"]=true, ["Stop"]=true, ["Resume"]=true,
+    ["SetVolume"]=true, ["GetVolume"]=true,
+    -- 动画方法
+    ["Play"]=true, ["Stop"]=true, ["AdjustSpeed"]=true, ["AdjustWeight"]=true,
+    ["GetTimeOfKeyframe"]=true, ["GetKeyframes"]=true,
+    -- 物理方法
+    ["ApplyImpulse"]=true, ["ApplyAngularImpulse"]=true, ["SetNetworkOwner"]=true,
+    ["GetNetworkOwner"]=true, ["SetNetworkOwnershipAuto"]=true,
+    ["IsNetworkOwner"]=true, ["CanSetNetworkOwnership"]=true,
+    -- 约束方法
+    ["Activate"]=true, ["Deactivate"]=true,
+    -- 粒子方法
+    ["Emit"]=true, ["Clear"]=true, ["SetAttribute"]=true,
+    -- 光照方法
+    ["GetMinutesAfterMidnight"]=true, ["SetMinutesAfterMidnight"]=true,
+    -- 地形方法
+    ["FillBlock"]=true, ["FillBall"]=true, ["FillCylinder"]=true,
+    ["FillRegion"]=true, ["ReadVoxels"]=true, ["WriteVoxels"]=true,
+    ["GetCell"]=true, ["GetCells"]=true, ["CopyRegion"]=true, ["PasteRegion"]=true,
+    -- 数据存储方法
+    ["GetAsync"]=true, ["SetAsync"]=true, ["UpdateAsync"]=true,
+    ["RemoveAsync"]=true, ["IncrementAsync"]=true, ["GetSortedAsync"]=true,
+    ["GetVersionAsync"]=true, ["RemoveVersionAsync"]=true, ["ListKeysAsync"]=true,
+    ["ListVersionsAsync"]=true, ["ListDataStoresAsync"]=true, ["ListGlobalStoresAsync"]=true,
+    ["OnUpdate"]=true, ["GetGlobalDataStore"]=true, ["GetDataStore"]=true,
+    ["GetOrderedDataStore"]=true,
+    -- 消息服务方法
+    ["PublishAsync"]=true, ["SubscribeAsync"]=true, ["UnsubscribeAsync"]=true,
+    -- 文本服务方法
+    ["FilterStringAsync"]=true, ["FilterStringForBroadcast"]=true,
+    ["GetTextObjectAsync"]=true, ["GetTextSize"]=true, ["GetBoundsSize"]=true,
+    ["GetBoundsFromTextSize"]=true,
+    -- 游戏通行证服务方法
+    ["UserOwnsGamePassAsync"]=true, ["PromptGamePassPurchase"]=true,
+    ["GetGamePassProductInfo"]=true,
+    -- 市场服务方法
+    ["PromptProductPurchase"]=true, ["PromptPurchase"]=true,
+    ["GetProductInfo"]=true, ["UserOwnsGamePassAsync"]=true,
+    ["PlayerOwnsAsset"]=true, ["PromptGamePassPurchase"]=true,
+    -- 插入服务方法
+    ["LoadAsset"]=true, ["LoadAssetVersion"]=true, ["CreateMeshPartAsync"]=true,
+    -- 选择服务方法
+    ["Get"]=true, ["Set"]=true, ["Add"]=true, ["Remove"]=true, ["Toggle"]=true,
+    -- 启动设置方法
+    ["Get"]=true, ["Set"]=true,
+    -- 工作区方法
+    ["FindPartOnRay"]=true, ["FindPartOnRayWithWhitelist"]=true,
+    ["FindPartOnRayWithIgnoreList"]=true, ["FindPartOnRayWithWhitelist"]=true,
+    ["Raycast"]=true, ["GetPartBoundsInBox"]=true, ["GetPartBoundsInRadius"]=true,
+    ["GetPartsInPart"]=true, ["GetPartsInPart"]=true,
+    ["GetTouchingParts"]=true, ["GetPartsInPart"]=true,
+    -- 玩家服务方法
+    ["GetPlayers"]=true, ["GetPlayerFromCharacter"]=true,
+    ["GetPlayerByUserId"]=true, ["GetFriendsOnline"]=true,
+    ["GetUserThumbnailAsync"]=true, ["GetNameFromUserIdAsync"]=true,
+    ["GetUserIdFromNameAsync"]=true,
+    -- 照明服务方法
+    ["GetMinutesAfterMidnight"]=true, ["SetMinutesAfterMidnight"]=true,
+    -- 运行服务方法
+    ["BindToRenderStep"]=true, ["UnbindFromRenderStep"]=true,
+    ["BindToClose"]=true, ["IsStudio"]=true, ["IsRunMode"]=true,
+    ["IsClient"]=true, ["IsServer"]=true, ["IsEdit"]=true,
+    ["IsStudioAccess"]=true, ["IsFile"]=true,
+    -- 用户输入服务方法
+    ["GetMouseLocation"]=true, ["GetKeysPressed"]=true,
+    ["GetGamepadState"]=true, ["GetConnectedGamepads"]=true,
+    ["IsGamepadConnected"]=true, ["IsKeyDown"]=true, ["IsMouseButtonDown"]=true,
+    ["GetNavigationGamepads"]=true, ["SetNavigationGamepads"]=true,
+    ["GetSupportedInputTypes"]=true, ["GetLastInputType"]=true,
+    ["SetNavigationGamepads"]=true,
+    -- 声音服务方法
+    ["GetListener"]=true, ["SetListener"]=true,
+    -- 动画控制器方法
+    ["GetPlayingAnimationTracks"]=true, ["LoadAnimation"]=true,
+    -- 人体描述方法
+    ["GetAppliedDescription"]=true, ["ApplyDescription"]=true,
+    ["GetHumanoidDescriptionFromUserId"]=true, ["GetHumanoidDescriptionFromOutfitId"]=true,
+    -- 组服务方法
+    ["GetGroupInfoAsync"]=true, ["GetGroupsAsync"]=true,
+    ["GetRankInGroup"]=true, ["GetRoleInGroup"]=true,
+    -- 徽章服务方法
+    ["UserHasBadgeAsync"]=true, ["AwardBadge"]=true, ["GetBadgeInfoAsync"]=true,
+    -- 分析服务方法
+    ["LogEvent"]=true, ["TrackEvent"]=true,
+    -- 内容保护服务方法
+    ["ProtectInstance"]=true, ["UnprotectInstance"]=true,
+    -- 虚拟用户方法
+    ["CaptureIcon"]=true, ["Button1Down"]=true, ["Button1Up"]=true,
+    ["Button2Down"]=true, ["Button2Up"]=true, ["KeyDown"]=true, ["KeyUp"]=true,
+    ["MouseMove"]=true, ["SetMouseLocation"]=true, ["SendKeyEvent"]=true,
+    ["SendMouseEvent"]=true, ["SendScrollWheelEvent"]=true,
+    -- 虚拟输入服务方法
+    ["SendKeyEvent"]=true, ["SendMouseEvent"]=true, ["SendScrollWheelEvent"]=true,
+    ["SendTextInput"]=true,
+    -- 路径寻找服务方法
+    ["CreatePath"]=true, ["GetAgents"]=true,
+    -- 路径方法
+    ["Run"]=true, ["Stop"]=true, ["CheckOcclusionAsync"]=true,
+    ["GetWaypoints"]=true, ["Status"]=true,
+    -- 导航网格方法
+    ["ComputeAsync"]=true, ["FindPathAsync"]=true,
+    -- 角色移动方法
+    ["MoveTo"]=true, ["CheckPathCollision"]=true,
+    -- 控制模块方法
+    ["GetMoveVector"]=true, ["IsMovePressed"]=true, ["IsJumpPressed"]=true,
+    -- 相机控制模块方法
+    ["GetCameraCFrame"]=true, ["GetCameraFocus"]=true,
+    -- 玩家模块方法
+    ["GetControls"]=true, ["GetCamera"]=true, ["GetClickDetector"]=true,
+    -- 点击检测器方法
+    ["MaxActivationDistance"]=true, ["CursorIcon"]=true,
+    -- 探测器方法
+    ["MaxActivationDistance"]=true, ["CursorIcon"]=true,
+    -- 提示方法
+    ["Enabled"]=true, ["Duration"]=true,
+    -- 选择框方法
+    ["Adornee"]=true, ["Color3"]=true, ["LineThickness"]=true,
+    -- 表面外观方法
+    ["Face"]=true, ["Transparency"]=true, ["Color3"]=true,
+    -- 贴花方法
+    ["Face"]=true, ["Texture"]=true, ["Transparency"]=true,
+    -- 纹理方法
+    ["Face"]=true, ["Texture"]=true, ["Transparency"]=true,
+    -- 火花方法
+    ["Enabled"]=true, ["Color"]=true, ["SecondaryColor"]=true,
+    -- 火焰方法
+    ["Enabled"]=true, ["Color"]=true, ["SecondaryColor"]=true,
+    -- 烟雾方法
+    ["Enabled"]=true, ["Color"]=true, ["Opacity"]=true, ["Size"]=true,
+    -- 粒子发射器方法
+    ["Enabled"]=true, ["Color"]=true, ["Size"]=true, ["Transparency"]=true,
+    ["Lifetime"]=true, ["Rate"]=true, ["Speed"]=true, ["SpreadAngle"]=true,
+    ["Texture"]=true, ["Acceleration"]=true, ["Drag"]=true, ["Rotation"]=true,
+    ["RotSpeed"]=true, ["EmissionDirection"]=true, ["Squash"]=true,
+    ["TimeScale"]=true, ["VelocityInheritance"]=true, ["VelocitySpread"]=true,
+    ["LightEmission"]=true, ["LightInfluence"]=true, ["TextureLength"]=true,
+    ["TextureMode"]=true, ["ZOffset"]=true,
+    -- 光束方法
+    ["Enabled"]=true, ["Color"]=true, ["Transparency"]=true, ["Width0"]=true,
+    ["Width1"]=true, ["FaceCamera"]=true, ["LightEmission"]=true,
+    ["LightInfluence"]=true, ["Texture"]=true, ["TextureLength"]=true,
+    ["TextureMode"]=true, ["TextureSpeed"]=true, ["ZOffset"]=true,
+    -- 轨迹方法
+    ["Enabled"]=true, ["Color"]=true, ["Transparency"]=true, ["Width0"]=true,
+    ["Width1"]=true, ["FaceCamera"]=true, ["LightEmission"]=true,
+    ["LightInfluence"]=true, ["Texture"]=true, ["TextureLength"]=true,
+    ["TextureMode"]=true, ["TextureSpeed"]=true, ["ZOffset"]=true,
+    -- 高亮方法
+    ["Enabled"]=true, ["FillColor"]=true, ["OutlineColor"]=true,
+    ["FillTransparency"]=true, ["OutlineTransparency"]=true, ["DepthMode"]=true,
+    -- 选择框方法
+    ["Adornee"]=true, ["Color3"]=true, ["LineThickness"]=true,
+    ["SurfaceTransparency"]=true, ["SurfaceColor3"]=true, ["AlwaysOnTop"]=true,
+    -- 表面选择方法
+    ["Adornee"]=true, ["Surface"]=true, ["SurfaceColor3"]=true,
+    ["SurfaceTransparency"]=true,
+    -- 部件方法
+    ["CanCollide"]=true, ["CanTouch"]=true, ["CanQuery"]=true, ["CanSimulate"]=true,
+    ["Anchored"]=true, ["Mass"]=true, ["Material"]=true, ["Color"]=true,
+    ["Transparency"]=true, ["Reflectance"]=true, ["Size"]=true,
+    ["Position"]=true, ["CFrame"]=true, ["Orientation"]=true,
+    ["Rotation"]=true, ["Velocity"]=true, ["RotVelocity"]=true,
+    ["AssemblyLinearVelocity"]=true, ["AssemblyAngularVelocity"]=true,
+    ["AssemblyCenterOfMass"]=true, ["AssemblyMass"]=true,
+    ["AssemblyRootPart"]=true, ["CenterOfMass"]=true,
+    ["GetConnectedParts"]=true, ["GetRootPart"]=true, ["GetJoints"]=true,
+    ["BreakJoints"]=true, ["MakeJoints"]=true, ["GetTouchingParts"]=true,
+    ["CanSetNetworkOwnership"]=true, ["GetNetworkOwner"]=true,
+    ["SetNetworkOwner"]=true, ["SetNetworkOwnershipAuto"]=true,
+    ["IsNetworkOwner"]=true, ["ApplyImpulse"]=true, ["ApplyAngularImpulse"]=true,
+    ["GetBoundsAligned"]=true, ["GetBoundingBox"]=true,
+    -- 模型方法
+    ["GetBoundingBox"]=true, ["GetExtentsSize"]=true, ["MoveTo"]=true,
+    ["TranslateBy"]=true, ["ScaleTo"]=true, ["GetScale"]=true,
+    ["PrimaryPart"]=true, ["WorldPivot"]=true, ["WorldOrigin"]=true,
+    ["GetPivot"]=true, ["PivotTo"]=true,
+    -- 文件夹方法
+    ["GetChildren"]=true, ["FindFirstChild"]=true,
+    -- 配置方法
+    ["GetAttribute"]=true, ["SetAttribute"]=true, ["GetAttributes"]=true,
+    -- 附件方法
+    ["Position"]=true, ["Orientation"]=true, ["CFrame"]=true,
+    ["Axis"]=true, ["SecondaryAxis"]=true, ["WorldAxis"]=true,
+    ["WorldSecondaryAxis"]=true, ["WorldCFrame"]=true, ["WorldPosition"]=true,
+    -- 约束方法
+    ["Enabled"]=true, ["Visible"]=true, ["Color"]=true, ["Thickness"]=true,
+    ["Attachment0"]=true, ["Attachment1"]=true,
+    -- 弹簧约束方法
+    ["FreeLength"]=true, ["Stiffness"]=true, ["Damping"]=true, ["MaxForce"]=true,
+    ["MaxExtents"]=true, ["Relaxation"]=true,
+    -- 杆约束方法
+    ["Length"]=true, ["Thickness"]=true, ["Visible"]=true, ["Color"]=true,
+    -- 绳索约束方法
+    ["Length"]=true, ["Thickness"]=true, ["Visible"]=true, ["Color"]=true,
+    ["WinchEnabled"]=true, ["WinchSpeed"]=true, ["WinchTarget"]=true,
+    -- 铰链约束方法
+    ["ActuatorType"]=true, ["AngularVelocity"]=true, ["MotorMaxAcceleration"]=true,
+    ["MotorMaxTorque"]=true, ["ServoMaxTorque"]=true, ["TargetAngle"]=true,
+    ["TargetVelocity"]=true, ["LimitsEnabled"]=true, ["LowerAngle"]=true,
+    ["UpperAngle"]=true, ["Restitution"]=true,
+    -- 圆柱约束方法
+    ["ActuatorType"]=true, ["AngularVelocity"]=true, ["MotorMaxAcceleration"]=true,
+    ["MotorMaxTorque"]=true, ["ServoMaxTorque"]=true, ["TargetAngle"]=true,
+    ["TargetVelocity"]=true, ["LimitsEnabled"]=true, ["LowerAngle"]=true,
+    ["UpperAngle"]=true, ["Restitution"]=true,
+    -- 球形约束方法
+    ["LimitsEnabled"]=true, ["UpperAngle"]=true, ["Restitution"]=true,
+    -- 棱柱约束方法
+    ["ActuatorType"]=true, ["Velocity"]=true, ["MotorMaxAcceleration"]=true,
+    ["MotorMaxForce"]=true, ["ServoMaxForce"]=true, ["TargetPosition"]=true,
+    ["LimitsEnabled"]=true, ["LowerLimit"]=true, ["UpperLimit"]=true,
+    ["Restitution"]=true,
+    -- 扭矩约束方法
+    ["Torque"]=true, ["AngularVelocity"]=true, ["MaxTorque"]=true,
+    -- 力约束方法
+    ["Force"]=true, ["Velocity"]=true, ["MaxForce"]=true,
+    -- 线速度约束方法
+    ["Velocity"]=true, ["MaxForce"]=true, ["VectorVelocity"]=true,
+    ["PlaneVelocity"]=true, ["LineVelocity"]=true,
+    -- 角速度约束方法
+    ["AngularVelocity"]=true, ["MaxTorque"]=true,
+    -- 对齐方向约束方法
+    ["AngularVelocity"]=true, ["MaxTorque"]=true, ["Responsiveness"]=true,
+    ["Mode"]=true, ["PrimaryAxis"]=true, ["SecondaryAxis"]=true,
+    ["CFrame"]=true,
+    -- 对齐位置约束方法
+    ["Velocity"]=true, ["MaxForce"]=true, ["Responsiveness"]=true,
+    ["Mode"]=true, ["Position"]=true, ["CFrame"]=true,
+    -- 对齐方向约束方法
+    ["AngularVelocity"]=true, ["MaxTorque"]=true, ["Responsiveness"]=true,
+    ["Mode"]=true, ["PrimaryAxis"]=true, ["SecondaryAxis"]=true,
+    ["CFrame"]=true,
+    -- 对齐位置约束方法
+    ["Velocity"]=true, ["MaxForce"]=true, ["Responsiveness"]=true,
+    ["Mode"]=true, ["Position"]=true, ["CFrame"]=true,
+    -- 向量力约束方法
+    ["Force"]=true, ["ApplyAtCenterOfMass"]=true, ["Location"]=true,
+    -- 向量扭矩约束方法
+    ["Torque"]=true, ["ApplyAtCenterOfMass"]=true,
+    -- 角速度约束方法
+    ["AngularVelocity"]=true, ["MaxTorque"]=true,
+    -- 线速度约束方法
+    ["Velocity"]=true, ["MaxForce"]=true,
+    -- 对齐方向约束方法
+    ["AngularVelocity"]=true, ["MaxTorque"]=true,
+    -- 对齐位置约束方法
+    ["Velocity"]=true, ["MaxForce"]=true,
+    -- 向量力约束方法
+    ["Force"]=true,
+    -- 向量扭矩约束方法
+    ["Torque"]=true,
+    -- 角速度约束方法
+    ["AngularVelocity"]=true,
+    -- 线速度约束方法
+    ["Velocity"]=true,
+    -- 对齐方向约束方法
+    ["AngularVelocity"]=true,
+    -- 对齐位置约束方法
+    ["Velocity"]=true,
+    -- 向量力约束方法
+    ["Force"]=true,
+    -- 向量扭矩约束方法
+    ["Torque"]=true,
+  }
 
   local function dc(t)
     if type(t) ~= "table" then return t end
@@ -5292,7 +5641,54 @@ local function eliminate_runtime_code(body, R)
   end
   local function has_user_string(e)
     if type(e) ~= "table" then return false end
-    if e[1] == "str" and type(e[2]) == "string" and e[2]:find("[^\x20-\x7e]") then return true end
+    if e[1] == "str" and type(e[2]) == "string" then
+      local s = e[2]
+      -- 非ASCII字符（中文字符串等）
+      if s:find("[^\x20-\x7e]") then return true end
+      -- 用户定义的ASCII字符串特征
+      local user_str_patterns = {
+        "DeltaUI", "rbxassetid", "rbxasset", "http", "https",
+        "Players", "UserInputService", "CoreGui", "ReplicatedStorage",
+        "TweenService", "RunService", "Stats", "HttpService",
+        "ScreenGui", "Frame", "TextLabel", "TextButton", "ScrollingFrame",
+        "UIListLayout", "UICorner", "UIGridLayout", "UIStroke", "UIPadding",
+        "ImageLabel", "ImageButton", "TextBox", "LocalScript", "Script",
+        "Shirt", "Pants", "ShirtTemplate", "PantsTemplate", "Humanoid",
+        "HumanoidRootPart", "Torso", "Character", "Backpack", "Tool",
+        "RemoteEvent", "RemoteFunction", "rEvents", "Folder", "Model",
+        "Instance", "Enum", "Vector2", "Vector3", "CFrame", "Color3",
+        "UDim2", "UDim", "ColorSequence", "NumberSequence",
+        "game", "workspace", "script", "owner", "creator",
+        "MouseButton1Click", "MouseButton1Down", "MouseButton1Up",
+        "MouseEnter", "MouseLeave", "InputBegan", "InputChanged", "InputEnded",
+        "Touched", "TouchEnded", "ChildAdded", "ChildRemoved",
+        "GetService", "FindFirstChild", "FindFirstChildOfClass", "IsA",
+        "GetChildren", "GetDescendants", "WaitForChild", "Clone", "Destroy",
+        "FireServer", "InvokeServer", "FireClient", "InvokeClient",
+        "LoadString", "loadstring", "HttpGet", "HttpPost",
+        "isfile", "readfile", "writefile", "isfolder", "makefolder",
+        "getcustomasset", "getsynasset", "syn", "request",
+        "Lucide", "GetAsset", "ImageRectOffset", "ImageRectSize",
+        "ScaleType", "Fit", "ImageColor3", "BackgroundTransparency",
+        "TextColor3", "TextSize", "TextXAlignment", "TextYAlignment",
+        "Font", "SourceSans", "SourceSansBold",
+        "ZIndexBehavior", "Sibling", "Global", "BorderSizePixel",
+        "ClipsDescendants", "CanvasSize", "ScrollBarThickness",
+        "ScrollingDirection", "Padding", "HorizontalAlignment", "VerticalAlignment",
+        "CornerRadius", "Thickness", "Transparency",
+        "Size", "Position", "Parent", "Name", "Visible", "Active",
+        "AutoButtonColor", "ZIndex", "AutoLocalize",
+        "Luraph", "cleanLuraphPrefix", "Luraph Script",
+        "gradients", "Theme", "config", "loadConfig",
+        "safeRun", "notify", "getRemote", "callRemote",
+        "petShop", "cPetShop", "petsFolder",
+        "Button", "Toggle", "Tab", "Dropdown", "Input", "Paragraph", "Section",
+        "CreateWindow", "WindUI", "setLoop",
+      }
+      for _, pat in ipairs(user_str_patterns) do
+        if s:find(pat, 1, true) then return true end
+      end
+    end
     for i = 2, #e do if type(e[i]) == "table" and has_user_string(e[i]) then return true end end
     return false
   end
@@ -6215,6 +6611,11 @@ function M.deobfWeAreDevClean(code)
 end
 
 -- 全局导出（兼容 dofile 后直接调用）
+deobfWeAreDevFull = M.deobfWeAreDevFull
+extract_user_code = M.extract_user_code
+deobfWeAreDevClean = M.deobfWeAreDevClean
+
+
 deobfWeAreDevFull = M.deobfWeAreDevFull
 extract_user_code = M.extract_user_code
 deobfWeAreDevClean = M.deobfWeAreDevClean

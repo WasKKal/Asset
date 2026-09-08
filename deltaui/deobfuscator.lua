@@ -3454,8 +3454,7 @@ local function LcgDecryptor_new(mul45, add45, mul8, key8)
 end
 
 local function _utf8_ok(b)
-  if not isValidUTF8(b) then return false end
-  return isPrintableText(b)
+  return isValidUTF8(b)
 end
 
 local function brute_key8(mul45, add45, mul8, pairs)
@@ -3466,12 +3465,29 @@ local function brute_key8(mul45, add45, mul8, pairs)
   end
   local best = nil
   local bestscore = -1
+  local function _has_ctrl(s)
+    for i = 1, #s do
+      local b = s:byte(i)
+      if b < 0x20 and b ~= 0x09 then return true end
+    end
+    return false
+  end
+  local _common_pat = "[%p%d%a，。！？：；、的一是在有和等不了人我他这中大为上个国以到说们要你会着没那好自也很去时过家学只如起把还多小都就她从想实看正心样仍比或但质气第向道命此变条没结解问意建月青边红听则完却千吃做叫当住给活走先师写快]"
+  local function _meaning_score(s)
+    local sc = 0
+    for _ in s:gmatch(_common_pat) do sc = sc + 0.1 end
+    return math.min(sc, 1.0)
+  end
   for k = 0, 255 do
     local d = LcgDecryptor_new(mul45, add45, mul8, k)
     local sc = 0
     for _, p in ipairs(sample) do
       local ok, result = pcall(function() return d:decrypt(p[1], p[2]) end)
-      if ok and _utf8_ok(result) then sc = sc + 1
+      if ok and isPrintableText(result) and not _has_ctrl(result) then
+        sc = sc + 2 + _meaning_score(result)
+      elseif ok and _utf8_ok(result) and not _has_ctrl(result) then
+        sc = sc + 2 + _meaning_score(result)
+      elseif ok and _utf8_ok(result) then sc = sc + 0
       elseif ok then sc = sc - 1
       else sc = sc - 2 end
     end

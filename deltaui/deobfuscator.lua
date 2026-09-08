@@ -5468,10 +5468,25 @@ WeAreDev V2 通用反编译器（完整管线，基于 Prometheus Vmify VM 逆�
 ]]
 local function deobfWeAreDevV2(code)
     if type(code) ~= "string" or #code == 0 then return nil, "空代码" end
-    -- 检测是否为 WeAreDev/Prometheus Vmify 结构
-    local isVmify = code:match("wearedevs?%.net/obfuscator") ~= nil or code:match("Tamper Detected") ~= nil
+    -- 检测是否为 WeAreDev/Prometheus Vmify 结构（多特征联合判断）
+    local score = 0
+    if code:match("wearedevs?%.net/obfuscator") then score = score + 3 end
+    if code:match("Tamper Detected") then score = score + 3 end
+    if code:match("newproxy") then score = score + 1 end
+    if code:match("getfenv and getfenv") then score = score + 1 end
+    if code:match("v001%.0%.0") then score = score + 2 end
+    if code:match("__metatable") and code:match("setmetatable") then score = score + 1 end
+    local isVmify = score >= 3
     if not isVmify then
-        return nil, "未识别为 WeAreDev Vmify 结构"
+        -- 非混淆代码直接返回原文，避免输出垃圾
+        return {
+            source = code,
+            stage = "passthrough",
+            isVmify = false,
+            lcgParams = {},
+            v1Stats = {},
+            note = "输入非WeAreDev混淆代码，原样返回（检测得分: " .. score .. "）"
+        }
     end
     -- 执行完整反编译管线
     local ok, result = pcall(function()
@@ -5480,13 +5495,19 @@ local function deobfWeAreDevV2(code)
     if not ok or type(result) ~= "string" or #result == 0 then
         return nil, "完整反编译失败: " .. tostring(result)
     end
+    -- 体积 sanity check：输出超过输入10倍时警告
+    local ratio = #result / #code
+    local note = "完整反编译输出（控制流结构化+代码生成）"
+    if ratio > 10 then
+        note = note .. string.format(" [警告: 输出体积是输入的%.1f倍，可能存在反编译异常]", ratio)
+    end
     return {
         source = result,
         stage = "v2_full_decompile",
         isVmify = isVmify,
         lcgParams = {},
         v1Stats = {},
-        note = "完整反编译输出（控制流结构化+代码生成）"
+        note = note
     }
 end
 

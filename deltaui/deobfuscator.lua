@@ -241,6 +241,8 @@ local function deobfSetupHouseSync()
     pcall(function()
         if _G.__DeltaUI_onTabChanged then
             _G.__DeltaUI_onTabChanged:Connect(function(tabName)
+                -- 先保存当前选项卡的内容
+                deobfHouseSaveNow()
                 if tabName and deobfHouseFileMap[tabName] then
                     local fn = deobfHouseFileMap[tabName]
                     pcall(function() cb:SetAttribute("deobfFileName", fn) end)
@@ -248,6 +250,32 @@ local function deobfSetupHouseSync()
             end)
         end
     end)
+end
+
+-- 保存所有打开的选项卡
+local function deobfHouseSaveAll()
+    if not dataApi then return end
+    local api = _G
+    local cb = api.__DeltaUI_codeBox
+    if not cb then return end
+    
+    -- 先保存当前选项卡
+    deobfHouseSaveNow()
+    
+    -- 遍历所有打开的文件并保存
+    for name, tabName in pairs(deobfHouseOpenFiles) do
+        -- 尝试获取该选项卡的内容
+        local content = nil
+        if api.__DeltaUI_getTabContent then
+            local ok, r = pcall(api.__DeltaUI_getTabContent, tabName)
+            if ok and r then content = r end
+        end
+        if content and #content > 0 then
+            pcall(function()
+                dataApi.writeFile(name, content)
+            end)
+        end
+    end
 end
 
 
@@ -301,6 +329,17 @@ local function deobfOpenInHouseEditor(name, content)
     end
 
     if api.__DeltaUI_renderTabs then pcall(api.__DeltaUI_renderTabs) end
+
+    -- 切换到新创建的选项卡
+    local switched = false
+    if api.__DeltaUI_switchTab then
+        local ok = pcall(api.__DeltaUI_switchTab, tabName)
+        if ok then switched = true end
+    end
+    if not switched and api.__DeltaUI_selectTab then
+        local ok = pcall(api.__DeltaUI_selectTab, tabName)
+        if ok then switched = true end
+    end
 
     -- 确保跳转到housepage
     if deobfSwitchPage then

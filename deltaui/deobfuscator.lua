@@ -9445,6 +9445,7 @@ local function deobfRunTool(toolId)
             deobfNotify("反混淆完成", "输出 " .. #result.source .. " 字节")
         end
         AddLog("=== 反混淆完成 ===", "info")
+        pcall(function() deobfRefreshFileList() end)
         return
     end
 

@@ -563,7 +563,97 @@ local function deobfLoadFiles()
         end
     end
     table.sort(result, function(a, b) return a:lower() < b:lower() end)
-    return result
+    local func_map = {}
+  for bid, block in pairs(blocks) do
+    if block and block.body then
+      for _, stmt in ipairs(block.body) do
+        local k = stmt[1] or stmt.tag
+        local function find_mk(e)
+          if type(e) ~= "table" then return nil end
+          if e[1] == "mkclosure" then return e end
+          for _, v in pairs(e) do
+            if type(v) == "table" then
+              local r = find_mk(v)
+              if r then return r end
+            end
+          end
+          return nil
+        end
+        local mk = find_mk(stmt)
+        if mk then
+          local fid = mk[2]
+          local vname = (k == "let" or k == "setvar") and stmt[2] or "anon"
+          if not func_map[fid] then
+            func_map[fid] = {varname=vname, def_block=bid}
+          end
+        end
+      end
+    end
+  end
+
+  local function restore_func_body(fid)
+    local fblock = blocks[fid]
+    if not fblock or not fblock.body then return {} end
+    local fres = {}
+    local fknown = {}
+    for _, stmt in ipairs(fblock.body) do
+      local k = stmt[1] or stmt.tag
+      if has_user_feature(stmt) then
+        local line = nil
+        if k == "let" or k == "setvar" then
+          local vn = stmt[2]
+          local val = stmt[3]
+          if type(val) == "table" then
+            local vs = restore_expr(val, fknown)
+            line = vn .. " = " .. vs
+            if val[1] == "str" or val[1] == "num" then fknown[vn] = vs end
+          end
+        elseif k == "assign" then
+          local lhs = stmt[2]
+          local rhs = stmt[3]
+          if type(lhs) == "table" and type(rhs) == "table" then
+            local ls = {}
+            local rs = {}
+            for j = 1, #lhs do table.insert(ls, restore_expr(lhs[j], fknown)) end
+            for j = 1, #rhs do table.insert(rs, restore_expr(rhs[j], fknown)) end
+            line = table.concat(ls, ", ") .. " = " .. table.concat(rs, ", ")
+          end
+        elseif k == "callstmt" then
+          line = restore_expr(stmt[2], fknown)
+        end
+        if line and #line > 3 then
+          local is_rt = false
+          for _, pat in ipairs(runtime_patterns) do
+            if line:find(pat) then is_rt = true; break end
+          end
+          if not is_rt then table.insert(fres, line) end
+        end
+      end
+    end
+    return fres
+  end
+
+  local organized = {}
+  table.insert(organized, "-- 还原的用户功能逻辑:")
+  local used_funcs = {}
+  for _, line in ipairs(result) do
+    table.insert(organized, line)
+  end
+  for fid, info in pairs(func_map) do
+    if not used_funcs[fid] then
+      local body = restore_func_body(fid)
+      if #body > 0 then
+        used_funcs[fid] = true
+        table.insert(organized, "")
+        table.insert(organized, "local " .. info.varname .. " = function()")
+        for _, line in ipairs(body) do
+          table.insert(organized, "  " .. line)
+        end
+        table.insert(organized, "end")
+      end
+    end
+  end
+  return organized
 end
 
 local function deobfRefreshFileList()
@@ -6133,6 +6223,7 @@ end
 
 local function vm_restore_user_code(decomp_result)
   local blocks = decomp_result.blocks
+  local runtime_patterns = {"p%[","alloc%(","mkclosure","pcall%(","error%(","Tamper","string%.","math%.","table%.","os%.","coroutine%.","bit32%.","tostring%(","tonumber%(","type%(","select%(","unpack%(","rawget%(","rawset%(","rawequal%(","pairs%(","ipairs%(","next%(","setmetatable%(","getmetatable%(","newproxy%(","loadstring%(","load%(","random%(","byte%(","len%(","gsub%(","gmatch%(","%% 256","%% 257","%% 35184372088832","%% 65536","HttpGet"}
   local user_apis = {task=true,wait=true,spawn=true,delay=true,defer=true,game=true,workspace=true,script=true,Players=true,LocalPlayer=true,Character=true,Humanoid=true,HumanoidRootPart=true,FindFirstChild=true,FindFirstChildOfClass=true,IsA=true,GetDescendants=true,GetChildren=true,BreakJoints=true,Activate=true,ChangeState=true,Jumping=true,CFrame=true,Vector3=true,UDim2=true,Color3=true,Connect=true,GetService=true,UserInputService=true,JumpRequest=true,print=true,warn=true,error=true,assert=true,firetouchinterest=true,fireclickdetector=true,_G=true,shared=true,SelectedOre=true,MineSpeed=true,InfiniteJump=true,AutoFarmEnabled=true,AutoCollectEnabled=true,LoadCharacter=true,CharacterAdded=true,Tool=true,BasePart=true,fromOffset=true,fromScale=true,new=true,Magnitude=true,Position=true,Name=true,Toggle=true,Button=true,Slider=true,Dropdown=true,Tab=true,CreateWindow=true}
 
   local function is_global_access(e)
@@ -6323,7 +6414,6 @@ local function vm_restore_user_code(decomp_result)
           end
           if line and #line > 3 then
             local is_runtime = false
-            local runtime_patterns = {"p%[","alloc%(","mkclosure","pcall%(","error%(","Tamper","string%.","math%.","table%.","os%.","coroutine%.","bit32%.","tostring%(","tonumber%(","type%(","select%(","unpack%(","rawget%(","rawset%(","rawequal%(","pairs%(","ipairs%(","next%(","setmetatable%(","getmetatable%(","newproxy%(","loadstring%(","load%(","random%(","byte%(","len%(","gsub%(","gmatch%(","%% 256","%% 257","%% 35184372088832","%% 65536","HttpGet"}
             for _, pat in ipairs(runtime_patterns) do
               if line:find(pat) then is_runtime = true; break end
             end
@@ -6333,7 +6423,103 @@ local function vm_restore_user_code(decomp_result)
       end
     end
   end
-  return result
+
+  local func_map = {}
+  for bid, block in pairs(blocks) do
+    if block and block.body then
+      for _, stmt in ipairs(block.body) do
+        local k = stmt[1] or stmt.tag
+        local function find_mk(e)
+          if type(e) ~= "table" then return nil end
+          if e[1] == "mkclosure" then return e end
+          for _, v in pairs(e) do
+            if type(v) == "table" then
+              local r = find_mk(v)
+              if r then return r end
+            end
+          end
+          return nil
+        end
+        local mk = find_mk(stmt)
+        if mk then
+          local fid = mk[2]
+          local vname = (k == "let" or k == "setvar") and stmt[2] or "anon"
+          if not func_map[fid] then
+            func_map[fid] = {varname=vname, def_block=bid}
+          end
+        end
+      end
+    end
+  end
+
+  local function restore_func_body(fid)
+    local fblock = blocks[fid]
+    if not fblock or not fblock.body then return {} end
+    local fres = {}
+    local fknown = {}
+    for _, stmt in ipairs(fblock.body) do
+      local k = stmt[1] or stmt.tag
+      if has_user_feature(stmt) then
+        local line = nil
+        if k == "let" or k == "setvar" then
+          local vn = stmt[2]
+          local val = stmt[3]
+          if type(val) == "table" then
+            local vs = restore_expr(val, fknown)
+            line = vn .. " = " .. vs
+            if val[1] == "str" or val[1] == "num" then fknown[vn] = vs end
+          end
+        elseif k == "assign" then
+          local lhs = stmt[2]
+          local rhs = stmt[3]
+          if type(lhs) == "table" and type(rhs) == "table" then
+            local ls = {}
+            local rs = {}
+            for j = 1, #lhs do table.insert(ls, restore_expr(lhs[j], fknown)) end
+            for j = 1, #rhs do table.insert(rs, restore_expr(rhs[j], fknown)) end
+            line = table.concat(ls, ", ") .. " = " .. table.concat(rs, ", ")
+          end
+        elseif k == "callstmt" then
+          line = restore_expr(stmt[2], fknown)
+        end
+        if line and #line > 3 then
+          local is_rt = false
+          for _, pat in ipairs(runtime_patterns) do
+            if line:find(pat) then is_rt = true; break end
+          end
+          if not is_rt then table.insert(fres, line) end
+        end
+      end
+    end
+    return fres
+  end
+
+  local organized = {}
+  for _, line in ipairs(result) do
+    table.insert(organized, line)
+  end
+  for fid, info in pairs(func_map) do
+    local body = restore_func_body(fid)
+    if #body > 0 then
+      local fname = info.varname
+      local fname_count = 0
+      for _, existing in ipairs(organized) do
+        if existing:find("local " .. fname .. " = function") then
+          fname_count = fname_count + 1
+        end
+      end
+      if fname_count > 0 then
+        fname = fname .. "_" .. tostring(fid)
+      end
+      table.insert(organized, "")
+      table.insert(organized, "local " .. fname .. " = function()")
+      for _, line in ipairs(body) do
+        table.insert(organized, "  " .. line)
+      end
+      table.insert(organized, "end")
+    end
+  end
+  return organized
 end
 
 

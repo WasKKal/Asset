@@ -568,6 +568,7 @@ end
 
 local function deobfRefreshFileList()
     if not deobfFileList then return end
+    deobfRefreshPending = false
     for _, item in pairs(deobfFileItems) do
         pcall(function() item:Destroy() end)
     end
@@ -581,10 +582,14 @@ local function deobfRefreshFileList()
     if count == 0 and #oldFiles > 0 then
         deobfFiles = oldFiles
         count = #deobfFiles
-        -- 延迟再次刷新，确保新创建的文件能显示
-        task.defer(function()
-            pcall(function() deobfRefreshFileList() end)
-        end)
+        -- 延迟再次刷新（仅一次，防止无限递归）
+        if not deobfRefreshPending then
+            deobfRefreshPending = true
+            task.defer(function()
+                deobfRefreshPending = false
+                pcall(function() deobfRefreshFileList() end)
+            end)
+        end
     end
 
     if count == 0 then

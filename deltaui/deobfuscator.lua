@@ -9069,6 +9069,7 @@ local function deobfRunTool(toolId)
             AddLog("=== 反混淆完成 ===", "info")
             AddLog("总计 " .. totalChanges .. " 处修改", "info")
         end
+        pcall(function() deobfRefreshFileList() end)
         return
     end
 
@@ -9099,6 +9100,7 @@ local function deobfRunTool(toolId)
             deobfNotify("反混淆完成", "输出 " .. #result.source .. " 字节")
         end
         AddLog("=== 反混淆完成 ===", "info")
+        pcall(function() deobfRefreshFileList() end)
         return
     end
 

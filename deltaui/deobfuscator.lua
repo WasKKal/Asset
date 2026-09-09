@@ -6076,38 +6076,6 @@ local function eliminate_runtime_code(body, R)
   end
 
   local current = body
-  local function is_vm_while(s)
-    if s.tag ~= "while" then return false end
-    local cond = s.cond
-    if type(cond) ~= "table" then return false end
-    if cond[1] == "var" and runtime_vars[cond[2]] then return true end
-    if cond[1] == "bin" then
-      local l, r = cond[3], cond[4]
-      if type(l)=="table" and l[1]=="var" and runtime_vars[l[2]] then return true end
-      if type(r)=="table" and r[1]=="var" and runtime_vars[r[2]] then return true end
-    end
-    return false
-  end
-  local function remove_vm_whiles(stmts_list)
-    local result = {}
-    for _, s in ipairs(stmts_list) do
-      if s.tag == "if" then
-        s["then"] = remove_vm_whiles(s["then"] or {})
-        s.els = remove_vm_whiles(s.els or {})
-        result[#result+1] = s
-      elseif s.tag == "while" then
-        s.body = remove_vm_whiles(s.body or {})
-        if is_vm_while(s) and not stmt_has_user(s) then
-        else
-          result[#result+1] = s
-        end
-      else
-        result[#result+1] = s
-      end
-    end
-    return result
-  end
-  current = remove_vm_whiles(current)
   for iter = 1, 50 do
     local changed = false
     local function remove_runtime(stmts_list)

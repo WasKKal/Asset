@@ -5644,6 +5644,23 @@ function vm_is_runtime_expr(e, depth)
   
   if k == "alloc" or k == "mkclosure" then return true end
   
+  if k == "func" or k == "function" then
+    local body = e[3] or e[2]
+    if type(body) == "table" then
+      local has_user = false
+      local function check_body(b)
+        if type(b) ~= "table" then return end
+        if vm_has_user_feature(b) then has_user = true end
+        for i, v in ipairs(b) do
+          if type(v) == "table" then check_body(v) end
+        end
+      end
+      check_body(body)
+      if not has_user then return true end
+    end
+    return true
+  end
+  
   if k == "var" then
     return vm_register_names[e[2]] == true
   end
@@ -5732,6 +5749,21 @@ function vm_is_runtime_expr(e, depth)
   end
   
   if k == "bin" or k == "un" or k == "binary" or k == "unary" then
+    local has_str = false
+    local has_num = false
+    local function check_str_num(v)
+      if type(v) ~= "table" then return end
+      if v[1] == "str" then has_str = true end
+      if v[1] == "num" then has_num = true end
+      for i, val in ipairs(v) do
+        if type(val) == "table" then check_str_num(val) end
+      end
+    end
+    for i = 3, #e do
+      check_str_num(e[i])
+    end
+    if has_str and has_num then return true end
+    
     for i = 3, #e do
       if type(e[i]) == "table" and not vm_is_runtime_expr(e[i], depth + 1) then
         return false

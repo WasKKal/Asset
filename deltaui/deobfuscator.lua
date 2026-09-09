@@ -6147,7 +6147,55 @@ function vm_generate_code(interpret_result)
     ::continue::
   end
   
-  return table.concat(lines, "\n")
+  local raw_result = table.concat(lines, "\n")
+  
+  -- 模式匹配：重建函数调用结构
+  local rebuilt = {}
+  local pending_str = nil
+  local pending_var = nil
+  
+  for line in raw_result:gmatch("[^\n]+") do
+    local str_var, str_val = line:match("^local (%w+) = \"(.+)\"$")
+    if str_var and str_val then
+      if pending_str then
+        local q = string.char(34)
+        table.insert(rebuilt, "local " .. pending_var .. " = " .. q .. pending_str .. q)
+      end
+      pending_str = str_val
+      pending_var = str_var
+    else
+      local table_var, table_content = line:match("^local (%w+) = (.+)$")
+      local matched = false
+      if table_var and table_content:find("Title") and pending_var then
+        local pattern = "=%s*" .. pending_var .. "%s*[,}]"
+        if table_content:find(pattern) then
+          local q = string.char(34)
+          local gsub_pattern = "=%s*" .. pending_var .. "(%s*[,}])"
+          local replaced = table_content:gsub(gsub_pattern, "=" .. q .. pending_str .. q .. "%1")
+          table.insert(rebuilt, "-- UI调用: " .. replaced)
+          pending_str = nil
+          pending_var = nil
+          matched = true
+        end
+      end
+      if not matched then
+        if pending_str then
+          local q = string.char(34)
+          table.insert(rebuilt, "local " .. pending_var .. " = " .. q .. pending_str .. q)
+          pending_str = nil
+          pending_var = nil
+        end
+        table.insert(rebuilt, line)
+      end
+    end
+  end
+  
+  if pending_str then
+    local q = string.char(34)
+    table.insert(rebuilt, "local " .. pending_var .. " = " .. q .. pending_str .. q)
+  end
+  
+  return table.concat(rebuilt, "\n")
 end
 
 -- ============================================================

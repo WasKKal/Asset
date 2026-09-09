@@ -4658,7 +4658,7 @@ pendingLogs = {}
 logProcessing = false
 
 local defaultEditorText = [=[
-
+-- DeltaUI Script Editor
 ]=]
 
 local errorTranslationCache = {}

@@ -6346,24 +6346,26 @@ function vm_generate_code(interpret_result, decomp_result)
     
     local lua_code = vm_stmt_to_lua(stmt, 0)
     if lua_code then
-      if lua_code:find("^local %u = t%(") then goto continue end
-      if lua_code:find("^local %u = {nil") then goto continue end
-      if lua_code:find("^local %a = {nil") then goto continue end
-      if lua_code:find("^local %u = {__index") then goto continue end
+      local skip = false
+      if lua_code:find("^local %u = t%(") then skip = true end
+      if lua_code:find("^local %u = {nil") then skip = true end
+      if lua_code:find("^local %a = {nil") then skip = true end
+      if lua_code:find("^local %u = {__index") then skip = true end
       
-      for var, val in pairs(constants) do
-        if type(val) == "string" then
-          lua_code = lua_code:gsub("%f[%a]" .. var .. "%f[^%a]", string.format("%q", val))
-        elseif type(val) == "number" then
-          lua_code = lua_code:gsub("%f[%a]" .. var .. "%f[^%a]", tostring(val))
-        elseif type(val) == "boolean" then
-          lua_code = lua_code:gsub("%f[%a]" .. var .. "%f[^%a]", tostring(val))
+      if not skip then
+        for var, val in pairs(constants) do
+          if type(val) == "string" then
+            lua_code = lua_code:gsub("%f[%a]" .. var .. "%f[^%a]", string.format("%q", val))
+          elseif type(val) == "number" then
+            lua_code = lua_code:gsub("%f[%a]" .. var .. "%f[^%a]", tostring(val))
+          elseif type(val) == "boolean" then
+            lua_code = lua_code:gsub("%f[%a]" .. var .. "%f[^%a]", tostring(val))
+          end
         end
+        
+        table.insert(lines, lua_code)
       end
-      
-      table.insert(lines, lua_code)
     end
-    ::continue::
   end
   
   local raw_result = table.concat(lines, "\n")

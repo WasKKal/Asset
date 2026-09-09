@@ -185,13 +185,13 @@ local DEOBF_ANIM_DUR = 0.2
 
 local DEOBF_LONG_PRESS = 0.5
 
-local deobfSwitchPage = nil
+deobfSwitchPage = nil
 local deobfHouseFileMap = {}
 local deobfHouseLastFile = nil
 local deobfHouseSaveTimer = nil
 local deobfHouseSyncConnected = false
 local deobfHouseOpenFiles = {}
-local deobfNotify = nil
+deobfNotify = nil
 
 local function deobfGetHouseCurrentTabName()
     local api = _G
@@ -7610,7 +7610,7 @@ local function deobfRunTool(toolId)
     if toolId == "wearedev_full" then
         AddLog("=== WeAreDev 完全反混淆（VM逆向引擎）===", "info")
         AddLog("管线：词法→解析→基本块→寄存器折叠→CFG→常量数组→LCG解密→容器解析→语义→upvalue还原→短路折叠→结构化→代码生成", "info")
-        local result, err = deobfWeAreDevV2(content)
+        local result, err = deobfWeAreDevFull(content)
         if not result then
             AddLog("反编译失败: " .. tostring(err), "warn")
             return
@@ -7717,6 +7717,7 @@ local function deobfRunTool(toolId)
         AddLog("没有需要修改的内容", "info")
         deobfNotify("没有需要修改的内容", 2)
     end
+    pcall(function() deobfRefreshFileList() end)
 end
 
 local function buildUI()

@@ -944,9 +944,15 @@ local function deobfCreateNewFile()
                 table.insert(deobfFiles, fname)
                 table.sort(deobfFiles, function(a, b) return a:lower() < b:lower() end)
             end
+            -- 重置重试计数器，确保新文件能立即显示
+            deobfRefreshRetry = 0
             pcall(function() deobfRefreshFileList() end)
             task.spawn(function()
+                task.wait(0.2)
+                deobfRefreshRetry = 0
+                pcall(function() deobfRefreshFileList() end)
                 task.wait(0.3)
+                deobfRefreshRetry = 0
                 pcall(function() deobfRefreshFileList() end)
             end)
         else

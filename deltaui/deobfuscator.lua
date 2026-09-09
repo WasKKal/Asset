@@ -185,7 +185,41 @@ local DEOBF_ANIM_DUR = 0.2
 
 local DEOBF_LONG_PRESS = 0.5
 
-deobfSwitchPage = nil
+deobfSwitchPage = function(pageName)
+    pageName = tostring(pageName or "house"):lower()
+    local page = deobfPage
+    if not page then return false end
+    local container = page.Parent
+    if not container then return false end
+    local targetPage = nil
+    for _, child in ipairs(container:GetChildren()) do
+        if child:IsA("Frame") or child:IsA("ScrollingFrame") then
+            local name = child.Name:lower()
+            if name == pageName or name:find(pageName) then
+                targetPage = child
+            end
+        end
+    end
+    if not targetPage then
+        for _, child in ipairs(container:GetChildren()) do
+            if child:IsA("Frame") or child:IsA("ScrollingFrame") then
+                if child ~= page then
+                    targetPage = child
+                    break
+                end
+            end
+        end
+    end
+    if targetPage then
+        for _, child in ipairs(container:GetChildren()) do
+            if child:IsA("Frame") or child:IsA("ScrollingFrame") then
+                child.Visible = (child == targetPage)
+            end
+        end
+        return true
+    end
+    return false
+end
 local deobfHouseFileMap = {}
 local deobfHouseLastFile = nil
 local deobfHouseSaveTimer = nil

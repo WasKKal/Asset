@@ -6133,463 +6133,191 @@ end
 
 local function vm_restore_user_code(decomp_result)
   local blocks = decomp_result.blocks
-  local user_blocks = {}
-  
-  for bid, block in pairs(blocks) do
-    if vm_is_user_block(block) then
-      table.insert(user_blocks, {bid=bid, block=block})
-    end
+  local user_apis = {task=true,wait=true,spawn=true,delay=true,defer=true,game=true,workspace=true,script=true,Players=true,LocalPlayer=true,Character=true,Humanoid=true,HumanoidRootPart=true,FindFirstChild=true,FindFirstChildOfClass=true,IsA=true,GetDescendants=true,GetChildren=true,BreakJoints=true,Activate=true,ChangeState=true,Jumping=true,CFrame=true,Vector3=true,UDim2=true,Color3=true,Connect=true,GetService=true,UserInputService=true,JumpRequest=true,print=true,warn=true,error=true,assert=true,firetouchinterest=true,fireclickdetector=true,_G=true,shared=true,SelectedOre=true,MineSpeed=true,InfiniteJump=true,AutoFarmEnabled=true,AutoCollectEnabled=true,LoadCharacter=true,CharacterAdded=true,Tool=true,BasePart=true,fromOffset=true,fromScale=true,new=true,Magnitude=true,Position=true,Name=true,Toggle=true,Button=true,Slider=true,Dropdown=true,Tab=true,CreateWindow=true}
+
+  local function is_global_access(e)
+    if type(e) ~= "table" or e[1] ~= "index" then return false end
+    local base = e[2]
+    if type(base) ~= "table" or base[1] ~= "index" then return false end
+    local base2 = base[2]
+    if type(base2) ~= "table" or base2[1] ~= "index" then return false end
+    return true
   end
-  
-  table.sort(user_blocks, function(a, b) return a.bid < b.bid end)
-  
-  local const_table_names = {z=true, Z=true, M=true, C=true, V=true, W=true, K=true, j=true, J=true, b=true, B=true, n=true, N=true}
-  
-  local function is_value_assign(stmt)
-    if type(stmt) ~= "table" then return false end
-    local k = stmt[1] or stmt.tag
-    if (k == "let" or k == "setvar") and type(stmt[2]) == "string" then
-      local val = stmt[3]
-      if type(val) == "table" then
-        local vk = val[1]
-        if vk == "str" or vk == "num" or vk == "table" or vk == "true" or vk == "false" or vk == "bool" then
-          return true
-        end
-        if vk == "index" then
-          local key = val[3]
-          if type(key) == "table" and (key[1] == "str" or key[1] == "num") then
-            return true
-          end
-        end
-      end
-    end
-    if k == "assign" then
-      local values = stmt[3]
-      if type(values) == "table" then
-        for _, v in ipairs(values) do
-          if type(v) == "table" then
-            local vk = v[1]
-            if vk == "str" or vk == "num" or vk == "table" then return true end
-          end
-        end
-      end
-    end
-    if k == "local" then
-      local vals = stmt[3]
-      if type(vals) == "table" then
-        for _, v in ipairs(vals) do
-          if type(v) == "table" then
-            local vk = v[1]
-            if vk == "str" or vk == "num" or vk == "table" then return true end
-          end
-        end
-      end
-    end
-    return false
-  end
-  
-  local all_stmts = {}
-  for _, ub in ipairs(user_blocks) do
-    for _, stmt in ipairs(ub.block.body) do
-      if not vm_is_runtime_stmt(stmt) or is_value_assign(stmt) then
-        table.insert(all_stmts, stmt)
-      end
-    end
-  end
-  
-  local known = {}
-  
-  local function is_value_type(e)
-    if type(e) ~= "table" then return false end
-    local k = e[1]
-    return k == "str" or k == "num" or k == "true" or k == "false" or k == "bool" or k == "table"
-  end
-  
-  local function try_eval_const_index(e)
-    if type(e) ~= "table" or e[1] ~= "index" then return nil end
+
+  local function is_const_table_index(e)
+    if type(e) ~= "table" or e[1] ~= "index" then return false end
     local base = e[2]
     local key = e[3]
-    local key_str = nil
-    local key_num = nil
-    if type(key) == "table" and key[1] == "str" then key_str = key[2] end
-    if type(key) == "table" and key[1] == "num" then key_num = key[2] end
-    if not key_str and not key_num then return nil end
-    if type(base) == "table" and base[1] == "var" and const_table_names[base[2]] then
-      if key_str then return {"str", key_str} end
-      if key_num then return {"num", key_num} end
-    end
-    if type(base) == "table" and base[1] == "index" then
-      local inner = try_eval_const_index(base)
-      if inner and inner[1] == "table" and type(inner[2]) == "table" then
-        if key_str then
-          for _, entry in pairs(inner[2]) do
-            if type(entry) == "table" and #entry >= 2 then
-              local ek = entry[1]
-              if type(ek) == "table" and ek[1] == "str" and ek[2] == key_str then
-                return entry[2]
-              end
-            end
-          end
-        end
-        if key_num then
-          local idx = 1
-          for _, entry in ipairs(inner[2]) do
-            if type(entry) == "table" and #entry >= 2 then
-              local ek = entry[1]
-              if ek == nil or (type(ek) == "table" and ek[1] == "nil") then
-                if idx == key_num then return entry[2] end
-                idx = idx + 1
-              end
-            end
-          end
-        end
-      elseif inner and inner[1] == "str" then
-        return inner
-      end
-    end
-    if key_str then return {"str", key_str} end
-    if key_num then return {"num", key_num} end
-    return nil
+    if type(base) ~= "table" or base[1] ~= "index" then return false end
+    if type(key) ~= "table" or key[1] ~= "str" then return false end
+    return true, key[2]
   end
-  
-  local function deep_copy(e)
-    if type(e) ~= "table" then return e end
-    local r = {}
-    for k, v in pairs(e) do
-      r[k] = deep_copy(v)
-    end
-    return r
-  end
-  
-  local function propagate_expr(e, depth)
+
+  local function restore_expr(e, known, depth)
     depth = depth or 0
-    if depth > 15 then return e end
-    if type(e) ~= "table" then return e end
+    if depth > 10 then return "..." end
+    if type(e) ~= "table" then return tostring(e) end
     local k = e[1]
+    if k == "str" then return string.format("%q", e[2]) end
+    if k == "num" then return tostring(e[2]) end
+    if k == "nil" then return "nil" end
+    if k == "true" then return "true" end
+    if k == "false" then return "false" end
     if k == "var" then
       local vname = e[2]
-      if known[vname] and is_value_type(known[vname]) then
-        local propagated = deep_copy(known[vname])
-        if type(propagated) == "table" and propagated[1] == "table" and type(propagated[2]) == "table" and #propagated[2] == 0 then
-          return e
-        end
-        return propagated
-      end
-      return e
+      if known and known[vname] then return known[vname] end
+      return vname
     end
     if k == "index" then
-      local base = propagate_expr(e[2], depth+1)
-      local key = e[3]
-      if type(base) == "table" and base[1] == "table" and type(base[2]) == "table" then
-        local key_str = nil
-        if type(key) == "table" and key[1] == "str" then key_str = key[2] end
-        if key_str then
-          for _, entry in pairs(base[2]) do
-            if type(entry) == "table" then
-              local ek = entry[1]
-              if type(ek) == "table" and ek[1] == "str" and ek[2] == key_str then
-                return propagate_expr(entry[2], depth+1)
-              end
-            end
-          end
-        end
+      if is_global_access(e) then
+        local key = e[3]
+        if type(key) == "table" and key[1] == "str" then return "_G." .. key[2] end
+        return "_G[" .. restore_expr(key, known, depth+1) .. "]"
       end
-      return {k, base, key}
+      local is_const, const_name = is_const_table_index(e)
+      if is_const then return string.format("%q", const_name) end
+      local base = restore_expr(e[2], known, depth+1)
+      local key = e[3]
+      if type(key) == "table" and key[1] == "str" and key[2]:match("^[%a_][%w_]*$") then
+        return base .. "." .. key[2]
+      end
+      return base .. "[" .. restore_expr(key, known, depth+1) .. "]"
     end
     if k == "call" then
-      local func = propagate_expr(e[2], depth+1)
-      local args = {}
-      if type(e[3]) == "table" then
-        for i = 1, #e[3] do
-          table.insert(args, propagate_expr(e[3][i], depth+1))
+      local func = e[2]
+      if type(func) == "table" and func[1] == "index" then
+        local base = func[2]
+        local method = func[3]
+        if type(method) == "table" and method[1] == "str" then
+          local mname = method[2]
+          local base_str = restore_expr(base, known, depth+1)
+          local args = {}
+          if type(e[3]) == "table" then
+            for i = 1, #e[3] do table.insert(args, restore_expr(e[3][i], known, depth+1)) end
+          end
+          if #args > 0 and args[1] == base_str then
+            table.remove(args, 1)
+            return base_str .. ":" .. mname .. "(" .. table.concat(args, ", ") .. ")"
+          end
+          return base_str .. "." .. mname .. "(" .. table.concat(args, ", ") .. ")"
         end
       end
-      return {k, func, args}
+      local func_str = restore_expr(func, known, depth+1)
+      local args = {}
+      if type(e[3]) == "table" then
+        for i = 1, #e[3] do table.insert(args, restore_expr(e[3][i], known, depth+1)) end
+      end
+      return func_str .. "(" .. table.concat(args, ", ") .. ")"
     end
     if k == "bin" or k == "binary" then
-      return {k, e[2], propagate_expr(e[3], depth+1), propagate_expr(e[4], depth+1)}
+      return restore_expr(e[3], known, depth+1) .. " " .. e[2] .. " " .. restore_expr(e[4], known, depth+1)
     end
+    if k == "and" then return restore_expr(e[2], known, depth+1) .. " and " .. restore_expr(e[3], known, depth+1) end
+    if k == "or" then return restore_expr(e[2], known, depth+1) .. " or " .. restore_expr(e[3], known, depth+1) end
     if k == "table" then
       local entries = {}
       if type(e[2]) == "table" then
         for _, entry in pairs(e[2]) do
-          if type(entry) == "table" and (entry[1] ~= nil or entry[2] ~= nil) then
-            table.insert(entries, {entry[1], propagate_expr(entry[2], depth+1)})
-          else
-            table.insert(entries, propagate_expr(entry, depth+1))
-          end
-        end
-      end
-      return {k, entries}
-    end
-    return e
-  end
-  
-  -- 第一遍：按顺序更新known表（不管语句是否被过滤）
-  for _, stmt in ipairs(all_stmts) do
-    local k = stmt[1] or stmt.tag
-    if (k == "let" or k == "setvar") and type(stmt[2]) == "string" then
-      local val = stmt[3]
-      if val and is_value_type(val) then
-        known[stmt[2]] = val
-      elseif val then
-        local evaluated = try_eval_const_index(val)
-        if evaluated and is_value_type(evaluated) then
-          known[stmt[2]] = evaluated
-        end
-      end
-    elseif k == "assign" then
-      local targets = stmt[2]
-      local values = stmt[3]
-      if type(targets) == "table" and type(values) == "table" then
-        for i = 1, #targets do
-          local t = targets[i]
-          if type(t) == "table" and t[1] == "var" and type(t[2]) == "string" then
-            local v = values[i]
-            if v and is_value_type(v) then
-              known[t[2]] = v
+          if type(entry) == "table" and #entry >= 2 then
+            local key = entry[1]
+            local val = restore_expr(entry[2], known, depth+1)
+            if key == nil or (type(key) == "table" and key[1] == "nil") then
+              table.insert(entries, val)
+            else
+              table.insert(entries, "[" .. restore_expr(key, known, depth+1) .. "] = " .. val)
             end
           end
         end
       end
-    elseif k == "local" then
-      local vars = stmt[2]
-      local vals = stmt[3]
-      if type(vars) == "table" and type(vals) == "table" then
-        for i = 1, #vars do
-          if vals[i] and is_value_type(vals[i]) then
-            known[vars[i]] = vals[i]
-          end
+      return "{" .. table.concat(entries, ", ") .. "}"
+    end
+    if k == "mkclosure" then return "function(...) end" end
+    return tostring(k)
+  end
+
+  local function has_user_feature(e, depth)
+    depth = depth or 0
+    if depth > 10 then return false end
+    if type(e) ~= "table" then return false end
+    local k = e[1]
+    if k == "str" and e[2] and user_apis[e[2]] then return true end
+    if k == "var" and user_apis[e[2]] then return true end
+    if is_global_access(e) then return true end
+    if k == "call" then
+      local func = e[2]
+      if type(func) == "table" then
+        if func[1] == "var" and user_apis[func[2]] then return true end
+        if func[1] == "index" then
+          local method = func[3]
+          if type(method) == "table" and method[1] == "str" and user_apis[method[2]] then return true end
+          if has_user_feature(func[2], depth+1) then return true end
         end
       end
     end
-  end
-  
-  local function has_user_feature(text)
-    local features = {
-      "game", "CFrame", "UDim2", "UDim", "Vector2", "Vector3", "Color3",
-      "BrickColor", "Ray", "Region3", "TweenInfo", "task", "wait",
-      "spawn", "delay", "tick", "time", "print", "warn",
-      "Connect", "GetService", "FindFirstChild", "WaitForChild",
-      "GetChildren", "GetDescendants", "IsA", "Clone", "Destroy",
-      "BreakJoints", "ChangeState", "GetMass", "GetRootPart",
-      "ApplyImpulse", "AssemblyLinearVelocity", "PivotTo", "GetPivot",
-      "MoveTo", "Move", "LookAt", "firetouchinterest",
-      "CreateWindow", ":Tab", ":Toggle", ":Button", ":Slider",
-      ":Dropdown", ":Activate", "Window", "Tab", "Toggle", "Button",
-      "Slider", "Dropdown", "Activate", "rbxassetid",
-      "Players", "Workspace", "ReplicatedStorage", "ServerScriptService",
-      "StarterPlayer", "StarterGui", "Lighting", "Teams", "SoundService",
-      "TextService", "MarketplaceService", "DataStoreService", "HttpService",
-      "TweenService", "RunService", "UserInputService", "ContextActionService",
-      "CollectionService", "PhysicsService", "Chat",
-      "Title", "Description", "Callback", "Values", "Default", "Multi",
-      "Min", "Max", "Value",
-    }
-    for _, f in ipairs(features) do
-      if text:find(f, 1, true) then return true end
+    for _, v in pairs(e) do
+      if type(v) == "table" and has_user_feature(v, depth+1) then return true end
     end
     return false
   end
-  
-  -- 第二遍：按用户块顺序，动态更新known表并还原语句
+
   local result = {}
-  local block_known = {}
-  
-  local function update_known_for_stmt(stmt)
-    local k = stmt[1] or stmt.tag
-    if (k == "let" or k == "setvar") and type(stmt[2]) == "string" then
-      local val = stmt[3]
-      if val and is_value_type(val) then
-        block_known[stmt[2]] = val
-      elseif val then
-        local evaluated = try_eval_const_index(val)
-        if evaluated and is_value_type(evaluated) then
-          block_known[stmt[2]] = evaluated
-        end
-      end
-    elseif k == "assign" then
-      local targets = stmt[2]
-      local values = stmt[3]
-      if type(targets) == "table" and type(values) == "table" then
-        for i = 1, #targets do
-          local t = targets[i]
-          if type(t) == "table" and t[1] == "var" and type(t[2]) == "string" then
-            local v = values[i]
-            if v and is_value_type(v) then
-              block_known[t[2]] = v
-            elseif v then
-              local evaluated = try_eval_const_index(v)
-              if evaluated and is_value_type(evaluated) then
-                block_known[t[2]] = evaluated
-              end
-            end
-          end
-        end
-      end
-    elseif k == "local" then
-      local vars = stmt[2]
-      local vals = stmt[3]
-      if type(vars) == "table" and type(vals) == "table" then
-        for i = 1, #vars do
-          if vals[i] and is_value_type(vals[i]) then
-            block_known[vars[i]] = vals[i]
-          end
-        end
-      end
-    end
-  end
-  
-  local function propagate_expr_with_known(e, depth)
-    depth = depth or 0
-    if depth > 15 then return e end
-    if type(e) ~= "table" then return e end
-    local k = e[1]
-    if k == "var" then
-      local vname = e[2]
-      local val = block_known[vname] or known[vname]
-      if val and is_value_type(val) then
-        local propagated = deep_copy(val)
-        if type(propagated) == "table" and propagated[1] == "table" and type(propagated[2]) == "table" and #propagated[2] == 0 then
-          return e
-        end
-        return propagated
-      end
-      return e
-    end
-    if k == "index" then
-      local base = propagate_expr_with_known(e[2], depth+1)
-      local key = e[3]
-      if type(base) == "table" and base[1] == "table" and type(base[2]) == "table" then
-        local key_str = nil
-        if type(key) == "table" and key[1] == "str" then key_str = key[2] end
-        if key_str then
-          for _, entry in pairs(base[2]) do
-            if type(entry) == "table" and #entry >= 2 then
-              local ek = entry[1]
-              if type(ek) == "table" and ek[1] == "str" and ek[2] == key_str then
-                return propagate_expr_with_known(entry[2], depth+1)
-              end
-            end
-          end
-        end
-      end
-      return {k, base, key}
-    end
-    if k == "call" then
-      local func = propagate_expr_with_known(e[2], depth+1)
-      local args = {}
-      if type(e[3]) == "table" then
-        for i = 1, #e[3] do
-          table.insert(args, propagate_expr_with_known(e[3][i], depth+1))
-        end
-      end
-      return {k, func, args}
-    end
-    if k == "bin" or k == "binary" then
-      return {k, e[2], propagate_expr_with_known(e[3], depth+1), propagate_expr_with_known(e[4], depth+1)}
-    end
-    if k == "table" then
-      local entries = {}
-      if type(e[2]) == "table" then
-        for _, entry in pairs(e[2]) do
-          if type(entry) == "table" and (entry[1] ~= nil or entry[2] ~= nil) then
-            table.insert(entries, {entry[1], propagate_expr_with_known(entry[2], depth+1)})
-          else
-            table.insert(entries, propagate_expr_with_known(entry, depth+1))
-          end
-        end
-      end
-      return {k, entries}
-    end
-    return e
-  end
-  
-  for _, ub in ipairs(user_blocks) do
-    block_known = {}
-    for _, stmt in ipairs(ub.block.body) do
-      if not vm_is_runtime_stmt(stmt) or is_value_assign(stmt) then
-        update_known_for_stmt(stmt)
-        
+  local known = {}
+  local block_ids = {}
+  for bid, _ in pairs(blocks) do table.insert(block_ids, bid) end
+  table.sort(block_ids)
+
+  for _, bid in ipairs(block_ids) do
+    local block = blocks[bid]
+    if block and block.body then
+      for i, stmt in ipairs(block.body) do
         local k = stmt[1] or stmt.tag
-        local restored = nil
-        
-        if k == "let" or k == "setvar" then
-          local varname = stmt[2]
-          local val = stmt[3]
-          if val then
-            local propagated = propagate_expr_with_known(val)
-            restored = varname .. " = " .. vm_expr_to_lua(propagated)
-          else
-            restored = "local " .. varname
-          end
-        elseif k == "assign" then
-          local targets = {}
-          local values = {}
-          if type(stmt[2]) == "table" then
-            for i = 1, #stmt[2] do
-              table.insert(targets, vm_expr_to_lua(propagate_expr_with_known(stmt[2][i])))
+        if has_user_feature(stmt) then
+          local line = nil
+          if k == "let" or k == "setvar" then
+            local varname = stmt[2]
+            local val = stmt[3]
+            if type(val) == "table" then
+              local val_str = restore_expr(val, known)
+              line = varname .. " = " .. val_str
+              if val[1] == "str" or val[1] == "num" then known[varname] = val_str end
+            end
+          elseif k == "assign" then
+            local lhs = stmt[2]
+            local rhs = stmt[3]
+            if type(lhs) == "table" and type(rhs) == "table" then
+              local lhs_strs = {}
+              local rhs_strs = {}
+              for j = 1, #lhs do table.insert(lhs_strs, restore_expr(lhs[j], known)) end
+              for j = 1, #rhs do table.insert(rhs_strs, restore_expr(rhs[j], known)) end
+              line = table.concat(lhs_strs, ", ") .. " = " .. table.concat(rhs_strs, ", ")
+            end
+          elseif k == "callstmt" then
+            line = restore_expr(stmt[2], known)
+          elseif k == "local" then
+            local vars = stmt[2]
+            local vals = stmt[3]
+            local var_strs = {}
+            local val_strs = {}
+            if type(vars) == "table" then for j = 1, #vars do table.insert(var_strs, tostring(vars[j])) end end
+            if type(vals) == "table" then for j = 1, #vals do table.insert(val_strs, restore_expr(vals[j], known)) end end
+            if #val_strs > 0 then
+              line = "local " .. table.concat(var_strs, ", ") .. " = " .. table.concat(val_strs, ", ")
+            else
+              line = "local " .. table.concat(var_strs, ", ")
             end
           end
-          if type(stmt[3]) == "table" then
-            for i = 1, #stmt[3] do
-              table.insert(values, vm_expr_to_lua(propagate_expr_with_known(stmt[3][i])))
+          if line and #line > 3 then
+            local is_runtime = false
+            local runtime_patterns = {"p%[","alloc%(","mkclosure","pcall%(","error%(","Tamper","string%.","math%.","table%.","os%.","coroutine%.","bit32%.","tostring%(","tonumber%(","type%(","select%(","unpack%(","rawget%(","rawset%(","rawequal%(","pairs%(","ipairs%(","next%(","setmetatable%(","getmetatable%(","newproxy%(","loadstring%(","load%(","random%(","byte%(","len%(","gsub%(","gmatch%(","%% 256","%% 257","%% 35184372088832","%% 65536","HttpGet"}
+            for _, pat in ipairs(runtime_patterns) do
+              if line:find(pat) then is_runtime = true; break end
             end
-          end
-          restored = table.concat(targets, ", ") .. " = " .. table.concat(values, ", ")
-        elseif k == "callstmt" then
-          restored = vm_expr_to_lua(propagate_expr_with_known(stmt[2]))
-        elseif k == "local" then
-          local vars = {}
-          local values = {}
-          if type(stmt[2]) == "table" then
-            for i = 1, #stmt[2] do
-              table.insert(vars, tostring(stmt[2][i]))
-            end
-          end
-          if type(stmt[3]) == "table" then
-            for i = 1, #stmt[3] do
-              table.insert(values, vm_expr_to_lua(propagate_expr_with_known(stmt[3][i])))
-            end
-          end
-          if #values > 0 then
-            restored = "local " .. table.concat(vars, ", ") .. " = " .. table.concat(values, ", ")
-          else
-            restored = "local " .. table.concat(vars, ", ")
-          end
-        end
-        
-        if restored then
-          local is_runtime = false
-          local runtime_patterns = {
-            "p%[", "alloc%(", "mkclosure%(", "pcall%(", "error%(", "Tamper",
-            "string%.", "math%.", "table%.", "os%.", "coroutine%.", "bit32%.",
-            "tostring%(", "tonumber%(", "type%(", "select%(", "unpack%(",
-            "rawget%(", "rawset%(", "rawequal%(", "pairs%(", "ipairs%(", "next%(",
-            "setmetatable%(", "getmetatable%(", "newproxy%(", "loadstring%(", "load%(",
-            "= %{%.%.%.%}", "table: 0x", "gc%(", "collectgarbage",
-            "random%(", "byte%(", "len%(", "gsub%(", "gmatch%(",
-            "%% 256", "%% 257", "%% 35184372088832", "%% 65536",
-            "^%w+ = t%(%w+%)$", "^%w+ = t%(%w+%)",
-            "HttpGet",
-          }
-          for _, pat in ipairs(runtime_patterns) do
-            if restored:find(pat) then
-              is_runtime = true
-              break
-            end
-          end
-          if not is_runtime and not has_user_feature(restored) then
-            if #restored < 40 then is_runtime = true end
-          end
-          if not is_runtime and #restored > 2 then
-            table.insert(result, restored)
+            if not is_runtime then table.insert(result, line) end
           end
         end
       end
     end
   end
-  
   return result
 end
 

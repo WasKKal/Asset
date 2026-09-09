@@ -7146,7 +7146,7 @@ function M.analyze_runtime_vars_v2(blocks)
   return runtime_vars, {index=var_index, mod=var_mod, assign=var_assign, usage=var_usage}
 end
 
-local function v2_is_runtime_expr(e, runtime_vars, depth)
+function v2_is_runtime_expr(e, runtime_vars, depth)
   depth = depth or 0
   if depth > 20 then return false end
   if type(e) ~= "table" then return false end
@@ -7272,7 +7272,7 @@ local function v2_is_runtime_expr(e, runtime_vars, depth)
   return false
 end
 
-local function v2_is_runtime_stmt(stmt, runtime_vars)
+function v2_is_runtime_stmt(stmt, runtime_vars)
   if type(stmt) ~= "table" then return false end
   local k = stmt[1] or stmt.tag
   
@@ -7675,7 +7675,7 @@ function M.analyze_runtime_vars_v2(blocks)
   return runtime_vars, {index=var_index, mod=var_mod, assign=var_assign, usage=var_usage}
 end
 
-local function v2_is_runtime_expr(e, runtime_vars, depth)
+function v2_is_runtime_expr(e, runtime_vars, depth)
   depth = depth or 0
   if depth > 20 then return false end
   if type(e) ~= "table" then return false end
@@ -7801,7 +7801,7 @@ local function v2_is_runtime_expr(e, runtime_vars, depth)
   return false
 end
 
-local function v2_is_runtime_stmt(stmt, runtime_vars)
+function v2_is_runtime_stmt(stmt, runtime_vars)
   if type(stmt) ~= "table" then return false end
   local k = stmt[1] or stmt.tag
   
@@ -8084,7 +8084,7 @@ end
 WeAreDev V2 通用反编译器（完整管线，基于 Prometheus Vmify VM 逆向）
 完整反编译管线：词法→解析→VM提取→寄存器折叠→CFG→常量数组→LCG解密→容器解析→语义→upvalue还原→短路折叠→结构化→代码生成
 ]]
-local function deobfWeAreDevV2(code)
+function deobfWeAreDevV2(code)
     if type(code) ~= "string" or #code == 0 then return nil, "空代码" end
     -- 检测是否为 WeAreDev/Prometheus Vmify 结构（多特征联合判断）
     local score = 0
@@ -8129,7 +8129,7 @@ local function deobfWeAreDevV2(code)
     }
 end
 
-local function deobfWeAreDevTrace(code)
+function deobfWeAreDevTrace(code)
     if type(code) ~= "string" or #code == 0 then return nil, nil, "空代码" end
     local result = deobfSandboxExecute(code)
     local statements = {}
@@ -8154,7 +8154,7 @@ local function deobfWeAreDevTrace(code)
     return statements, constants, err
 end
 
-local function deobfGlobalNumSimplify(code)
+function deobfGlobalNumSimplify(code)
     if type(code) ~= "string" or #code == 0 then return code or "" end
     local count = 0
     local guard = 0
@@ -8199,7 +8199,7 @@ local function deobfGlobalNumSimplify(code)
     return code, count
 end
 
-local function deobfNumExprRestore(code)
+function deobfNumExprRestore(code)
     if type(code) ~= "string" or #code == 0 then return code or "" end
     local result = code
     local count = 0
@@ -8291,7 +8291,7 @@ local function deobfNumExprRestore(code)
     return result, count
 end
 
-local function deobfUnsplitStrings(code)
+function deobfUnsplitStrings(code)
     if type(code) ~= "string" or #code == 0 then return code or "", 0 end
     local result = code
     local count = 0
@@ -8328,7 +8328,7 @@ local function deobfUnsplitStrings(code)
     return result, count
 end
 
-local function deobfUnwrapFunction(code)
+function deobfUnwrapFunction(code)
     if type(code) ~= "string" or #code == 0 then return code or "" end
     local result = code
     local count = 0
@@ -8364,7 +8364,7 @@ local function deobfUnwrapFunction(code)
     return result, count
 end
 
-local function deobfConstantArrayInline(code)
+function deobfConstantArrayInline(code)
     if type(code) ~= "string" or #code == 0 then return code or "" end
     local result = code
     local count = 0
@@ -8410,7 +8410,7 @@ local function deobfConstantArrayInline(code)
     return result, count
 end
 
-local function deobfUnproxify(code)
+function deobfUnproxify(code)
     if type(code) ~= "string" or #code == 0 then return code or "" end
     local result = code
     local count = 0
@@ -8444,7 +8444,7 @@ local function deobfUnproxify(code)
     return result, count
 end
 
-local function deobfPrometheusFull(code)
+function deobfPrometheusFull(code)
     if type(code) ~= "string" or #code == 0 then return code or "" end
     local result = code
     local totalChanges = 0
@@ -8511,7 +8511,7 @@ local function deobfPrometheusFull(code)
     return result, totalChanges
 end
 
-local function deobfGcClean(code)
+function deobfGcClean(code)
     if type(code) ~= "string" or #code == 0 then return code or "", 0 end
     local lines = {}
     for line in code:gmatch("[^\r\n]+") do
@@ -8561,7 +8561,7 @@ local function deobfGcClean(code)
     return table.concat(result, "\n"), removed
 end
 
-local function deobfStripComments(code)
+function deobfStripComments(code)
     if type(code) ~= "string" or #code == 0 then return code or "" end
     local out = {}
     local i = 1
@@ -8625,7 +8625,7 @@ local function deobfStripComments(code)
     return table.concat(out)
 end
 
-local function deobfFormatCode(code)
+function deobfFormatCode(code)
     if type(code) ~= "string" or #code == 0 then return code or "" end
     code = code:gsub("(%s+)(then)(%s+)", "%1%2\n")
     code = code:gsub("(%s+)(do)(%s+)", "%1%2\n")
@@ -8727,7 +8727,7 @@ local function deobfFormatCode(code)
     return table.concat(result, "\n")
 end
 
-local function deobfAnalyzeCode(code)
+function deobfAnalyzeCode(code)
     if type(code) ~= "string" or #code == 0 then return code or "" end
     local stats = {}
     stats.totalLines = select(2, code:gsub("\n", "\n")) + 1

@@ -402,6 +402,19 @@ local function deobfOpenInHouseEditor(name, content)
     if deobfSwitchPage then
         pcall(deobfSwitchPage, "house")
     end
+    
+    -- 延迟再次确保编辑器内容正确（防止housepage预设文本覆盖）
+    task.defer(function()
+        pcall(function()
+            local cb2 = _G.__DeltaUI_codeBox
+            if cb2 then
+                _G.__DeltaUI_isProgrammaticTextChange = true
+                cb2.Text = content
+                _G.__DeltaUI_isProgrammaticTextChange = false
+            end
+        end)
+    end)
+    
     if deobfNotify then deobfNotify("已在主页新建代码页: " .. tabName, 1) end
     return true
 end
@@ -568,6 +581,10 @@ local function deobfRefreshFileList()
     if count == 0 and #oldFiles > 0 then
         deobfFiles = oldFiles
         count = #deobfFiles
+        -- 延迟再次刷新，确保新创建的文件能显示
+        task.defer(function()
+            pcall(function() deobfRefreshFileList() end)
+        end)
     end
 
     if count == 0 then

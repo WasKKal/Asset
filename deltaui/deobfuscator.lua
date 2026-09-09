@@ -7551,6 +7551,1432 @@ function M.interpret_block_v2(block, runtime_vars)
   return user_stmts, runtime_stmts
 end
 
+-- 全局导出（兼容 dofile 后直接调用）
+deobfWeAreDevFull = M.deobfWeAreDevFull
+extract_user_code = M.extract_user_code
+deobfWeAreDevClean = M.deobfWeAreDevClean
+interpret_block = M.interpret_block
+
+-- ============================================================
+-- VM解释器v2：基于使用模式和语句模式的运行时代码消除
+-- ============================================================
+
+local runtime_funcs = {
+  alloc = true, setmetatable = true, getmetatable = true, newproxy = true,
+  pcall = true, xpcall = true, error = true, assert = true,
+  tostring = true, tonumber = true, type = true, select = true, unpack = true,
+  rawget = true, rawset = true, rawequal = true,
+  pairs = true, ipairs = true, next = true,
+  string = true, math = true, table = true, os = true, bit32 = true, coroutine = true,
+}
+
+local special_runtime_funcs = {
+  W = true,
+}
+
+local runtime_var_names = {
+  V = true, v = true, W = true, z = true, K = true,
+  g = true, j = true, G = true, S = true,
+}
+
+-- 分析变量使用模式，识别运行时变量
+function M.analyze_runtime_vars_v2(blocks)
+  local var_index = {}  -- 被索引访问次数
+  local var_mod = {}  -- 参与模运算次数
+  local var_assign = {}  -- 被赋值次数
+  local var_usage = {}  -- 总使用次数
+  
+  local function analyze_expr(e)
+    if type(e) ~= "table" then return end
+    local k = e[1]
+    
+    if k == "var" then
+      var_usage[e[2]] = (var_usage[e[2]] or 0) + 1
+    end
+    
+    if k == "index" then
+      local base = e[2]
+      if type(base) == "table" and base[1] == "var" then
+        var_index[base[2]] = (var_index[base[2]] or 0) + 1
+      end
+    end
+    
+    if k == "bin" and e[2] == "%" then
+      for i = 3, 4 do
+        if type(e[i]) == "table" and e[i][1] == "var" then
+          var_mod[e[i][2]] = (var_mod[e[i][2]] or 0) + 1
+        end
+      end
+    end
+    
+    for i = 2, #e do
+      if type(e[i]) == "table" then
+        analyze_expr(e[i])
+      end
+    end
+  end
+  
+  local function analyze_stmt(stmt)
+    if type(stmt) ~= "table" then return end
+    local k = stmt[1] or stmt.tag
+    
+    if k == "let" or k == "setvar" then
+      if type(stmt[2]) == "string" then
+        var_assign[stmt[2]] = (var_assign[stmt[2]] or 0) + 1
+      end
+      if type(stmt[3]) == "table" then
+        analyze_expr(stmt[3])
+      end
+    elseif k == "assign" then
+      if type(stmt[3]) == "table" then
+        for i = 1, #stmt[3] do
+          if type(stmt[3][i]) == "table" then
+            analyze_expr(stmt[3][i])
+          end
+        end
+      end
+    elseif k == "callstmt" then
+      if type(stmt[2]) == "table" then
+        analyze_expr(stmt[2])
+      end
+    end
+  end
+  
+  for block_id, block in pairs(blocks) do
+    if block.body then
+      for _, stmt in ipairs(block.body) do
+        analyze_stmt(stmt)
+      end
+    end
+  end
+  
+  -- 识别运行时变量
+  local runtime_vars = {}
+  
+  -- 1. 被索引访问次数多的变量（>3次）：上值表或常量表
+  for name, count in pairs(var_index) do
+    if count >= 1 then
+      runtime_vars[name] = true
+    end
+  end
+  
+  -- 2. 参与模运算的变量：PC寄存器
+  for name, count in pairs(var_mod) do
+    if count >= 1 then
+      runtime_vars[name] = true
+    end
+  end
+  
+  -- 3. 硬编码的运行时变量
+  for name, _ in pairs(runtime_var_names) do
+    runtime_vars[name] = true
+  end
+  
+  return runtime_vars, {index=var_index, mod=var_mod, assign=var_assign, usage=var_usage}
+end
+
+local function v2_is_runtime_expr(e, runtime_vars, depth)
+  depth = depth or 0
+  if depth > 20 then return false end
+  if type(e) ~= "table" then return false end
+  local k = e[1]
+  
+  if k == "alloc" or k == "mkclosure" then return true end
+  
+  if k == "var" then
+    return runtime_vars[e[2]] == true
+  end
+  
+  if k == "num" or k == "boolean" or k == "nil" then return true end
+  
+  if k == "str" then
+    local s = e[2]
+    local runtime_strs = {
+      ["__index"] = true, ["__metatable"] = true, ["__gc"] = true,
+      ["__len"] = true, ["__newindex"] = true, ["__tostring"] = true,
+      ["__call"] = true, ["__concat"] = true, ["__unm"] = true,
+      ["__add"] = true, ["__sub"] = true, ["__mul"] = true,
+      ["__div"] = true, ["__mod"] = true, ["__pow"] = true,
+      ["__eq"] = true, ["__lt"] = true, ["__le"] = true,
+      ["Tamper Detected!"] = true,
+      ["gmatch"] = true, ["gsub"] = true, ["byte"] = true,
+      ["char"] = true, ["len"] = true, ["sub"] = true,
+      ["format"] = true, ["find"] = true, ["rep"] = true,
+      ["random"] = true, ["randomseed"] = true, ["floor"] = true,
+      ["ceil"] = true, ["abs"] = true, ["sqrt"] = true,
+      ["concat"] = true, ["insert"] = true, ["remove"] = true,
+      ["sort"] = true, ["clock"] = true, ["time"] = true,
+    }
+    return runtime_strs[s] == true
+  end
+  
+  if k == "table" then
+    if e[2] == nil or (type(e[2]) == "table" and #e[2] == 0) then
+      return true
+    end
+    
+    if type(e[2]) == "table" then
+      for i = 1, #e[2] do
+        local entry = e[2][i]
+        if type(entry) == "table" and type(entry[1]) == "table" and entry[1][1] == "str" then
+          local key = entry[1][2]
+          if key == "__index" or key == "__metatable" or key == "__gc" or
+             key == "__len" or key == "__newindex" or key == "__tostring" or
+             key == "__call" or key == "__concat" then
+            return true
+          end
+        end
+      end
+    end
+    
+    if type(e[2]) == "table" then
+      for i = 1, #e[2] do
+        if type(e[2][i]) == "table" then
+          if not v2_is_runtime_expr(e[2][i], runtime_vars, depth + 1) then
+            return false
+          end
+        end
+      end
+    end
+    return true
+  end
+  
+  if k == "index" then
+    local base = e[2]
+    if type(base) == "table" and base[1] == "var" then
+      if runtime_vars[base[2]] then
+        return true
+      end
+    end
+    if type(base) == "table" and v2_is_runtime_expr(base, runtime_vars, depth + 1) then
+      return true
+    end
+    return false
+  end
+  
+  if k == "call" then
+    local fn = e[2]
+    local args = e[3]
+    
+    if type(fn) == "table" and fn[1] == "var" then
+      if special_runtime_funcs[fn[2]] then
+        return true
+      end
+      
+      if runtime_funcs[fn[2]] then
+        if type(args) == "table" then
+          for i = 1, #args do
+            if type(args[i]) == "table" and not v2_is_runtime_expr(args[i], runtime_vars, depth + 1) then
+              return false
+            end
+          end
+        end
+        return true
+      end
+      
+      if fn[2] == "print" or fn[2] == "warn" then
+        return false
+      end
+    end
+    
+    if type(fn) == "table" and fn[1] == "index" then
+      local base = fn[2]
+      if type(base) == "table" and base[1] == "var" and runtime_funcs[base[2]] then
+        return true
+      end
+    end
+    
+    return false
+  end
+  
+  if k == "bin" or k == "un" then
+    for i = 3, #e do
+      if type(e[i]) == "table" and not v2_is_runtime_expr(e[i], runtime_vars, depth + 1) then
+        return false
+      end
+    end
+    return true
+  end
+  
+  return false
+end
+
+local function v2_is_runtime_stmt(stmt, runtime_vars)
+  if type(stmt) ~= "table" then return false end
+  local k = stmt[1] or stmt.tag
+  
+  if k == "let" or k == "setvar" then
+    local val = stmt[3]
+    if type(val) == "table" then
+      return v2_is_runtime_expr(val, runtime_vars)
+    end
+    return false
+  end
+  
+  if k == "assign" then
+    local lhs = stmt[2]
+    local rhs = stmt[3]
+    
+    if type(lhs) == "table" and #lhs >= 1 then
+      local l = lhs[1]
+      if type(l) == "table" and l[1] == "index" then
+        local base = l[2]
+        if type(base) == "table" and base[1] == "var" then
+          if runtime_vars[base[2]] then
+            return true
+          end
+        end
+      end
+    end
+    
+    if type(rhs) == "table" then
+      for i = 1, #rhs do
+        if type(rhs[i]) == "table" and not v2_is_runtime_expr(rhs[i], runtime_vars) then
+          return false
+        end
+      end
+      return true
+    end
+    return false
+  end
+  
+  if k == "callstmt" then
+    local call = stmt[2]
+    if type(call) == "table" then
+      return v2_is_runtime_expr(call, runtime_vars)
+    end
+    return false
+  end
+  
+  if k == "local" then
+    local rhs = stmt[3]
+    if type(rhs) == "table" then
+      for i = 1, #rhs do
+        if type(rhs[i]) == "table" and not v2_is_runtime_expr(rhs[i], runtime_vars) then
+          return false
+        end
+      end
+      return true
+    end
+    return false
+  end
+  
+  return false
+end
+
+function M.interpret_block(block, runtime_vars)
+  runtime_vars = runtime_vars or {}
+  
+  local rv = {}
+  for k, v in pairs(runtime_vars) do rv[k] = v end
+  
+  local user_stmts = {}
+  local runtime_stmts = {}
+  
+  for i, stmt in ipairs(block.body) do
+    if v2_is_runtime_stmt(stmt, rv) then
+      table.insert(runtime_stmts, stmt)
+      local k = stmt[1] or stmt.tag
+      if (k == "let" or k == "setvar") and type(stmt[2]) == "string" then
+        rv[stmt[2]] = true
+      end
+    else
+      table.insert(user_stmts, stmt)
+    end
+  end
+  
+  return user_stmts, runtime_stmts
+end
+
+-- 基于语句模式的运行时代码识别
+function M.is_runtime_stmt_pattern(stmt)
+  if type(stmt) ~= "table" then return false end
+  local k = stmt[1] or stmt.tag
+  
+  -- 1. PC寄存器操作：setvar X, {bin, %, ...}
+  if k == "setvar" and type(stmt[3]) == "table" and stmt[3][1] == "bin" and stmt[3][2] == "%" then
+    return true
+  end
+  
+  -- 2. 寄存器算术操作：setvar X, {bin, +/-, ...}
+  if k == "setvar" and type(stmt[3]) == "table" and stmt[3][1] == "bin" then
+    local op = stmt[3][2]
+    if op == "+" or op == "-" or op == "*" or op == "/" or op == "%" or op == "^" then
+      -- 检查操作数是否都是变量或数字
+      local all_simple = true
+      for i = 3, 4 do
+        if type(stmt[3][i]) == "table" then
+          if stmt[3][i][1] ~= "var" and stmt[3][i][1] ~= "num" then
+            all_simple = false
+          end
+        end
+      end
+      if all_simple then return true end
+    end
+  end
+  
+  -- 3. 表创建：let X, {table, ...}
+  if k == "let" and type(stmt[3]) == "table" and stmt[3][1] == "table" then
+    return true
+  end
+  
+  -- 4. 变量交换：assign {{var, l1}}, {{var, l2}}
+  if k == "assign" and type(stmt[2]) == "table" and #stmt[2] == 1 then
+    local lhs = stmt[2][1]
+    if type(lhs) == "table" and lhs[1] == "var" then
+      -- 检查右侧是否是变量
+      if type(stmt[3]) == "table" and #stmt[3] == 1 then
+        local rhs = stmt[3][1]
+        if type(rhs) == "table" and rhs[1] == "var" then
+          return true
+        end
+      end
+    end
+  end
+  
+  -- 5. 上值表函数调用：let X, {call, {index, {var, A}, ...}, ...}
+  if k == "let" and type(stmt[3]) == "table" and stmt[3][1] == "call" then
+    local fn = stmt[3][2]
+    if type(fn) == "table" and fn[1] == "index" then
+      local base = fn[2]
+      if type(base) == "table" and base[1] == "var" then
+        return true
+      end
+    end
+  end
+  
+  -- 6. 运行时函数调用：let X, {call, {var, pcall/tostring/tonumber/...}, ...}
+  if k == "let" and type(stmt[3]) == "table" and stmt[3][1] == "call" then
+    local fn = stmt[3][2]
+    if type(fn) == "table" and fn[1] == "var" then
+      local runtime_call_funcs = {
+        pcall = true, xpcall = true, tostring = true, tonumber = true,
+        type = true, select = true, unpack = true, error = true,
+        assert = true, setmetatable = true, getmetatable = true,
+        rawget = true, rawset = true, rawequal = true,
+        pairs = true, ipairs = true, next = true,
+        l = true,  -- 上值解析函数
+      }
+      if runtime_call_funcs[fn[2]] then
+        return true
+      end
+    end
+  end
+  
+  -- 7. 上值解析函数调用：setvar X, {call, {var, l}, {{var, X}}}
+  if k == "setvar" and type(stmt[3]) == "table" and stmt[3][1] == "call" then
+    local fn = stmt[3][2]
+    if type(fn) == "table" and fn[1] == "var" and fn[2] == "l" then
+      return true
+    end
+  end
+  
+  -- 8. 上值表函数调用：setvar X, {call, {index, ...}, ...}
+  if k == "setvar" and type(stmt[3]) == "table" and stmt[3][1] == "call" then
+    local fn = stmt[3][2]
+    if type(fn) == "table" and fn[1] == "index" then
+      return true
+    end
+  end
+  
+  -- 9. 表创建：setvar X, {table, ...}
+  if k == "setvar" and type(stmt[3]) == "table" and stmt[3][1] == "table" then
+    return true
+  end
+  
+  -- 10. 变量赋值：setvar X, {var, Y}
+  if k == "setvar" and type(stmt[3]) == "table" and stmt[3][1] == "var" then
+    return true
+  end
+  
+  -- 11. 简单值赋值：setvar X, {false/true/nil/num/boolean}
+  if k == "setvar" and type(stmt[3]) == "table" then
+    local vk = stmt[3][1]
+    if vk == "false" or vk == "true" or vk == "nil" or vk == "num" or vk == "boolean" then
+      return true
+    end
+  end
+  
+  -- 12. 运行时函数调用：setvar X, {call, {var, tonumber/tostring/...}, ...}
+  if k == "setvar" and type(stmt[3]) == "table" and stmt[3][1] == "call" then
+    local fn = stmt[3][2]
+    if type(fn) == "table" and fn[1] == "var" then
+      local runtime_call_funcs = {
+        pcall = true, xpcall = true, tostring = true, tonumber = true,
+        type = true, select = true, unpack = true, error = true,
+        assert = true, setmetatable = true, getmetatable = true,
+        rawget = true, rawset = true, rawequal = true,
+        pairs = true, ipairs = true, next = true,
+        l = true,
+      }
+      if runtime_call_funcs[fn[2]] then
+        return true
+      end
+    end
+  end
+  
+  -- 13. 多变量赋值+函数调用：assign {{var, X}, {var, Y}}, {{call, ...}}
+  if k == "assign" and type(stmt[2]) == "table" and #stmt[2] >= 2 then
+    local all_vars = true
+    for i = 1, #stmt[2] do
+      if type(stmt[2][i]) ~= "table" or stmt[2][i][1] ~= "var" then
+        all_vars = false
+      end
+    end
+    if all_vars and type(stmt[3]) == "table" and #stmt[3] >= 1 then
+      local first_rhs = stmt[3][1]
+      if type(first_rhs) == "table" and first_rhs[1] == "call" then
+        return true
+      end
+    end
+  end
+  
+  -- 14. 索引赋值：assign {{index, {var, X}, {var, Y}}}, {{var, Z}}
+  if k == "assign" and type(stmt[2]) == "table" and #stmt[2] == 1 then
+    local lhs = stmt[2][1]
+    if type(lhs) == "table" and lhs[1] == "index" then
+      if type(stmt[3]) == "table" and #stmt[3] == 1 then
+        local rhs = stmt[3][1]
+        if type(rhs) == "table" and rhs[1] == "var" then
+          return true
+        end
+      end
+    end
+  end
+  
+  return false
+end
+
+-- 改进的interpret_block：结合使用模式和语句模式
+  runtime_vars = runtime_vars or {}
+  
+  local rv = {}
+  for k, v in pairs(runtime_vars) do rv[k] = v end
+  
+  local user_stmts = {}
+  local runtime_stmts = {}
+  
+  for i, stmt in ipairs(block.body) do
+    -- 先检查语句模式
+    if M.is_runtime_stmt_pattern(stmt) then
+      table.insert(runtime_stmts, stmt)
+      local k = stmt[1] or stmt.tag
+      if (k == "let" or k == "setvar") and type(stmt[2]) == "string" then
+        rv[stmt[2]] = true
+      end
+    -- 再检查使用模式
+    elseif v2_is_runtime_stmt(stmt, rv) then
+      table.insert(runtime_stmts, stmt)
+      local k = stmt[1] or stmt.tag
+      if (k == "let" or k == "setvar") and type(stmt[2]) == "string" then
+        rv[stmt[2]] = true
+      end
+    else
+      table.insert(user_stmts, stmt)
+    end
+  end
+  
+  return user_stmts, runtime_stmts
+end
+
+--[[
+WeAreDev V2 通用反编译器（完整管线，基于 Prometheus Vmify VM 逆向）
+完整反编译管线：词法→解析→VM提取→寄存器折叠→CFG→常量数组→LCG解密→容器解析→语义→upvalue还原→短路折叠→结构化→代码生成
+]]
+local function deobfWeAreDevV2(code)
+    if type(code) ~= "string" or #code == 0 then return nil, "空代码" end
+    -- 检测是否为 WeAreDev/Prometheus Vmify 结构（多特征联合判断）
+    local score = 0
+    if code:match("wearedevs?%.net/obfuscator") then score = score + 3 end
+    if code:match("Tamper Detected") then score = score + 3 end
+    if code:match("newproxy") then score = score + 1 end
+    if code:match("getfenv and getfenv") then score = score + 1 end
+    if code:match("v001%.0%.0") then score = score + 2 end
+    if code:match("__metatable") and code:match("setmetatable") then score = score + 1 end
+    local isVmify = score >= 3
+    if not isVmify then
+        -- 非混淆代码直接返回原文，避免输出垃圾
+        return {
+            source = code,
+            stage = "passthrough",
+            isVmify = false,
+            lcgParams = {},
+            v1Stats = {},
+            note = "输入非WeAreDev混淆代码，原样返回（检测得分: " .. score .. "）"
+        }
+    end
+    -- 执行完整反编译管线
+    local ok, result = pcall(function()
+        return deobfWeAreDevFull(code)
+    end)
+    if not ok or type(result) ~= "string" or #result == 0 then
+        return nil, "完整反编译失败: " .. tostring(result)
+    end
+    -- 体积 sanity check：输出超过输入10倍时警告
+    local ratio = #result / #code
+    local note = "完整反编译输出（控制流结构化+代码生成）"
+    if ratio > 10 then
+        note = note .. string.format(" [警告: 输出体积是输入的%.1f倍，可能存在反编译异常]", ratio)
+    end
+    return {
+        source = result,
+        stage = "v2_full_decompile",
+        isVmify = isVmify,
+        lcgParams = {},
+        v1Stats = {},
+        note = note
+    }
+end
+
+local function deobfWeAreDevTrace(code)
+    if type(code) ~= "string" or #code == 0 then return nil, nil, "空代码" end
+    local result = deobfSandboxExecute(code)
+    local statements = {}
+    local constants = {}
+    local seenConst = {}
+    for _, entry in ipairs(result.trace) do
+        if entry.op == "print" and entry.a then
+            statements[#statements + 1] = "print(" .. table.concat(entry.a, ", ") .. ")"
+        elseif entry.op == "call" and entry.t then
+            local args = entry.a or {}
+            statements[#statements + 1] = entry.t .. "(" .. table.concat(args, ", ") .. ")"
+        end
+    end
+    local decoded = deobfExtractDecodedStrings(result.trace)
+    for _, s in ipairs(decoded) do
+        if not seenConst[s] and #s < 256 then
+            seenConst[s] = true
+            constants[#constants + 1] = s
+        end
+    end
+    local err = result.success and nil or ("执行中断: " .. tostring(result.error) .. " (捕获 " .. result.count .. " 条轨迹)")
+    return statements, constants, err
+end
+
+local function deobfGlobalNumSimplify(code)
+    if type(code) ~= "string" or #code == 0 then return code or "" end
+    local count = 0
+    local guard = 0
+    local changed = true
+    while changed and guard < 20 do
+        changed = false
+        guard = guard + 1
+        local out, i = {}, 1
+        while i <= #code do
+            local ch = code:sub(i, i)
+            if ch:match("[%d%-]") and (i == 1 or not code:sub(i-1, i-1):match("[%w_%.]")) then
+                local numExpr = code:sub(i):match("^([%d%s%+%-%*%/%(%)%.^]+)")
+                if numExpr and #numExpr >= 3 and numExpr:find("[%+%-%*/]") then
+                    local trimmed = numExpr:match("^(.-)%s*$")
+                    if not trimmed:match("[%a_]") and trimmed:match("%d") then
+                        local v = wearedevEvalNumeric(trimmed)
+                        if v ~= nil and math.type(v) == "integer" then
+                            local txt = tostring(v)
+                            out[#out + 1] = txt
+                            i = i + #trimmed
+                            count = count + 1
+                            changed = true
+                        else
+                            out[#out + 1] = ch
+                            i = i + 1
+                        end
+                    else
+                        out[#out + 1] = ch
+                        i = i + 1
+                    end
+                else
+                    out[#out + 1] = ch
+                    i = i + 1
+                end
+            else
+                out[#out + 1] = ch
+                i = i + 1
+            end
+        end
+        code = table.concat(out)
+    end
+    return code, count
+end
+
+local function deobfNumExprRestore(code)
+    if type(code) ~= "string" or #code == 0 then return code or "" end
+    local result = code
+    local count = 0
+
+    result = result:gsub("0x(%x+)", function(hex)
+        local n = tonumber(hex, 16)
+        if n then
+            count = count + 1
+            return tostring(n)
+        end
+        return "0x" .. hex
+    end)
+
+    result = result:gsub("(%d+)%s*[eE]%s*([%+%-]?%d+)", function(mantissa, exp)
+        local n = tonumber(mantissa .. "e" .. exp)
+        if n and n == math.floor(n) and math.abs(n) < 1e15 then
+            count = count + 1
+            return tostring(n)
+        end
+        return mantissa .. "e" .. exp
+    end)
+
+    result = result:gsub("%(%s*(%-?%d+)%s*%+%s*(%-?%d+)%s*%)", function(a, b)
+        local n = tonumber(a) + tonumber(b)
+        count = count + 1
+        return tostring(n)
+    end)
+
+    result = result:gsub("%(%s*(%-?%d+)%s*%-%s*(%-?%d+)%s*%)", function(a, b)
+        local n = tonumber(a) - tonumber(b)
+        count = count + 1
+        return tostring(n)
+    end)
+
+    result = result:gsub("%(%s*(%-?%d+)%s*%*%s*(%-?%d+)%s*%)", function(a, b)
+        local n = tonumber(a) * tonumber(b)
+        count = count + 1
+        return tostring(n)
+    end)
+
+    result = result:gsub("%(%s*(%-?%d+)%s*%%%%%s*(%-?%d+)%s*%)", function(a, b)
+        local na, nb = tonumber(a), tonumber(b)
+        if nb ~= 0 then
+            local n = na % nb
+            count = count + 1
+            return tostring(n)
+        end
+        return "(" .. a .. "%" .. b .. ")"
+    end)
+
+    local function bit_xor32(x, y)
+        x = math.floor(tonumber(x) or 0) % 0x100000000
+        y = math.floor(tonumber(y) or 0) % 0x100000000
+        local r, b = 0, 1
+        for i = 0, 31 do
+            if (x % 2 == 1) ~= (y % 2 == 1) then r = r + b end
+            x = math.floor(x / 2); y = math.floor(y / 2); b = b * 2
+        end
+        return r
+    end
+    result = result:gsub("%(%s*(%-?%d+)%s*%~%s*(%-?%d+)%s*%)", function(a, b)
+        local na, nb = tonumber(a), tonumber(b)
+        if na and nb and na >= 0 and nb >= 0 and na < 2^32 and nb < 2^32 then
+            local n = bit_xor32(na, nb)
+            count = count + 1
+            return tostring(n)
+        end
+        return "(" .. a .. "~" .. b .. ")"
+    end)
+
+    for _ = 1, 3 do
+        local prev = result
+        result = result:gsub("%(%s*(%-?%d+)%s*([%+%-%*])%s*(%-?%d+)%s*%)", function(a, op, b)
+            local na, nb = tonumber(a), tonumber(b)
+            local n
+            if op == "+" then n = na + nb
+            elseif op == "-" then n = na - nb
+            elseif op == "*" then n = na * nb
+            end
+            if n and n == math.floor(n) and math.abs(n) < 1e15 then
+                count = count + 1
+                return tostring(n)
+            end
+            return "(" .. a .. op .. b .. ")"
+        end)
+        if result == prev then break end
+    end
+
+    return result, count
+end
+
+end
+local function deobfUnsplitStrings(code)
+    if type(code) ~= "string" or #code == 0 then return code or "", 0 end
+    local result = code
+    local count = 0
+
+    result = result:gsub('table%.concat%s*%(%s*{%s*([^}]*)}%s*%)', function(entries)
+        local parts = {}
+        for str in entries:gmatch('"([^"]*)"') do
+            table.insert(parts, str)
+        end
+        if #parts > 1 then
+            count = count + 1
+            return '"' .. table.concat(parts) .. '"'
+        end
+        return 'table.concat({' .. entries .. '})'
+    end)
+
+    repeat
+        local prev = result
+        result = result:gsub('"([^"]*)"%s*%.%.%s*"([^"]*)"', function(a, b)
+            count = count + 1
+            return '"' .. a .. b .. '"'
+        end)
+    until result == prev
+
+    result = result:gsub('string%.rep%s*%(%s*"([^"]*)"%s*,%s*(%d+)%s*%)', function(str, n)
+        local nn = tonumber(n)
+        if nn and nn <= 100 then
+            count = count + 1
+            return '"' .. string.rep(str, nn) .. '"'
+        end
+        return 'string.rep("' .. str .. '",' .. n .. ')'
+    end)
+
+    return result, count
+end
+
+local function deobfUnwrapFunction(code)
+    if type(code) ~= "string" or #code == 0 then return code or "" end
+    local result = code
+    local count = 0
+
+    local function unwrapPattern(prefix, suffix)
+        local pattern = prefix .. '%(%s*function%s*%(%.%.%.%)%s*(.-)%s*end%)%s*%(%.%.%.%)' .. suffix
+        return pattern
+    end
+
+    result = result:gsub('return%s*%(?%s*function%s*%(%.%.%.%)%s*\n', function()
+        count = count + 1
+        return ""
+    end)
+
+    if count > 0 then
+        result = result:gsub('%s*end%s*%)*%s*%(%.%.%.%)%s*$', function()
+            return ""
+        end)
+    end
+
+    result = result:gsub('local%s+([%w_]+)%s*=%s*%(%s*function%s*%(%s*%)%s*\n', function(varname)
+        count = count + 1
+        return "do\n"
+    end)
+
+    if count == 0 then
+        result = result:gsub('^%s*return%s+function%s*%(%.%.%.%)%s*\n(.-)\n%s*end%s*%(%.%.%.%)%s*$', function(body)
+            count = count + 1
+            return body
+        end)
+    end
+
+    return result, count
+end
+
+local function deobfConstantArrayInline(code)
+    if type(code) ~= "string" or #code == 0 then return code or "" end
+    local result = code
+    local count = 0
+
+    local arrays = {}
+
+    result = result:gsub('local%s+([%w_]+)%s*=%s*{%s*([^}]-)%s*}', function(arrName, content)
+        local items = {}
+        local allStrings = true
+        local allNumbers = true
+        for _item in content:gmatch('%s*([^,]+)') do
+    local item = _item
+            item = item:match("^%s*(.-)%s*$")
+            if item ~= "" then
+                table.insert(items, item)
+                if not item:match('^".*"$') and not item:match("^'.*'$") then
+                    allStrings = false
+                end
+                if not item:match("^%-?%d+%.?%d*$") then
+                    allNumbers = false
+                end
+            end
+        end
+        if (allStrings or allNumbers) and #items > 0 then
+            arrays[arrName] = items
+            count = count + 1
+            return ""
+        end
+        return "local " .. arrName .. " = {" .. content .. "}"
+    end)
+
+    for arrName, items in pairs(arrays) do
+        result = result:gsub(arrName .. '%s*%[%s*(%d+)%s*%]', function(idx)
+            local i = tonumber(idx)
+            if i and items[i + 1] then
+                count = count + 1
+                return items[i + 1]
+            end
+            return arrName .. "[" .. idx .. "]"
+        end)
+    end
+
+    return result, count
+end
+
+local function deobfUnproxify(code)
+    if type(code) ~= "string" or #code == 0 then return code or "" end
+    local result = code
+    local count = 0
+
+    local proxies = {}
+
+    result = result:gsub('local%s+([%w_]+)%s*=%s*setmetatable%s*%(%s*{}%s*,%s*{%s*__index%s*=%s*function%s*%([^)]*%)%s*return%s+([%w_]+)%s*%%[k%]%s*end%s*}%s*%)', function(proxyName, origName)
+        proxies[proxyName] = origName
+        count = count + 1
+        return ""
+    end)
+
+    result = result:gsub('local%s+([%w_]+)%s*=%s*setmetatable%s*%(%s*{}%s*,%s*{%s*__index%s*=%s*function%s*%(%s*[%w_,%s]*%)%s*return%s+([%w_]+)', function(proxyName, origName)
+        if not proxies[proxyName] then
+            proxies[proxyName] = origName
+            count = count + 1
+            return ""
+        end
+        return "local " .. proxyName .. " = setmetatable({}, {__index = function() return " .. origName
+    end)
+
+    for proxyName, origName in pairs(proxies) do
+        result = result:gsub("%f[%a_]" .. proxyName .. "%f[^%w_]", origName)
+    end
+
+    result = result:gsub('setmetatable%s*%(%s*{}%s*,%s*{%s*__index%s*=%s*function%s*%([^)]*%)%s*end%s*}%s*%)%s*\n', function()
+        count = count + 1
+        return ""
+    end)
+
+    return result, count
+end
+
+local function deobfPrometheusFull(code)
+    if type(code) ~= "string" or #code == 0 then return code or "" end
+    local result = code
+    local totalChanges = 0
+    local stepCount = 0
+
+    local r1, c1 = deobfConstantArrayInline(result)
+    result = r1
+    totalChanges = totalChanges + c1
+    stepCount = stepCount + 1
+    AddLog("[Step " .. stepCount .. "] 常量数组内联: " .. c1 .. " 处", "info")
+
+    local r2, c2 = deobfStringDecrypt(result)
+    result = r2
+    totalChanges = totalChanges + c2
+    stepCount = stepCount + 1
+    AddLog("[Step " .. stepCount .. "] 字符串解密: " .. c2 .. " 处", "info")
+
+    local r3, c3 = deobfUnsplitStrings(result)
+    result = r3
+    totalChanges = totalChanges + c3
+    stepCount = stepCount + 1
+    AddLog("[Step " .. stepCount .. "] 分割字符串合并: " .. c3 .. " 处", "info")
+
+    local r4, c4 = deobfNumExprRestore(result)
+    result = r4
+    totalChanges = totalChanges + c4
+    stepCount = stepCount + 1
+    AddLog("[Step " .. stepCount .. "] 数字表达式还原: " .. c4 .. " 处", "info")
+
+    local r5, c5 = deobfUnproxify(result)
+    result = r5
+    totalChanges = totalChanges + c5
+    stepCount = stepCount + 1
+    AddLog("[Step " .. stepCount .. "] 代理变量还原: " .. c5 .. " 处", "info")
+
+    local r6, c6 = deobfUnwrapFunction(result)
+    result = r6
+    totalChanges = totalChanges + c6
+    stepCount = stepCount + 1
+    AddLog("[Step " .. stepCount .. "] 函数包装解除: " .. c6 .. " 处", "info")
+
+    local r7, c7 = deobfRestoreControlFlow(result)
+    result = r7
+    totalChanges = totalChanges + c7
+    stepCount = stepCount + 1
+    AddLog("[Step " .. stepCount .. "] 控制流还原: " .. c7 .. " 处", "info")
+
+    local r8, c8 = deobfRenameVars(result)
+    result = r8
+    totalChanges = totalChanges + c8
+    stepCount = stepCount + 1
+    AddLog("[Step " .. stepCount .. "] 变量重命名: " .. c8 .. " 处", "info")
+
+    local r9, c9 = deobfGcClean(result)
+    result = r9
+    totalChanges = totalChanges + c9
+    stepCount = stepCount + 1
+    AddLog("[Step " .. stepCount .. "] 垃圾代码清理: " .. c9 .. " 处", "info")
+
+    result = deobfFormatCode(result)
+    stepCount = stepCount + 1
+    AddLog("[Step " .. stepCount .. "] 代码格式化完成", "info")
+
+    return result, totalChanges
+end
+
+local function deobfGcClean(code)
+    if type(code) ~= "string" or #code == 0 then return code or "", 0 end
+    local lines = {}
+    for line in code:gmatch("[^\r\n]+") do
+        table.insert(lines, line)
+    end
+
+    local result = {}
+    local removed = 0
+
+    for _, line in ipairs(lines) do
+        local trimmed = line:match("^%s*(.-)%s*$")
+        local skip = false
+
+        if trimmed == "" then
+            local lastLines = {}
+            for i = #result - 2, #result do
+                if i > 0 then table.insert(lastLines, result[i]) end
+            end
+            local emptyCount = 0
+            for _, l in ipairs(lastLines) do
+                if l:match("^%s*$") then emptyCount = emptyCount + 1 end
+            end
+            if emptyCount < 3 then
+                table.insert(result, line)
+            else
+                skip = true
+            end
+        elseif trimmed:match("^local%s+[%a_][%w_]*%s*=%s*nil%s*$") then
+            skip = true
+            removed = removed + 1
+        elseif trimmed:match("^[%a_][%w_]*%s*=%s*nil%s*$") then
+            if not trimmed:match("^local%s+") then
+                skip = true
+                removed = removed + 1
+            end
+        elseif trimmed:match("^if%s+false%s+then$") then
+            skip = true
+            removed = removed + 1
+        elseif trimmed:match("^%-%-[%s]*$") then
+        end
+
+        if not skip then
+            table.insert(result, line)
+        end
+    end
+
+    return table.concat(result, "\n"), removed
+end
+
+local function deobfStripComments(code)
+    if type(code) ~= "string" or #code == 0 then return code or "" end
+    local out = {}
+    local i = 1
+    local n = #code
+    while i <= n do
+        local ch = code:sub(i, i)
+        if ch == "-" and i < n and code:sub(i+1, i+1) == "-" then
+            if code:sub(i, i+3) == "--[[" or code:sub(i, i+4) == "--[=[" then
+                local eqMatch = code:sub(i):match("^%-%-%[(=*)%[")
+                if eqMatch then
+                    local closePattern = "%]" .. eqMatch .. "%]"
+                    local closePos = code:find(closePattern, i + 4 + #eqMatch)
+                    if closePos then
+                        i = closePos + 2 + #eqMatch
+                    else
+                        i = n + 1
+                    end
+                else
+                    i = i + 2
+                end
+            else
+                local nl = code:find("\n", i)
+                if nl then i = nl else i = n + 1 end
+            end
+        elseif ch == '"' or ch == "'" then
+            local quote = ch
+            out[#out + 1] = ch
+            i = i + 1
+            while i <= n do
+                local c = code:sub(i, i)
+                out[#out + 1] = c
+                if c == "\\" then
+                    i = i + 1
+                    if i <= n then
+                        out[#out + 1] = code:sub(i, i)
+                        i = i + 1
+                    end
+                elseif c == quote then
+                    i = i + 1
+                    break
+                else
+                    i = i + 1
+                end
+            end
+        elseif ch == "[" and code:sub(i, i+1):match("%[=*%[") then
+            local eqMatch = code:sub(i):match("^%[(=*)%[")
+            local closePattern = "%]" .. eqMatch .. "%]"
+            local closePos = code:find(closePattern, i + 2 + #eqMatch)
+            if closePos then
+                out[#out + 1] = code:sub(i, closePos + 1 + #eqMatch)
+                i = closePos + 2 + #eqMatch
+            else
+                out[#out + 1] = ch
+                i = i + 1
+            end
+        else
+            out[#out + 1] = ch
+            i = i + 1
+        end
+    end
+    return table.concat(out)
+end
+
+local function deobfFormatCode(code)
+    if type(code) ~= "string" or #code == 0 then return code or "" end
+    code = code:gsub("(%s+)(then)(%s+)", "%1%2\n")
+    code = code:gsub("(%s+)(do)(%s+)", "%1%2\n")
+    code = code:gsub("(%s+)(else)(%s+)", "\n%1%2\n")
+    code = code:gsub("(%s+)(end)(%s+)", "\n%1%2\n")
+    code = code:gsub("(%s+)(return)(%s+)", "\n%1%2 ")
+    code = code:gsub("(%s+)(local%s+function)", "\n%1")
+    code = code:gsub("(%s+)(function%s*[%(%a_])", "\n%1")
+    local lines = {}
+    for line in code:gmatch("[^\r\n]+") do
+        table.insert(lines, line)
+    end
+
+    local result = {}
+    local indent = 0
+    local indentStr = "    "
+
+    for _, line in ipairs(lines) do
+        local trimmed = line:match("^%s*(.-)%s*$")
+        if trimmed == "" then
+            table.insert(result, "")
+        else
+            local startsBlock = trimmed:match("^function") or trimmed:match("^if%s+")
+                or trimmed:match("^for%s+") or trimmed:match("^while%s+")
+                or trimmed:match("^do%s*$") or trimmed:match("^repeat%s*$")
+            local endsBlock = trimmed:match("^end%s*$") or trimmed:match("^else%s*$")
+                or trimmed:match("^elseif%s+") or trimmed:match("^until%s+")
+
+            if endsBlock and not startsBlock then
+                indent = math.max(0, indent - 1)
+            end
+
+            table.insert(result, indentStr:rep(indent) .. trimmed)
+
+            if startsBlock then
+                indent = indent + 1
+            end
+            if trimmed:match("^else") or trimmed:match("^elseif") then
+                indent = indent + 1
+            end
+        end
+    end
+
+    local MAX_W = 120
+    local function findBreak(s, limit)
+        local i, inS, sc, inL, ll = 1, false, "", false, 0
+        local bp = nil
+        while i <= #s and i <= limit do
+            local c = s:sub(i, i)
+            if inL then
+                if c == "]" then
+                    local e, j = 0, i + 1
+                    while s:sub(j, j) == "=" do e = e + 1; j = j + 1 end
+                    if s:sub(j, j) == "]" and e == ll then inL = false; i = j end
+                end
+            elseif inS then
+                if c == "\\" then i = i + 1
+                elseif c == sc then inS = false end
+            else
+                if c == '"' or c == "'" then inS = true; sc = c
+                elseif c == "[" then
+                    local e, j = 0, i + 1
+                    if s:sub(j, j) == "=" then
+                        while s:sub(j, j) == "=" do e = e + 1; j = j + 1 end
+                        if s:sub(j, j) == "[" then inL = true; ll = e; i = j end
+                    elseif s:sub(j, j) == "[" then inL = true; ll = 0; i = j end
+                else
+                    local op = false
+                    if c == "=" or c == "+" or c == "-" or c == "*" or c == "/" or c == "," then op = true
+                    elseif c == "." and s:sub(i+1, i+1) == "." then op = true
+                    elseif s:sub(i, i+2) == "and" and (i < 2 or not s:sub(i-1,i-1):match("[%w_]")) and (i+3 > #s or not s:sub(i+3,i+3):match("[%w_]")) then op = true
+                    elseif s:sub(i, i+1) == "or" and (i < 2 or not s:sub(i-1,i-1):match("[%w_]")) and (i+2 > #s or not s:sub(i+2,i+2):match("[%w_]")) then op = true end
+                    if op and i > 30 then bp = i end
+                end
+            end
+            i = i + 1
+        end
+        return bp
+    end
+
+    local wrapped = {}
+    for _, ln in ipairs(result) do
+        if #ln <= MAX_W or ln:match("^%s*$") then
+            wrapped[#wrapped + 1] = ln
+        else
+            local cur = ln
+            local ind = ln:match("^(%s*)") or ""
+            while #cur > MAX_W do
+                local bp = findBreak(cur, MAX_W)
+                if not bp then break end
+                wrapped[#wrapped + 1] = cur:sub(1, bp)
+                cur = ind .. "    " .. (cur:sub(bp + 1):match("^%s*(.*)$") or cur:sub(bp + 1))
+            end
+            wrapped[#wrapped + 1] = cur
+        end
+    end
+    result = wrapped
+
+    return table.concat(result, "\n")
+end
+
+local function deobfAnalyzeCode(code)
+    if type(code) ~= "string" or #code == 0 then return code or "" end
+    local stats = {}
+    stats.totalLines = select(2, code:gsub("\n", "\n")) + 1
+    stats.totalChars = #code
+
+    local keywords = {"function", "local", "if", "for", "while", "repeat", "do", "end", "return", "break", "and", "or", "not"}
+    stats.keywordCount = 0
+    for _, kw in ipairs(keywords) do
+        stats.keywordCount = stats.keywordCount + select(2, code:gsub("%f[%a]" .. kw .. "%f[^%w]", ""))
+    end
+
+    local varNames = {}
+    for var in code:gmatch("local%s+([%a_][%w_]*)") do
+        if not varNames[var] then
+            varNames[var] = 1
+        else
+            varNames[var] = varNames[var] + 1
+        end
+    end
+    stats.localCount = 0
+    for _ in pairs(varNames) do stats.localCount = stats.localCount + 1 end
+    stats.localTotalUses = 0
+    for _, c in pairs(varNames) do stats.localTotalUses = stats.localTotalUses + c end
+
+    local funcCount = select(2, code:gsub("function%s", ""))
+    stats.functionCount = funcCount
+
+    local strCount = select(2, code:gsub('"[^"]*"', "")) + select(2, code:gsub("'[^']*'", ""))
+    stats.stringCount = strCount
+
+    local hasObfuscation = false
+    local obMarkers = {
+        "obfuscated", "____", "_G[\"", "L0_", "L1_", "L2_",
+        "v_%d+", "_v%d+", "oOoOOo", "OOoOOo"
+    }
+    for _, marker in ipairs(obMarkers) do
+        if code:match(marker) then
+            hasObfuscation = true
+            break
+        end
+    end
+    stats.likelyObfuscated = hasObfuscation
+
+    stats.obfuscators = {}
+    if code:match("[Ll]uraph") then table.insert(stats.obfuscators, "Luraph") end
+    if code:match("[Ww]earedev") then table.insert(stats.obfuscators, "WeAreDev") end
+    if code:match("obfuscate") then table.insert(stats.obfuscators, "通用混淆") end
+
+    return stats
+end
+
+local deobfHookActive = false
+local deobfHookCount = 0
+local deobfHookedLoadstring = nil
+
+local function deobfHookLoadstring()
+    if deobfHookActive then
+        AddLog("Hook Loadstring 已停止，共拦截 " .. deobfHookCount .. " 次调用", "info")
+        deobfHookActive = false
+        if deobfHookedLoadstring then
+            loadstring = deobfHookedLoadstring
+            deobfHookedLoadstring = nil
+        end
+        if deobfToolButtons["hook_loadstring"] then
+            deobfToolButtons["hook_loadstring"].BackgroundColor3 = theme.surface
+            deobfToolButtons["hook_loadstring"].BackgroundTransparency = 0.4
+        end
+        return
+    end
+
+    deobfHookedLoadstring = loadstring
+    deobfHookCount = 0
+    deobfHookActive = true
+
+    local original = loadstring
+    loadstring = function(src, chunkname)
+        deobfHookCount = deobfHookCount + 1
+        local srcStr = tostring(src)
+        local cn = tostring(chunkname or "unknown")
+        local now = os.date("%H:%M:%S")
+        AddLog("[Loadstring #" .. deobfHookCount .. "] " .. cn .. " (" .. #srcStr .. " bytes)", "info")
+        table.insert(deobfHookRecords, {
+            id = deobfHookCount,
+            source = srcStr,
+            chunkname = cn,
+            time = now,
+            size = #srcStr,
+        })
+        if deobfViewMode == "hooklog" then
+            task.spawn(deobfRefreshHookLog)
+        end
+        if dataApi then
+            local fname = "hooked_" .. deobfHookCount .. ".lua"
+            dataApi.writeFile(fname, srcStr)
+        end
+        return original(src, chunkname)
+    end
+
+    AddLog("Hook Loadstring 已启动，正在监听...", "info")
+    if deobfToolButtons["hook_loadstring"] then
+        deobfToolButtons["hook_loadstring"].BackgroundColor3 = theme.green
+        deobfToolButtons["hook_loadstring"].BackgroundTransparency = 0.7
+    end
+end
+
+local function deobfBaseDecode(code, baseType, customAlphabet)
+    if type(code) ~= "string" or #code == 0 then return "", "unknown" end
+    code = code:gsub("%s+", "")
+    local al = {
+        base64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/",
+        base32 = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567",
+        base58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz",
+        base62 = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz",
+        base91 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!#$%&()*+,./:;<=>?@[]^_`{|}~\"",
+    }
+    local function autoDetect(s)
+        if s:match("^[A-Za-z0-9+/]+=*$") then return "base64" end
+        if s:match("^[A-Z2-7]+=*$") then return "base32" end
+        if s:match("^[1-9A-HJ-NP-Za-km-z]+$") then return "base58" end
+        if s:match("^[0-9A-Za-z]+$") then return "base62" end
+        if s:match("^[!-u]+$") or (s:sub(1,2) == "<~" and s:sub(-2) == "~>") then return "base85" end
+        return "base64"
+    end
+    if not baseType or baseType == "" or baseType == "auto" then
+        baseType = autoDetect(code)
+    end
+    local alphabet = (customAlphabet and customAlphabet ~= "") and customAlphabet or al[baseType]
+    if baseType == "base64" or baseType == "base32" then
+        local b = alphabet
+        local rev = {}
+        for i = 1, #b do rev[b:sub(i, i)] = i - 1 end
+        local bitsPerChar = baseType == "base64" and 6 or 5
+        code = code:gsub("=+$", "")
+        local out = {}
+        local bits = 0
+        local val = 0
+        for i = 1, #code do
+            local v = rev[code:sub(i, i)]
+            if v then
+                val = val * (2^bitsPerChar) + v
+                bits = bits + bitsPerChar
+                while bits >= 8 do
+                    bits = bits - 8
+                    out[#out + 1] = string.char(math.floor(val / 2^bits) % 256)
+                    val = val % 2^bits
+                end
+            end
+        end
+        return table.concat(out), baseType
+    end
+    if baseType == "base85" then
+        local s = code
+        if s:sub(1, 2) == "<~" then s = s:sub(3) end
+        if s:sub(-2) == "~>" then s = s:sub(1, -3) end
+        local out = {}
+        local i = 1
+        while i <= #s do
+            if s:sub(i, i) == "z" then
+                for j = 1, 4 do out[#out + 1] = string.char(0) end
+                i = i + 1
+            else
+                local grp = {}
+                local actual = 0
+                for j = 1, 5 do
+                    if i <= #s then
+                        grp[#grp + 1] = string.byte(s:sub(i, i)) - 33
+                        actual = actual + 1
+                        i = i + 1
+                    else
+                        grp[#grp + 1] = 84
+                    end
+                end
+                local val = 0
+                for _, gv in ipairs(grp) do val = val * 85 + gv end
+                local outBytes = actual - 1
+                for j = 3, 0, -1 do
+                    if 4 - j <= outBytes then
+                        out[#out + 1] = string.char(math.floor(val / 256^j) % 256)
+                    end
+                end
+            end
+        end
+        return table.concat(out), baseType
+    end
+    if baseType == "base91" then
+        local b91 = alphabet
+        local rev = {}
+        for i = 1, #b91 do rev[b91:sub(i, i)] = i - 1 end
+        local out = {}
+        local v = -1
+        local b = 0
+        local n = 0
+        for i = 1, #code do
+            local val = rev[code:sub(i, i)]
+            if val then
+                if v < 0 then
+                    v = val
+                else
+                    v = v + val * 91
+                    b = b + v * 2^n
+                    n = n + ((v % 8192) > 88 and 13 or 14)
+                    while n >= 8 do
+                        out[#out + 1] = string.char(b % 256)
+                        b = math.floor(b / 256)
+                        n = n - 8
+                    end
+                    v = -1
+                end
+            end
+        end
+        if v >= 0 then
+            b = b + v * 2^n
+            n = n + 8
+            while n >= 8 do
+                out[#out + 1] = string.char(b % 256)
+                b = math.floor(b / 256)
+                n = n - 8
+            end
+        end
+        return table.concat(out), baseType
+    end
+    local base = #alphabet
+    local rev = {}
+    for i = 1, base do rev[alphabet:sub(i, i)] = i - 1 end
+    local zeroChar = alphabet:sub(1, 1)
+    local zeros = 0
+    while code:sub(zeros + 1, zeros + 1) == zeroChar do zeros = zeros + 1 end
+    local bytes = {}
+    for i = zeros + 1, #code do
+        local cv = rev[code:sub(i, i)]
+        if cv then
+            local carry = cv
+            for j = #bytes, 1, -1 do
+                local nv = bytes[j] * base + carry
+                bytes[j] = nv % 256
+                carry = math.floor(nv / 256)
+            end
+            while carry > 0 do
+                table.insert(bytes, 1, carry % 256)
+                carry = math.floor(carry / 256)
+            end
+        end
+    end
+    local out = {}
+    for i = 1, zeros do out[#out + 1] = string.char(0) end
+    for _, by in ipairs(bytes) do out[#out + 1] = string.char(by) end
+    return table.concat(out), baseType
+end
+
 local function deobfRunTool(toolId)
     if toolId == "hook_loadstring" then
         local wasActive = deobfHookActive

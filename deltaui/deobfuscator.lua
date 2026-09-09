@@ -9036,7 +9036,7 @@ local function deobfRunTool(toolId)
     if toolId == "wearedev_full" then
         AddLog("=== WeAreDev 完全反混淆（VM逆向引擎）===", "info")
         AddLog("管线：词法→解析→基本块→寄存器折叠→CFG→常量数组→LCG解密→容器解析→语义→upvalue还原→短路折叠→结构化→代码生成", "info")
-        local result, err = deobfWeAreDevFull(content)
+        local result, err = deobfWeAreDevV2(content)
         if not result then
             AddLog("反编译失败: " .. tostring(err), "warn")
             return

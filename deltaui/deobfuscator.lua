@@ -246,7 +246,7 @@ local function deobfHouseSaveNow()
         pcall(task.cancel, deobfHouseSaveTimer)
         deobfHouseSaveTimer = nil
     end
-    -- 获取完整内容（处理分页显示的情况）
+
     local fullContent = cb.Text
     if _G.__DeltaUI_getCurrentTabFullContent then
         local ok, content = pcall(_G.__DeltaUI_getCurrentTabFullContent)
@@ -282,7 +282,7 @@ local function deobfSetupHouseSync()
         end
         deobfHouseSaveTimer = task.delay(0.3, function()
             deobfHouseSaveTimer = nil
-            -- 获取完整内容（处理分页显示的情况）
+
             local fullContent = cb.Text
             if _G.__DeltaUI_getCurrentTabFullContent then
                 local ok, content = pcall(_G.__DeltaUI_getCurrentTabFullContent)
@@ -305,7 +305,7 @@ local function deobfSetupHouseSync()
     pcall(function()
         if _G.__DeltaUI_onTabChanged then
             _G.__DeltaUI_onTabChanged:Connect(function(tabName)
-                -- 先保存当前选项卡的内容
+
                 deobfHouseSaveNow()
                 if tabName and deobfHouseFileMap[tabName] then
                     local fn = deobfHouseFileMap[tabName]
@@ -316,19 +316,16 @@ local function deobfSetupHouseSync()
     end)
 end
 
--- 保存所有打开的选项卡
 local function deobfHouseSaveAll()
     if not dataApi then return end
     local api = _G
     local cb = api.__DeltaUI_codeBox
     if not cb then return end
-    
-    -- 先保存当前选项卡
+
     deobfHouseSaveNow()
-    
-    -- 遍历所有打开的文件并保存
+
     for name, tabName in pairs(deobfHouseOpenFiles) do
-        -- 尝试获取该选项卡的内容
+
         local content = nil
         if api.__DeltaUI_getTabContent then
             local ok, r = pcall(api.__DeltaUI_getTabContent, tabName)
@@ -354,7 +351,6 @@ local function deobfOpenInHouseEditor(name, content)
         return false
     end
 
-    -- 如果文件已经打开，直接切换，不创建新tab
     local existingTab = deobfHouseOpenFiles[name]
     if existingTab then
         local switched = false
@@ -366,7 +362,7 @@ local function deobfOpenInHouseEditor(name, content)
             local ok = pcall(api.__DeltaUI_selectTab, existingTab)
             if ok then switched = true end
         end
-        -- 即使切换失败，也不创建新tab，直接跳转到housepage
+
         if deobfSwitchPage then
             pcall(deobfSwitchPage, "house")
         end
@@ -393,7 +389,6 @@ local function deobfOpenInHouseEditor(name, content)
 
     if api.__DeltaUI_renderTabs then pcall(api.__DeltaUI_renderTabs) end
 
-    -- 切换到新创建的选项卡
     local switched = false
     if api.__DeltaUI_switchTab then
         local ok = pcall(api.__DeltaUI_switchTab, tabName)
@@ -404,7 +399,6 @@ local function deobfOpenInHouseEditor(name, content)
         if ok then switched = true end
     end
 
-    -- 确保跳转到housepage
     if deobfSwitchPage then
         pcall(deobfSwitchPage, "house")
     end
@@ -550,7 +544,7 @@ local function deobfLoadFiles()
     local result = {}
     local files = dataApi.listFiles("") or {}
     for _, fpath in ipairs(files) do
-        local fname = fpath:match("([^/%%]+)$") or fpath
+        local fname = fpath:match("([^/\\]+)$") or fpath
         if fname and fname ~= "" and not fname:match("^%.") then
             table.insert(result, fname)
         end
@@ -715,7 +709,7 @@ local function deobfRefreshFileList()
                 deobfTween(row, {BackgroundColor3 = theme.surface, BackgroundTransparency = 0.4}, 0.15)
                 delBtn.Visible = false
             end
-            -- 选中文件时删除按钮常驻显示
+
             if deobfSelectedFile == fname then
                 delBtn.Visible = true
             end
@@ -730,7 +724,7 @@ local function deobfRefreshFileList()
                     if fn == fname then
                         r.BackgroundColor3 = theme.accent
                         r.BackgroundTransparency = 0.75
-                        -- 选中文件时删除按钮常驻显示
+
                         for _, child in ipairs(r:GetChildren()) do
                             if child:IsA("TextButton") and child.Name ~= "" then
                                 child.Visible = true
@@ -739,7 +733,7 @@ local function deobfRefreshFileList()
                     else
                         r.BackgroundColor3 = theme.surface
                         r.BackgroundTransparency = 0.4
-                        -- 非选中文件时隐藏删除按钮
+
                         for _, child in ipairs(r:GetChildren()) do
                             if child:IsA("TextButton") and child.Name ~= "" then
                                 child.Visible = false
@@ -765,7 +759,7 @@ local function deobfRefreshFileList()
         if deobfSelectedFile == fname then
             row.BackgroundColor3 = theme.accent
             row.BackgroundTransparency = 0.75
-            -- 选中文件时删除按钮常驻显示
+
             delBtn.Visible = true
         end
 
@@ -1785,7 +1779,7 @@ local function wearedevEscapeInner(str)
         if b == q then out[#out + 1] = '\\"'
         elseif b == bs then out[#out + 1] = '\\\\'
         elseif b >= 32 and b <= 126 then out[#out + 1] = str:sub(i, i)
-        else out[#out + 1] = string.format('%%03d', b) end
+        else out[#out + 1] = string.format('\\%03d', b) end
     end
     return table.concat(out)
 end
@@ -1948,7 +1942,6 @@ local WEAREDEV_RUNTIME_GLOBALS = {
     string = true, table = true, math = true, os = true, coroutine = true, io = true,
 }
 
--- 全能沙箱执行器：所有操作不报错，所有调用被记录
 local function deobfCreateSandbox()
     local trace = {}
     local traceCount = 0
@@ -2185,7 +2178,6 @@ local function deobfTraceVMStates(code)
     return states, uniqueCount, result.count
 end
 
--- ==================== V2 反编译器核心模块（词法/解析/AST/base64/LCG） ====================
 local function deobfLex(src)
     local toks = {}
     local i = 1
@@ -2463,20 +2455,7 @@ function deobfLcg:decrypt(encBytes, seed)
     return out
 end
 
---[[
-WeAreDev V2 通用反编译器（基于 Prometheus Vmify VM 逆向）
-核心模块已内联到本文件：deobfLex（词法）、deobfParser（解析）、deobfEvalConst（常量折叠）、
-deobfExprLua（表达式渲染）、deobfB64Decode（base64解码）、deobfLcg（LCG字符串解密器）
-完整 Python 参考原型见仓库 prom_decomp/ 目录
-]]
-
--- ============================================================
--- ============================================================
 M = {}
-
--- ============================================================
--- 工具函数
--- ============================================================
 
 local function isDigit(b) return b >= 48 and b <= 57 end
 local function isAlpha(b) return (b >= 65 and b <= 90) or (b >= 97 and b <= 122) or b == 95 end
@@ -2484,13 +2463,10 @@ local function isAlnum(b) return isAlpha(b) or isDigit(b) end
 local function isSpace(b) return b == 32 or b == 9 or b == 13 or b == 10 end
 local function isPrint(b) return b >= 32 and b < 127 end
 
--- Python 风格取模（对负数行为一致）
 local function pymod(a, b) return a - math.floor(a / b) * b end
 
--- 判断是否为 AST 数组表（模拟 Python tuple）
 local function isAst(e) return type(e) == "table" and e[1] ~= nil end
 
--- 深拷贝 AST（数组表）
 local function astCopy(e)
   if type(e) ~= "table" then return e end
   local r = {}
@@ -2504,7 +2480,6 @@ local function astCopy(e)
   return r
 end
 
--- 表是否为数组（整数键 1..n）
 local function isArray(t)
   if type(t) ~= "table" then return false end
   local n = 0
@@ -2512,7 +2487,6 @@ local function isArray(t)
   return n == #t
 end
 
--- set 操作（用 table 键=true 模拟）
 local function setAdd(s, k) s[k] = true end
 local function setHas(s, k) return s[k] == true end
 local function setUnion(a, b)
@@ -2542,13 +2516,11 @@ local function setToList(s)
   return r
 end
 
--- 字符串工具
 local function strStartsWith(s, prefix, start)
   start = start or 1
   return s:sub(start, start + #prefix - 1) == prefix
 end
 
--- 检查字符串是否为合法 ASCII 标识符
 local function isIdent(s)
   if #s == 0 then return false end
   local b = s:byte(1)
@@ -2559,7 +2531,6 @@ local function isIdent(s)
   return true
 end
 
--- 检查字符串是否全部可打印（允许常见空白）
 local function isPrintableText(s)
   for i = 1, #s do
     local b = s:byte(i)
@@ -2570,7 +2541,6 @@ local function isPrintableText(s)
   return true
 end
 
--- 检查字节序列是否为合法 UTF-8
 local function isValidUTF8(s)
   local i = 1
   local n = #s
@@ -2612,10 +2582,6 @@ local function isValidUTF8(s)
   return true
 end
 
--- ============================================================
--- 词法分析器
--- ============================================================
-
 local KEYWORDS = {
   ["and"]=true,["break"]=true,["do"]=true,["else"]=true,["elseif"]=true,
   ["end"]=true,["false"]=true,["for"]=true,["function"]=true,["if"]=true,
@@ -2638,11 +2604,11 @@ local function lex(s)
   end
   local function processOne()
     local c = s:byte(i)
-    -- 空白
+
     if isSpace(c) then i = i + 1; return end
-    -- 注释
+
     if c == 45 and i + 1 <= n and s:byte(i + 1) == 45 then
-      -- 长注释?
+
       local lb_eq, lb_start = nil, nil
       if i + 2 <= n and s:byte(i + 2) == 91 then
         local j = i + 3
@@ -2658,15 +2624,15 @@ local function lex(s)
         if k then i = k + #close else i = n + 1 end
         return
       end
-      -- 行注释
+
       local j = s:find("\n", i, true)
       if j then i = j else i = n + 1 end
       return
     end
-    -- 数字
+
     if isDigit(c) or (c == 46 and i + 1 <= n and isDigit(s:byte(i + 1))) then
       local j = i
-      -- 十六进制
+
       if c == 48 and i + 1 <= n and (s:byte(i + 1) == 120 or s:byte(i + 1) == 88) then
         j = i + 2
         while j <= n and isAlnum(s:byte(j)) do j = j + 1 end
@@ -2685,7 +2651,7 @@ local function lex(s)
       i = j
       return
     end
-    -- 标识符/关键字
+
     if isAlpha(c) then
       local j = i
       while j <= n and isAlnum(s:byte(j)) do j = j + 1 end
@@ -2695,7 +2661,7 @@ local function lex(s)
       i = j
       return
     end
-    -- 字符串
+
     if c == 34 or c == 39 then
       local quote = c
       local j = i + 1
@@ -2727,7 +2693,7 @@ local function lex(s)
       i = j
       return
     end
-    -- 长字符串
+
     if c == 91 then
       local j = i + 1
       local eq = 0
@@ -2742,7 +2708,7 @@ local function lex(s)
         return
       end
     end
-    -- 运算符
+
     local matched = false
     for _, op in ipairs(OPS) do
       if strStartsWith(s, op, i) then
@@ -2764,10 +2730,6 @@ local function lex(s)
 end
 
 M.lex = lex
-
--- ============================================================
--- 解析器
--- ============================================================
 
 local Parser = {}
 Parser.__index = Parser
@@ -2886,7 +2848,7 @@ function Parser:simple()
   else
     error("无法解析表达式开头 " .. tostring(t.k) .. ":" .. tostring(t.v))
   end
-  -- 后缀
+
   while true do
     if self:atOp("[") then
       self:next()
@@ -2979,7 +2941,7 @@ function Parser:parse_func()
     end
   end
   self:expect(")")
-  -- 平衡块
+
   local depth = 1
   local start = self.i
   local opener = {["function"]=true,["if"]=true,["for"]=true,["while"]=true}
@@ -3041,7 +3003,7 @@ function Parser:one_statement()
     self:expect("end")
     return {"do", body}
   end
-  -- 表达式起始：赋值或调用语句
+
   local lhs = {self:parse_lvalue_or_expr()}
   while self:atOp(",") do
     self:next()
@@ -3081,10 +3043,6 @@ local function parse_expr_str(s)
   return p:expr(0)
 end
 M.parse_expr_str = parse_expr_str
-
--- ============================================================
--- AST 工具
--- ============================================================
 
 local function eval_const(e)
   if not isAst(e) then return nil end
@@ -3191,7 +3149,7 @@ end
 M.substitute = substitute
 
 local function lua_str_escape(s)
-  -- 尝试简单字符偏移解密（每个字符加上35）
+
   if #s > 0 then
     local all_printable = true
     local decrypted = {}
@@ -3222,7 +3180,7 @@ local function lua_str_escape(s)
     elseif ch == '\r' then out[#out + 1] = '\\r'
     elseif ch == '\t' then out[#out + 1] = '\\t'
     elseif b >= 32 and b < 127 then out[#out + 1] = ch
-    elseif b < 32 or b == 127 then out[#out + 1] = string.format("%%03d", b)
+    elseif b < 32 or b == 127 then out[#out + 1] = string.format("\\%03d", b)
     else out[#out + 1] = ch end  -- 非ASCII直接输出（UTF-8字节）
   end
   out[#out + 1] = '"'
@@ -3255,7 +3213,7 @@ local function expr_lua(e, parent_pri, side)
   end
   if k == "str" then
     local s = e[2]
-    -- 尝试简单字符偏移解密（每个字符加上35）
+
     if #s > 0 then
       local all_printable = true
       local decrypted = {}
@@ -3326,14 +3284,10 @@ local function expr_lua(e, parent_pri, side)
     end
     return "{" .. table.concat(parts, ", ") .. "}"
   end
-  if k == "func" then return "function(...) --[[func]] end" end
+  if k == "func" then return "function(...)  end" end
   return tostring(e)
 end
 M.expr_lua = expr_lua
-
--- ============================================================
--- 常量数组恢复
--- ============================================================
 
 local function find_const_array(code, toks)
   if not toks then toks = lex(code) end
@@ -3373,7 +3327,7 @@ local function _eval_arith(expr)
 end
 
 local function find_wrapper(code, arrvar)
-  -- 用 token 方式精确匹配 wrapper 函数
+
   local toks = lex(code)
   for i = 1, #toks - 8 do
     if toks[i].k == "local" and toks[i+1].k == "function" and
@@ -3386,7 +3340,7 @@ local function find_wrapper(code, arrvar)
        (toks[i+10].k == "OP" and (toks[i+10].v == "+" or toks[i+10].v == "-")) then
       local fname = toks[i+2].v
       local sign = toks[i+10].v
-      -- 收集表达式直到 ]
+
       local expr_toks = {}
       local j = i + 11
       local depth = 0
@@ -3399,7 +3353,7 @@ local function find_wrapper(code, arrvar)
         expr_toks[#expr_toks+1] = toks[j]
         j = j + 1
       end
-      -- 将表达式token转为字符串并求值
+
       local expr_str = {}
       for _, t in ipairs(expr_toks) do
         if t.k == "NUMBER" then expr_str[#expr_str+1] = t.v
@@ -3493,7 +3447,7 @@ local function find_lookup_table(code, toks)
 end
 
 local function b64_decode(s, char2val)
-  -- s: 字符串（latin1字节），char2val: char->idx
+
   local out = {}
   local value = 0
   local count = 0
@@ -3546,7 +3500,7 @@ local function recover_constants(code)
 end
 
 local function _bytes_node(b)
-  -- b 是 latin1 字节字符串，尝试按 UTF-8 解释
+
   if isValidUTF8(b) then return {"str", b} end
   return {"str", b}  -- 保持原样
 end
@@ -3584,10 +3538,6 @@ end
 
 M.recover_constants = recover_constants
 M.make_inliner = make_inliner
-
--- ============================================================
--- 字符串解密（LCG）
--- ============================================================
 
 local M45 = 35184372088832.0
 local M32 = 4294967296.0
@@ -3631,7 +3581,7 @@ local function LcgDecryptor_new(mul45, add45, mul8, key8)
     return table.remove(self.prev)
   end
   function self:decrypt(enc, seed)
-    -- enc: 字符串（latin1字节）
+
     self:_set_seed(seed)
     local prev = self.key8
     local out = {}
@@ -3792,7 +3742,7 @@ local function collect_enc_pairs(blocks)
       end
     end
   end
-  -- 去重
+
   local seen = {}
   local out = {}
   for _, p in ipairs(enc_pairs) do
@@ -3806,10 +3756,6 @@ M.LcgDecryptor_new = LcgDecryptor_new
 M.brute_key8 = brute_key8
 M.extract_lcg_params = extract_lcg_params
 M.collect_enc_pairs = collect_enc_pairs
-
--- ============================================================
--- 容器作用域解析
--- ============================================================
 
 local function _func_body_text(toks, rng)
   if not rng then return {} end
@@ -3930,7 +3876,7 @@ local function analyze_container(code)
       role[name] = "other"
     end
   end
-  -- 容器体内 return 语句
+
   local ret = p:one_statement()
   local retvar, startid, vclosure_name, unpack_name = nil, nil, nil, nil
   local ok = pcall(function()
@@ -3956,7 +3902,7 @@ local function analyze_container(code)
     while p:atOp(",") do p:next(); ext[#ext+1] = p:expr(0) end
   end
   p:expect(")")
-  -- 识别外部7项角色
+
   local ext_role = {}
   local function names_in(e, acc)
     if isAst(e) then
@@ -3993,7 +3939,7 @@ local function analyze_container(code)
       else ext_role[pname] = "ext?" end
     end
   end
-  -- upvaluesTable / refcount 表
+
   local upval_table, refcount_table = nil, nil
   local function _op(t, i, v) return i <= #t and t[i].k == "OP" and t[i].v == v end
   local function _nm(t, i) return i <= #t and t[i].k == "NAME" end
@@ -4032,10 +3978,6 @@ end
 
 M.analyze_container = analyze_container
 
--- ============================================================
--- VM 提取
--- ============================================================
-
 local function find_vm_container(toks)
   local best = nil
   local best_size = 0
@@ -4066,7 +4008,7 @@ local function find_vm_container(toks)
             end
             m = m + 1
           end
-          -- 计算while后到function结束的代码量
+
           local funcEnd = k
           local depth = 1
           while funcEnd <= #toks and depth > 0 do
@@ -4110,7 +4052,6 @@ local function match_block_end(toks, start)
   return -1
 end
 
--- DispatchParser
 local function DispatchParser_new(toks, posvar, start)
   local self = {t=toks, pv=posvar, i=start}
   function self:peek(k)
@@ -4262,7 +4203,7 @@ local function extract_vm(code)
   local dp = DispatchParser_new(toks, pv, while_idx + 3)
   local tree = dp:parse_node()
   local leaves = collect_leaves(tree)
-  -- 入口块id
+
   local entry = nil
   local function checkEntry(idx)
     if not (toks[idx].k == "OP" and toks[idx].v == "{" and toks[idx+1].k == "OP" and toks[idx+1].v == "}") then
@@ -4317,10 +4258,6 @@ local function extract_vm(code)
 end
 
 M.extract_vm = extract_vm
-
--- ============================================================
--- 块内数据流简化
--- ============================================================
 
 local function stat_rw(stat)
   local reads = {}
@@ -4439,7 +4376,7 @@ local function try_decrypt(e, decrypt)
         else return decrypt[enc .. "\0" .. seed] end
       end)
       if not ok or plain == nil then return nil end
-      -- 检查是否为可打印文本（ASCII可打印 或 合法UTF-8，支持中文）
+
       if isPrintableText(plain) then return plain end
       if isValidUTF8(plain) and #plain > 0 then return plain end
       return nil
@@ -4669,10 +4606,6 @@ M.simplify_block = simplify_block
 M.extract_terminator = extract_terminator
 M.classify_terminator = classify_terminator
 
--- ============================================================
--- CFG 构建
--- ============================================================
-
 local function simplify_leaf(leaf, posvar, retvar, decrypt, inliner)
   posvar = posvar or "D"
   retvar = retvar or "B"
@@ -4793,10 +4726,6 @@ end
 M.build_cfg = build_cfg
 M.succ = succ
 
--- ============================================================
--- 语义层重写
--- ============================================================
-
 local function _const_id(e)
   local c = eval_const(e)
   if c and c[1] == "num" then
@@ -4806,7 +4735,7 @@ local function _const_id(e)
   return nil
 end
 
-local function make_sema(cont, blocks)
+local function make_sema(cont)
   local env_names = {}
   for n, r in pairs(cont.ext_role) do if r == "env" then env_names[n] = true end end
   local upval_table = cont.upval_table
@@ -4818,29 +4747,6 @@ local function make_sema(cont, blocks)
   for n, r in pairs(cont.role) do if r == "gc" then gc_names[n] = true end end
   local emptytable_names = {}
   for n, r in pairs(cont.role) do if r == "emptytable" then emptytable_names[n] = true end end
-  -- Detect free-initialized string tables: var = free_var(var) pattern
-  local free_init_tables = {}
-  do
-    local free_vars = {}
-    for n, r in pairs(cont.role) do if r == "free" then free_vars[n] = true end end
-    local bc = 0
-    for _ in pairs(blocks or {}) do bc = bc + 1 end
-    print("DBG make_sema blocks=" .. bc .. " free_vars=" .. (function() local t={} for k in pairs(free_vars) do t[#t+1]=k end return table.concat(t,",") end)())
-    for _, b in pairs(blocks or {}) do
-      for _, s in ipairs(b.body or {}) do
-        if s[1] == "setvar" and s[2] == "C" then
-          print("DBG setvar C: s[3]=" .. (isAst(s[3]) and s[3][1] or type(s[3])) .. " expr=" .. (M and M.expr_lua and M.expr_lua(s[3]) or "n/a"))
-        end
-        if s[1] == "setvar" and isAst(s[3]) and s[3][1] == "call"
-           and isAst(s[3][2]) and s[3][2][1] == "var" and free_vars[s[3][2][2]]
-           and #s[3][3] == 1 and isAst(s[3][3][1]) and s[3][3][1] == "var" and s[3][3][1][2] == s[2] then
-          free_init_tables[s[2]] = true
-          if s[2] == "C" then print("DBG free_init C") end
-        end
-      end
-    end
-  end
-  if next(free_init_tables) then print("DBG fit: " .. table.concat((function() local t={} for k in pairs(free_init_tables) do t[#t+1]=k end return t end)(), ",")) end
   local closures = cont.closures
   local vclosures = {}
   for _, n in ipairs(cont.vclosure) do vclosures[n] = true end
@@ -4848,9 +4754,9 @@ local function make_sema(cont, blocks)
 
   local function is_strtable(base)
     if not isAst(base) then return false end
-    if base[1] == "var" and (gc_names[base[2]] or free_init_tables[base[2]]) then return true end
+    if base[1] == "var" and gc_names[base[2]] then return true end
     if base[1] == "index" and isAst(base[2]) and base[2][1] == "var" and emptytable_names[base[2][2]]
-       and isAst(base[3]) and base[3][1] == "var" and (gc_names[base[3][2]] or free_init_tables[base[3][2]]) then return true end
+       and isAst(base[3]) and base[3][1] == "var" and gc_names[base[3][2]] then return true end
     return false
   end
 
@@ -4941,8 +4847,8 @@ local function rewrite_statement(s, rw)
   return s
 end
 
-local function rewrite_block(body, cont, blocks)
-  local rw = make_sema(cont, blocks)
+local function rewrite_block(body, cont)
+  local rw = make_sema(cont)
   local out = {}
   for _, s in ipairs(body) do out[#out+1] = rewrite_statement(s, rw) end
   return out
@@ -4951,10 +4857,6 @@ end
 M.make_sema = make_sema
 M.rewrite_block = rewrite_block
 
--- ============================================================
--- 字符串表别名传播 pass
--- 追踪被赋值为字符串表(C / l[C])的变量别名, 将 alias["str"] 还原为 "str"
--- ============================================================
 local function strtable_alias_pass(blocks, cont)
   local gc_names = {}
   for n, r in pairs(cont.role) do if r == "gc" then gc_names[n] = true end end
@@ -4981,15 +4883,15 @@ local function strtable_alias_pass(blocks, cont)
       local base = rw_expr(e[2], alias, known)
       local key = rw_expr(e[3], alias, known)
       if isAst(key) and key[1] == "str" then
-        -- base is string table (C / l[C] / alias): table["str"] -> "str"
+
         if is_strtable_ref(base, alias) then
           return key
         end
-        -- base is known string variable (stale alias): str_var["str"] -> "str"
+
         if isAst(base) and base[1] == "var" and known[base[2]] ~= nil then
           return key
         end
-        -- base is string literal: "str"["key"] -> "key"
+
         if isAst(base) and base[1] == "str" then
           return key
         end
@@ -5079,9 +4981,6 @@ end
 
 M.strtable_alias_pass = strtable_alias_pass
 
--- ============================================================
--- 基本块优化：运行时代码消除 + 块去重
--- ============================================================
 local function optimize_blocks(blocks, cont)
   local user_markers = {
     "rbxassetid", "Instance", "GetService", "Connect", "Color3", "UDim2",
@@ -5119,7 +5018,6 @@ local function optimize_blocks(blocks, cont)
     return false
   end
 
-  -- Build pred/succ maps
   local function build_maps()
     local preds = {}
     local succs = {}
@@ -5143,48 +5041,47 @@ local function optimize_blocks(blocks, cont)
     return preds, succs
   end
 
-  -- Phase 1: Eliminate empty control-flow blocks (0 stmts) with single successor
   local eliminated = 0
   for iter = 1, 30 do
     local preds, succs = build_maps()
     local to_remove = {}
     for bid, b in pairs(blocks) do
-      if #b.body == 0 and #preds[bid] ~= 0 then
-        local tm = b.term
-        local single_succ = nil
-        if tm and tm[1] == "jmp" and blocks[tm[2]] then
-          single_succ = tm[2]
-        elseif tm and tm[1] == "branch" and tm[3] == tm[4] and blocks[tm[3]] then
-          single_succ = tm[3]
-        elseif #succs[bid] == 1 and succs[bid][1] ~= bid then
-          single_succ = succs[bid][1]
-        end
-        if single_succ and single_succ ~= bid and blocks[single_succ] then
-          to_remove[#to_remove+1] = {bid, single_succ}
-        end
+      if #b.body ~= 0 then goto continue end  -- only empty blocks
+      if #preds[bid] == 0 then goto continue end
+      local tm = b.term
+      local single_succ = nil
+      if tm and tm[1] == "jmp" and blocks[tm[2]] then
+        single_succ = tm[2]
+      elseif tm and tm[1] == "branch" and tm[3] == tm[4] and blocks[tm[3]] then
+        single_succ = tm[3]  -- degenerate branch: both paths same
+      elseif #succs[bid] == 1 and succs[bid][1] ~= bid then
+        single_succ = succs[bid][1]
       end
+      if single_succ and single_succ ~= bid and blocks[single_succ] then
+        to_remove[#to_remove+1] = {bid, single_succ}
+      end
+      ::continue::
     end
     if #to_remove == 0 then break end
     for _, item in ipairs(to_remove) do
       local bid, single_succ = item[1], item[2]
-      if blocks[bid] and blocks[single_succ] then
-        for _, p in ipairs(preds[bid]) do
-          local pb = blocks[p]
-          if pb and pb.term then
-            if pb.term[1] == "jmp" and pb.term[2] == bid then pb.term[2] = single_succ end
-            if pb.term[1] == "branch" then
-              if pb.term[3] == bid then pb.term[3] = single_succ end
-              if pb.term[4] == bid then pb.term[4] = single_succ end
-            end
+      if not blocks[bid] or not blocks[single_succ] then goto skip end
+      for _, p in ipairs(preds[bid]) do
+        local pb = blocks[p]
+        if pb and pb.term then
+          if pb.term[1] == "jmp" and pb.term[2] == bid then pb.term[2] = single_succ end
+          if pb.term[1] == "branch" then
+            if pb.term[3] == bid then pb.term[3] = single_succ end
+            if pb.term[4] == bid then pb.term[4] = single_succ end
           end
         end
-        blocks[bid] = nil
-        eliminated = eliminated + 1
       end
+      blocks[bid] = nil
+      eliminated = eliminated + 1
+      ::skip::
     end
   end
 
-  -- Phase 2: Deduplicate identical blocks
   local function block_key(b)
     local parts = {}
     for _, s in ipairs(b.body) do parts[#parts+1] = stmt_str(s) end
@@ -5197,7 +5094,6 @@ local function optimize_blocks(blocks, cont)
     return table.concat(parts, "\0")
   end
 
-  -- Collect function entry block IDs (referenced by mkclosure) and entry blocks
   local func_entries = {}
   local entry_blocks = {}
   for bid, b in pairs(blocks) do
@@ -5215,11 +5111,11 @@ local function optimize_blocks(blocks, cont)
   local preds, succs = build_maps()
   local groups = {}
   for bid, b in pairs(blocks) do
-    if not func_entries[bid] and not entry_blocks[bid] then
-      local key = block_key(b)
-      if not groups[key] then groups[key] = {} end
-      groups[key][#groups[key]+1] = bid
-    end
+    if func_entries[bid] or entry_blocks[bid] then goto skip_group end
+    local key = block_key(b)
+    if not groups[key] then groups[key] = {} end
+    groups[key][#groups[key]+1] = bid
+    ::skip_group::
   end
 
   local deduped = 0
@@ -5250,10 +5146,6 @@ local function optimize_blocks(blocks, cont)
 end
 
 M.optimize_blocks = optimize_blocks
-
--- ============================================================
--- Upvalue 机制还原
--- ============================================================
 
 local function UpvalueRestorer_new(cont, curmap)
   local self = {
@@ -5401,10 +5293,6 @@ end
 
 M.UpvalueRestorer_new = UpvalueRestorer_new
 
--- ============================================================
--- 短路表达式折叠
--- ============================================================
-
 local function _has_call_sc(e)
   local found = false
   local function w(x)
@@ -5524,13 +5412,8 @@ end
 
 M.fold_short_circuits = fold_short_circuits
 
--- ============================================================
--- 控制流结构化
--- ============================================================
-
 local VEXIT = -1
 
--- 结构化节点类型（用 table tag 模拟 Python class）
 local function SIf(cond, thenb, els) return {tag="if", cond=cond, ["then"]=thenb, els=els} end
 local function SWhile(cond, body, kind, head) return {tag="while", cond=cond, body=body, kind=kind or "while", head=head} end
 local function SLoopCtrl(k) return {tag="loopctrl", k=k} end
@@ -5781,7 +5664,7 @@ local function Structurer_new(blocks, entry, retvar, posvar, cont)
     end
     return out, cur
   end
-  -- 初始化
+
   self.reachable = self:_reachable()
   self.dom = self:_dom_on(self:_pred_succ(self.reachable, false), entry)
   self.pdom = self:_postdom()
@@ -5790,14 +5673,6 @@ local function Structurer_new(blocks, entry, retvar, posvar, cont)
 end
 
 M.Structurer_new = Structurer_new
-
--- ============================================================
--- 代码生成
--- ============================================================
-
--- ============================================================
--- 运行时代码消除器
--- ============================================================
 
 local function eliminate_runtime_code(body, R)
   local runtime_vars = {
@@ -5825,58 +5700,58 @@ local function eliminate_runtime_code(body, R)
   }
   local user_funcs = {
     print=true, warn=true,
-    -- Roblox实例方法
+
     ["Instance.new"]=true, ["game.GetService"]=true, ["game:HttpGet"]=true,
     ["game.HttpGet"]=true, ["game:HttpPost"]=true, ["game.HttpPost"]=true,
     ["workspace.FindFirstChild"]=true, ["workspace:FindFirstChild"]=true,
     ["script.FindFirstChild"]=true, ["script:FindFirstChild"]=true,
-    -- Roblox事件
+
     ["Connect"]=true, ["connect"]=true, ["Wait"]=true, ["wait"]=true,
-    -- 任务库
+
     ["task.spawn"]=true, ["task.wait"]=true, ["task.delay"]=true, ["task.cancel"]=true,
-    -- 延迟函数
+
     ["delay"]=true, ["spawn"]=true,
-    -- Delta UI库函数
+
     ["LoadLucide"]=true, ["GetIcon"]=true, ["ParseImageAsset"]=true,
     ["create"]=true, ["corner"]=true, ["updateCornerRadius"]=true, ["stroke"]=true,
     ["loadConfig"]=true, ["getThemeGradientColors"]=true,
-    -- UI库函数
+
     ["CreateWindow"]=true, ["Toggle"]=true, ["Tab"]=true, ["Button"]=true,
     ["Dropdown"]=true, ["Input"]=true, ["Paragraph"]=true, ["Section"]=true,
     ["setLoop"]=true, ["Notify"]=true,
-    -- 远程事件
+
     ["FireServer"]=true, ["InvokeServer"]=true, ["FireClient"]=true, ["InvokeClient"]=true,
-    -- 文件操作（exploit函数，但也是用户代码常用）
+
     ["isfile"]=true, ["readfile"]=true, ["writefile"]=true,
     ["isfolder"]=true, ["makefolder"]=true, ["delfile"]=true, ["delfolder"]=true,
     ["listfiles"]=true, ["listfolders"]=true,
-    -- 其他exploit函数
+
     ["getcustomasset"]=true, ["getsynasset"]=true, ["request"]=true,
     ["syn.request"]=true, ["http.request"]=true, ["http_request"]=true,
     ["loadstring"]=true, ["LoadString"]=true,
-    -- 游戏相关
+
     ["getgenv"]=true, ["getrenv"]=true, ["getgc"]=true, ["getrawmetatable"]=true,
     ["setrawmetatable"]=true, ["hookfunction"]=true, ["hookmetamethod"]=true,
     ["getnamecallmethod"]=true, ["setnamecallmethod"]=true,
-    -- 字符串/表操作（用户代码常用）
+
     ["string.split"]=true, ["string.trim"]=true, ["string.upper"]=true, ["string.lower"]=true,
     ["table.find"]=true, ["table.create"]=true, ["table.freeze"]=true, ["table.clone"]=true,
-    -- 数学函数（用户代码常用）
+
     ["math.clamp"]=true, ["math.sign"]=true, ["math.round"]=true, ["math.noise"]=true,
-    -- 颜色函数
+
     ["Color3.fromRGB"]=true, ["Color3.fromHSV"]=true, ["Color3.new"]=true,
     ["Color3.fromHex"]=true,
-    -- CFrame函数
+
     ["CFrame.new"]=true, ["CFrame.Angles"]=true, ["CFrame.fromEulerAnglesXYZ"]=true,
-    -- Vector函数
+
     ["Vector2.new"]=true, ["Vector3.new"]=true,
-    -- UDim函数
+
     ["UDim2.new"]=true, ["UDim.new"]=true,
-    -- Enum函数
+
     ["Enum.new"]=true,
-    -- Tween函数
+
     ["TweenInfo.new"]=true,
-    -- 实例方法
+
     ["FindFirstChild"]=true, ["FindFirstChildOfClass"]=true, ["FindFirstAncestor"]=true,
     ["FindFirstAncestorOfClass"]=true, ["FindFirstAncestorWhichIsA"]=true,
     ["FindFirstChildWhichIsA"]=true, ["IsA"]=true, ["IsDescendantOf"]=true,
@@ -5891,154 +5766,154 @@ local function eliminate_runtime_code(body, R)
     ["ScreenPointToRay"]=true, ["ViewportPointToRay"]=true,
     ["UnitRay"]=true, ["GetPartsInPart"]=true, ["GetPartBoundsInBox"]=true,
     ["GetPartBoundsInRadius"]=true, ["GetPartsInPart"]=true,
-    -- 玩家方法
+
     ["Kick"]=true, ["LoadCharacter"]=true, ["GetFriendsOnline"]=true,
     ["GetRankInGroup"]=true, ["GetRoleInGroup"]=true, ["IsFriendsWith"]=true,
     ["FollowUserId"]=true, ["BlockUserId"]=true, ["UnblockUserId"]=true,
-    -- 角色方法
+
     ["MoveTo"]=true, ["ChangeState"]=true, ["LoadAnimation"]=true,
     ["Play"]=true, ["Stop"]=true, ["AdjustSpeed"]=true, ["AdjustWeight"]=true,
-    -- 工具方法
+
     ["EquipTool"]=true, ["UnequipTools"]=true, ["Activate"]=true, ["Deactivate"]=true,
-    -- 人体方法
+
     ["AddForce"]=true, ["SetStateEnabled"]=true, ["GetStateEnabled"]=true,
     ["ApplyDescription"]=true, ["GetAppliedDescription"]=true,
     ["BreakJoints"]=true, ["MakeJoints"]=true,
-    -- 相机方法
+
     ["ScreenPointToRay"]=true, ["ViewportPointToRay"]=true,
     ["WorldToScreenPoint"]=true, ["WorldToViewportPoint"]=true,
     ["GetPartsObscuringTarget"]=true, ["GetRenderCFrame"]=true,
-    -- 声音方法
+
     ["Play"]=true, ["Pause"]=true, ["Stop"]=true, ["Resume"]=true,
     ["SetVolume"]=true, ["GetVolume"]=true,
-    -- 动画方法
+
     ["Play"]=true, ["Stop"]=true, ["AdjustSpeed"]=true, ["AdjustWeight"]=true,
     ["GetTimeOfKeyframe"]=true, ["GetKeyframes"]=true,
-    -- 物理方法
+
     ["ApplyImpulse"]=true, ["ApplyAngularImpulse"]=true, ["SetNetworkOwner"]=true,
     ["GetNetworkOwner"]=true, ["SetNetworkOwnershipAuto"]=true,
     ["IsNetworkOwner"]=true, ["CanSetNetworkOwnership"]=true,
-    -- 约束方法
+
     ["Activate"]=true, ["Deactivate"]=true,
-    -- 粒子方法
+
     ["Emit"]=true, ["Clear"]=true, ["SetAttribute"]=true,
-    -- 光照方法
+
     ["GetMinutesAfterMidnight"]=true, ["SetMinutesAfterMidnight"]=true,
-    -- 地形方法
+
     ["FillBlock"]=true, ["FillBall"]=true, ["FillCylinder"]=true,
     ["FillRegion"]=true, ["ReadVoxels"]=true, ["WriteVoxels"]=true,
     ["GetCell"]=true, ["GetCells"]=true, ["CopyRegion"]=true, ["PasteRegion"]=true,
-    -- 数据存储方法
+
     ["GetAsync"]=true, ["SetAsync"]=true, ["UpdateAsync"]=true,
     ["RemoveAsync"]=true, ["IncrementAsync"]=true, ["GetSortedAsync"]=true,
     ["GetVersionAsync"]=true, ["RemoveVersionAsync"]=true, ["ListKeysAsync"]=true,
     ["ListVersionsAsync"]=true, ["ListDataStoresAsync"]=true, ["ListGlobalStoresAsync"]=true,
     ["OnUpdate"]=true, ["GetGlobalDataStore"]=true, ["GetDataStore"]=true,
     ["GetOrderedDataStore"]=true,
-    -- 消息服务方法
+
     ["PublishAsync"]=true, ["SubscribeAsync"]=true, ["UnsubscribeAsync"]=true,
-    -- 文本服务方法
+
     ["FilterStringAsync"]=true, ["FilterStringForBroadcast"]=true,
     ["GetTextObjectAsync"]=true, ["GetTextSize"]=true, ["GetBoundsSize"]=true,
     ["GetBoundsFromTextSize"]=true,
-    -- 游戏通行证服务方法
+
     ["UserOwnsGamePassAsync"]=true, ["PromptGamePassPurchase"]=true,
     ["GetGamePassProductInfo"]=true,
-    -- 市场服务方法
+
     ["PromptProductPurchase"]=true, ["PromptPurchase"]=true,
     ["GetProductInfo"]=true, ["UserOwnsGamePassAsync"]=true,
     ["PlayerOwnsAsset"]=true, ["PromptGamePassPurchase"]=true,
-    -- 插入服务方法
+
     ["LoadAsset"]=true, ["LoadAssetVersion"]=true, ["CreateMeshPartAsync"]=true,
-    -- 选择服务方法
+
     ["Get"]=true, ["Set"]=true, ["Add"]=true, ["Remove"]=true, ["Toggle"]=true,
-    -- 启动设置方法
+
     ["Get"]=true, ["Set"]=true,
-    -- 工作区方法
+
     ["FindPartOnRay"]=true, ["FindPartOnRayWithWhitelist"]=true,
     ["FindPartOnRayWithIgnoreList"]=true, ["FindPartOnRayWithWhitelist"]=true,
     ["Raycast"]=true, ["GetPartBoundsInBox"]=true, ["GetPartBoundsInRadius"]=true,
     ["GetPartsInPart"]=true, ["GetPartsInPart"]=true,
     ["GetTouchingParts"]=true, ["GetPartsInPart"]=true,
-    -- 玩家服务方法
+
     ["GetPlayers"]=true, ["GetPlayerFromCharacter"]=true,
     ["GetPlayerByUserId"]=true, ["GetFriendsOnline"]=true,
     ["GetUserThumbnailAsync"]=true, ["GetNameFromUserIdAsync"]=true,
     ["GetUserIdFromNameAsync"]=true,
-    -- 照明服务方法
+
     ["GetMinutesAfterMidnight"]=true, ["SetMinutesAfterMidnight"]=true,
-    -- 运行服务方法
+
     ["BindToRenderStep"]=true, ["UnbindFromRenderStep"]=true,
     ["BindToClose"]=true, ["IsStudio"]=true, ["IsRunMode"]=true,
     ["IsClient"]=true, ["IsServer"]=true, ["IsEdit"]=true,
     ["IsStudioAccess"]=true, ["IsFile"]=true,
-    -- 用户输入服务方法
+
     ["GetMouseLocation"]=true, ["GetKeysPressed"]=true,
     ["GetGamepadState"]=true, ["GetConnectedGamepads"]=true,
     ["IsGamepadConnected"]=true, ["IsKeyDown"]=true, ["IsMouseButtonDown"]=true,
     ["GetNavigationGamepads"]=true, ["SetNavigationGamepads"]=true,
     ["GetSupportedInputTypes"]=true, ["GetLastInputType"]=true,
     ["SetNavigationGamepads"]=true,
-    -- 声音服务方法
+
     ["GetListener"]=true, ["SetListener"]=true,
-    -- 动画控制器方法
+
     ["GetPlayingAnimationTracks"]=true, ["LoadAnimation"]=true,
-    -- 人体描述方法
+
     ["GetAppliedDescription"]=true, ["ApplyDescription"]=true,
     ["GetHumanoidDescriptionFromUserId"]=true, ["GetHumanoidDescriptionFromOutfitId"]=true,
-    -- 组服务方法
+
     ["GetGroupInfoAsync"]=true, ["GetGroupsAsync"]=true,
     ["GetRankInGroup"]=true, ["GetRoleInGroup"]=true,
-    -- 徽章服务方法
+
     ["UserHasBadgeAsync"]=true, ["AwardBadge"]=true, ["GetBadgeInfoAsync"]=true,
-    -- 分析服务方法
+
     ["LogEvent"]=true, ["TrackEvent"]=true,
-    -- 内容保护服务方法
+
     ["ProtectInstance"]=true, ["UnprotectInstance"]=true,
-    -- 虚拟用户方法
+
     ["CaptureIcon"]=true, ["Button1Down"]=true, ["Button1Up"]=true,
     ["Button2Down"]=true, ["Button2Up"]=true, ["KeyDown"]=true, ["KeyUp"]=true,
     ["MouseMove"]=true, ["SetMouseLocation"]=true, ["SendKeyEvent"]=true,
     ["SendMouseEvent"]=true, ["SendScrollWheelEvent"]=true,
-    -- 虚拟输入服务方法
+
     ["SendKeyEvent"]=true, ["SendMouseEvent"]=true, ["SendScrollWheelEvent"]=true,
     ["SendTextInput"]=true,
-    -- 路径寻找服务方法
+
     ["CreatePath"]=true, ["GetAgents"]=true,
-    -- 路径方法
+
     ["Run"]=true, ["Stop"]=true, ["CheckOcclusionAsync"]=true,
     ["GetWaypoints"]=true, ["Status"]=true,
-    -- 导航网格方法
+
     ["ComputeAsync"]=true, ["FindPathAsync"]=true,
-    -- 角色移动方法
+
     ["MoveTo"]=true, ["CheckPathCollision"]=true,
-    -- 控制模块方法
+
     ["GetMoveVector"]=true, ["IsMovePressed"]=true, ["IsJumpPressed"]=true,
-    -- 相机控制模块方法
+
     ["GetCameraCFrame"]=true, ["GetCameraFocus"]=true,
-    -- 玩家模块方法
+
     ["GetControls"]=true, ["GetCamera"]=true, ["GetClickDetector"]=true,
-    -- 点击检测器方法
+
     ["MaxActivationDistance"]=true, ["CursorIcon"]=true,
-    -- 探测器方法
+
     ["MaxActivationDistance"]=true, ["CursorIcon"]=true,
-    -- 提示方法
+
     ["Enabled"]=true, ["Duration"]=true,
-    -- 选择框方法
+
     ["Adornee"]=true, ["Color3"]=true, ["LineThickness"]=true,
-    -- 表面外观方法
+
     ["Face"]=true, ["Transparency"]=true, ["Color3"]=true,
-    -- 贴花方法
+
     ["Face"]=true, ["Texture"]=true, ["Transparency"]=true,
-    -- 纹理方法
+
     ["Face"]=true, ["Texture"]=true, ["Transparency"]=true,
-    -- 火花方法
+
     ["Enabled"]=true, ["Color"]=true, ["SecondaryColor"]=true,
-    -- 火焰方法
+
     ["Enabled"]=true, ["Color"]=true, ["SecondaryColor"]=true,
-    -- 烟雾方法
+
     ["Enabled"]=true, ["Color"]=true, ["Opacity"]=true, ["Size"]=true,
-    -- 粒子发射器方法
+
     ["Enabled"]=true, ["Color"]=true, ["Size"]=true, ["Transparency"]=true,
     ["Lifetime"]=true, ["Rate"]=true, ["Speed"]=true, ["SpreadAngle"]=true,
     ["Texture"]=true, ["Acceleration"]=true, ["Drag"]=true, ["Rotation"]=true,
@@ -6046,26 +5921,26 @@ local function eliminate_runtime_code(body, R)
     ["TimeScale"]=true, ["VelocityInheritance"]=true, ["VelocitySpread"]=true,
     ["LightEmission"]=true, ["LightInfluence"]=true, ["TextureLength"]=true,
     ["TextureMode"]=true, ["ZOffset"]=true,
-    -- 光束方法
+
     ["Enabled"]=true, ["Color"]=true, ["Transparency"]=true, ["Width0"]=true,
     ["Width1"]=true, ["FaceCamera"]=true, ["LightEmission"]=true,
     ["LightInfluence"]=true, ["Texture"]=true, ["TextureLength"]=true,
     ["TextureMode"]=true, ["TextureSpeed"]=true, ["ZOffset"]=true,
-    -- 轨迹方法
+
     ["Enabled"]=true, ["Color"]=true, ["Transparency"]=true, ["Width0"]=true,
     ["Width1"]=true, ["FaceCamera"]=true, ["LightEmission"]=true,
     ["LightInfluence"]=true, ["Texture"]=true, ["TextureLength"]=true,
     ["TextureMode"]=true, ["TextureSpeed"]=true, ["ZOffset"]=true,
-    -- 高亮方法
+
     ["Enabled"]=true, ["FillColor"]=true, ["OutlineColor"]=true,
     ["FillTransparency"]=true, ["OutlineTransparency"]=true, ["DepthMode"]=true,
-    -- 选择框方法
+
     ["Adornee"]=true, ["Color3"]=true, ["LineThickness"]=true,
     ["SurfaceTransparency"]=true, ["SurfaceColor3"]=true, ["AlwaysOnTop"]=true,
-    -- 表面选择方法
+
     ["Adornee"]=true, ["Surface"]=true, ["SurfaceColor3"]=true,
     ["SurfaceTransparency"]=true,
-    -- 部件方法
+
     ["CanCollide"]=true, ["CanTouch"]=true, ["CanQuery"]=true, ["CanSimulate"]=true,
     ["Anchored"]=true, ["Mass"]=true, ["Material"]=true, ["Color"]=true,
     ["Transparency"]=true, ["Reflectance"]=true, ["Size"]=true,
@@ -6080,97 +5955,97 @@ local function eliminate_runtime_code(body, R)
     ["SetNetworkOwner"]=true, ["SetNetworkOwnershipAuto"]=true,
     ["IsNetworkOwner"]=true, ["ApplyImpulse"]=true, ["ApplyAngularImpulse"]=true,
     ["GetBoundsAligned"]=true, ["GetBoundingBox"]=true,
-    -- 模型方法
+
     ["GetBoundingBox"]=true, ["GetExtentsSize"]=true, ["MoveTo"]=true,
     ["TranslateBy"]=true, ["ScaleTo"]=true, ["GetScale"]=true,
     ["PrimaryPart"]=true, ["WorldPivot"]=true, ["WorldOrigin"]=true,
     ["GetPivot"]=true, ["PivotTo"]=true,
-    -- 文件夹方法
+
     ["GetChildren"]=true, ["FindFirstChild"]=true,
-    -- 配置方法
+
     ["GetAttribute"]=true, ["SetAttribute"]=true, ["GetAttributes"]=true,
-    -- 附件方法
+
     ["Position"]=true, ["Orientation"]=true, ["CFrame"]=true,
     ["Axis"]=true, ["SecondaryAxis"]=true, ["WorldAxis"]=true,
     ["WorldSecondaryAxis"]=true, ["WorldCFrame"]=true, ["WorldPosition"]=true,
-    -- 约束方法
+
     ["Enabled"]=true, ["Visible"]=true, ["Color"]=true, ["Thickness"]=true,
     ["Attachment0"]=true, ["Attachment1"]=true,
-    -- 弹簧约束方法
+
     ["FreeLength"]=true, ["Stiffness"]=true, ["Damping"]=true, ["MaxForce"]=true,
     ["MaxExtents"]=true, ["Relaxation"]=true,
-    -- 杆约束方法
+
     ["Length"]=true, ["Thickness"]=true, ["Visible"]=true, ["Color"]=true,
-    -- 绳索约束方法
+
     ["Length"]=true, ["Thickness"]=true, ["Visible"]=true, ["Color"]=true,
     ["WinchEnabled"]=true, ["WinchSpeed"]=true, ["WinchTarget"]=true,
-    -- 铰链约束方法
+
     ["ActuatorType"]=true, ["AngularVelocity"]=true, ["MotorMaxAcceleration"]=true,
     ["MotorMaxTorque"]=true, ["ServoMaxTorque"]=true, ["TargetAngle"]=true,
     ["TargetVelocity"]=true, ["LimitsEnabled"]=true, ["LowerAngle"]=true,
     ["UpperAngle"]=true, ["Restitution"]=true,
-    -- 圆柱约束方法
+
     ["ActuatorType"]=true, ["AngularVelocity"]=true, ["MotorMaxAcceleration"]=true,
     ["MotorMaxTorque"]=true, ["ServoMaxTorque"]=true, ["TargetAngle"]=true,
     ["TargetVelocity"]=true, ["LimitsEnabled"]=true, ["LowerAngle"]=true,
     ["UpperAngle"]=true, ["Restitution"]=true,
-    -- 球形约束方法
+
     ["LimitsEnabled"]=true, ["UpperAngle"]=true, ["Restitution"]=true,
-    -- 棱柱约束方法
+
     ["ActuatorType"]=true, ["Velocity"]=true, ["MotorMaxAcceleration"]=true,
     ["MotorMaxForce"]=true, ["ServoMaxForce"]=true, ["TargetPosition"]=true,
     ["LimitsEnabled"]=true, ["LowerLimit"]=true, ["UpperLimit"]=true,
     ["Restitution"]=true,
-    -- 扭矩约束方法
+
     ["Torque"]=true, ["AngularVelocity"]=true, ["MaxTorque"]=true,
-    -- 力约束方法
+
     ["Force"]=true, ["Velocity"]=true, ["MaxForce"]=true,
-    -- 线速度约束方法
+
     ["Velocity"]=true, ["MaxForce"]=true, ["VectorVelocity"]=true,
     ["PlaneVelocity"]=true, ["LineVelocity"]=true,
-    -- 角速度约束方法
+
     ["AngularVelocity"]=true, ["MaxTorque"]=true,
-    -- 对齐方向约束方法
+
     ["AngularVelocity"]=true, ["MaxTorque"]=true, ["Responsiveness"]=true,
     ["Mode"]=true, ["PrimaryAxis"]=true, ["SecondaryAxis"]=true,
     ["CFrame"]=true,
-    -- 对齐位置约束方法
+
     ["Velocity"]=true, ["MaxForce"]=true, ["Responsiveness"]=true,
     ["Mode"]=true, ["Position"]=true, ["CFrame"]=true,
-    -- 对齐方向约束方法
+
     ["AngularVelocity"]=true, ["MaxTorque"]=true, ["Responsiveness"]=true,
     ["Mode"]=true, ["PrimaryAxis"]=true, ["SecondaryAxis"]=true,
     ["CFrame"]=true,
-    -- 对齐位置约束方法
+
     ["Velocity"]=true, ["MaxForce"]=true, ["Responsiveness"]=true,
     ["Mode"]=true, ["Position"]=true, ["CFrame"]=true,
-    -- 向量力约束方法
+
     ["Force"]=true, ["ApplyAtCenterOfMass"]=true, ["Location"]=true,
-    -- 向量扭矩约束方法
+
     ["Torque"]=true, ["ApplyAtCenterOfMass"]=true,
-    -- 角速度约束方法
+
     ["AngularVelocity"]=true, ["MaxTorque"]=true,
-    -- 线速度约束方法
+
     ["Velocity"]=true, ["MaxForce"]=true,
-    -- 对齐方向约束方法
+
     ["AngularVelocity"]=true, ["MaxTorque"]=true,
-    -- 对齐位置约束方法
+
     ["Velocity"]=true, ["MaxForce"]=true,
-    -- 向量力约束方法
+
     ["Force"]=true,
-    -- 向量扭矩约束方法
+
     ["Torque"]=true,
-    -- 角速度约束方法
+
     ["AngularVelocity"]=true,
-    -- 线速度约束方法
+
     ["Velocity"]=true,
-    -- 对齐方向约束方法
+
     ["AngularVelocity"]=true,
-    -- 对齐位置约束方法
+
     ["Velocity"]=true,
-    -- 向量力约束方法
+
     ["Force"]=true,
-    -- 向量扭矩约束方法
+
     ["Torque"]=true,
   }
 
@@ -6184,9 +6059,9 @@ local function eliminate_runtime_code(body, R)
     if type(e) ~= "table" then return false end
     if e[1] == "str" and type(e[2]) == "string" then
       local s = e[2]
-      -- 非ASCII字符（中文字符串等）
+
       if s:find("[^ -~]") then return true end
-      -- 用户定义的ASCII字符串特征
+
       local user_str_patterns = {
         "DeltaUI", "rbxassetid", "rbxasset", "http", "https",
         "Players", "UserInputService", "CoreGui", "ReplicatedStorage",
@@ -6256,14 +6131,14 @@ local function eliminate_runtime_code(body, R)
         local kbase = key[2]
         if type(kbase)=="table" and kbase[1]=="var" then return true end
       end
-      -- 识别 a[v]、a[n]、a[M[1]] 等形式的上值函数调用
+
       if type(key)=="table" and key[1]=="var" then return true end
       if type(key)=="table" and key[1]=="index" then return true end
     end
-    -- 识别单字母变量的索引调用（如 a[v](...)、U(K)(...)）
+
     if type(base)=="table" and base[1]=="var" and type(base[2])=="string" and #base[2]<=2 then
       if type(key)=="table" and (key[1]=="var" or key[1]=="index" or key[1]=="num") then
-        -- 检查是否是运行时变量（单字母大写）
+
         if base[2]:match("^%u$") or base[2]:match("^%u%u$") then
           return true
         end
@@ -6313,12 +6188,22 @@ local function eliminate_runtime_code(body, R)
           if has_user_arg(e) then return false end
           found = true
         end
+
+        if type(base)=="table" and base[1]=="var" and type(base[2])=="string" and #base[2]<=2 then
+          local has_user = false
+          for i = 3, #e do
+            if type(e[i])=="table" and (has_user_string(e[i]) or has_user_func_call(e[i])) then
+              has_user = true; break
+            end
+          end
+          if not has_user then found = true end
+        end
       end
     end
     for i = 2, #e do
       if type(e[i]) == "table" then
+        if has_user_func_call(e[i]) then return false end
         local r = has_only_runtime_funcs(e[i])
-        if r == false then return false end
         if r == true then found = true end
       end
     end
@@ -6388,7 +6273,7 @@ local function eliminate_runtime_code(body, R)
     if type(e) ~= "table" then return e end
     if e[1]=="var" and subst[e[2]] then return dc(subst[e[2]]) end
     if e[1]=="index" then
-      -- 索引表达式：只替换base，不替换key（key通常是字符串字面量，不应被变量替换）
+
       local base = type(e[2])=="table" and expr_subst(e[2], subst) or e[2]
       return {"index", base, e[3]}
     end
@@ -6396,7 +6281,14 @@ local function eliminate_runtime_code(body, R)
     for i = 2, #e do r[i] = type(e[i])=="table" and expr_subst(e[i], subst) or e[i] end
     return r
   end
+  local function has_tamper(e)
+    if type(e) ~= "table" then return false end
+    if e[1] == "str" and type(e[2]) == "string" and e[2]:find("Tamper", 1, true) then return true end
+    for i = 2, #e do if type(e[i]) == "table" and has_tamper(e[i]) then return true end end
+    return false
+  end
   local function is_pure_runtime(s)
+    if has_tamper(s) then return true end
     if stmt_has_user(s) then return false end
     local k = s[1] or s.tag
     if k == "callstmt" then return has_only_runtime_funcs(s[2]) == true end
@@ -6453,7 +6345,7 @@ local function eliminate_runtime_code(body, R)
           s.body = remove_runtime(s.body or {})
           if #s.body==0 and not stmt_has_user(s) then changed=true else result[#result+1]=s end
         else
-          -- Recurse into function bodies in let/setvar/local statements
+
           local k = s[1] or s.tag
           if k == "let" or k == "setvar" then
             if type(s[3]) == "table" and s[3][1] == "function" and type(s[3].body) == "table" then
@@ -6571,6 +6463,7 @@ local function CodeGen_new(decompiler, param_names, indent)
       local curmap = {}
       for i, kv in ipairs(table_node[2]) do curmap[i] = kv[2] end
       local narg, body, rest, reach = self.dc:decompile_func(cid, curmap)
+      body = eliminate_runtime_code(body, self.dc.R)
       local names = self.param_names[cid]
       if not names then
         names = {}
@@ -6695,10 +6588,6 @@ local function CodeGen_new(decompiler, param_names, indent)
 end
 
 M.CodeGen_new = CodeGen_new
-
--- ============================================================
--- 反编译驱动
--- ============================================================
 
 local function collect_mkclosures(blocks)
   local m = {}
@@ -6836,10 +6725,6 @@ end
 
 M.Decompiler_new = Decompiler_new
 
--- ============================================================
--- 完整管线
--- ============================================================
-
 local function deobfuscate(code, verbose)
   local cont = analyze_container(code)
   local vm = extract_vm(code)
@@ -6857,14 +6742,14 @@ local function deobfuscate(code, verbose)
     decryptor = function(enc, seed) return d:decrypt(enc, seed) end
   end
   local blocks, unreach, id2stats = build_cfg(vm, pv, cont.returnvar, decryptor, inliner)
-  -- 字符串表别名传播: 追踪 C/l[C] 的变量别名, 还原 alias["str"] -> "str"
+
   strtable_alias_pass(blocks, cont)
-  -- 基本块优化: 消除纯运行时块 + 合并相同块
+
   optimize_blocks(blocks, cont)
-  -- 语义层重写
-  local rw = make_sema(cont, blocks)
+
+  local rw = make_sema(cont)
   for bid, b in pairs(blocks) do
-    b.body = rewrite_block(b.body, cont, blocks)
+    b.body = rewrite_block(b.body, cont)
     local tm = b.term
     if tm and tm[1] == "branch" then
       local tmlist = {tm[1], rw(tm[2]), tm[3], tm[4]}
@@ -6879,12 +6764,6 @@ local function deobfuscate(code, verbose)
 end
 
 M.deobfuscate = deobfuscate
-
--- ============================================================
--- VM字节码解释器
--- 直接解释VM字节码，重建原始程序的AST
--- 基于Prometheus compiler的逆向分析
--- ============================================================
 
 local vm_runtime_funcs = {
   alloc = true, mkclosure = true,
@@ -6914,16 +6793,16 @@ local function vm_has_user_feature(e, depth)
   depth = depth or 0
   if depth > 15 then return false end
   if type(e) ~= "table" then return false end
-  
+
   local k = e[1]
-  
+
   if k == "var" then
     local name = e[2]
     for _, pattern in ipairs(vm_user_code_patterns) do
       if name == pattern then return true end
     end
   end
-  
+
   if k == "str" then
     local s = e[2]
     if type(s) == "string" then
@@ -6931,7 +6810,7 @@ local function vm_has_user_feature(e, depth)
       if s:find("[\xe4-\xe9][\x80-\xbf][\x80-\xbf]") then return true end
     end
   end
-  
+
   if k == "index" then
     if type(e[3]) == "table" and e[3][1] == "str" then
       local key = e[3][2]
@@ -6940,13 +6819,13 @@ local function vm_has_user_feature(e, depth)
       end
     end
   end
-  
+
   for i = 2, #e do
     if type(e[i]) == "table" then
       if vm_has_user_feature(e[i], depth + 1) then return true end
     end
   end
-  
+
   return false
 end
 
@@ -6966,19 +6845,19 @@ local function vm_is_runtime_expr(e, depth)
   depth = depth or 0
   if depth > 15 then return false end
   if type(e) ~= "table" then return false end
-  
+
   if vm_has_user_feature(e) then return false end
-  
+
   local k = e[1]
-  
+
   if k == "alloc" or k == "mkclosure" then return true end
-  
+
   if k == "var" then
     return vm_register_names[e[2]] == true
   end
-  
+
   if k == "num" or k == "boolean" or k == "nil" then return true end
-  
+
   if k == "str" then
     local s = e[2]
     local runtime_strs = {
@@ -7000,7 +6879,7 @@ local function vm_is_runtime_expr(e, depth)
     }
     return runtime_strs[s] == true
   end
-  
+
   if k == "table" then
     if e[2] == nil or (type(e[2]) == "table" and #e[2] == 0) then
       return true
@@ -7016,7 +6895,7 @@ local function vm_is_runtime_expr(e, depth)
     end
     return true
   end
-  
+
   if k == "index" then
     local base = e[2]
     if type(base) == "table" and base[1] == "var" then
@@ -7029,11 +6908,11 @@ local function vm_is_runtime_expr(e, depth)
     end
     return false
   end
-  
+
   if k == "call" then
     local fn = e[2]
     local args = e[3]
-    
+
     if type(fn) == "table" and fn[1] == "var" then
       if vm_runtime_funcs[fn[2]] then
         if type(args) == "table" then
@@ -7046,7 +6925,7 @@ local function vm_is_runtime_expr(e, depth)
         return true
       end
     end
-    
+
     if type(fn) == "table" and fn[1] == "index" then
       local base = fn[2]
       if type(base) == "table" and base[1] == "var" and vm_runtime_lib_funcs[base[2]] then
@@ -7056,10 +6935,10 @@ local function vm_is_runtime_expr(e, depth)
         return true
       end
     end
-    
+
     return false
   end
-  
+
   if k == "bin" or k == "un" or k == "binary" or k == "unary" then
     for i = 3, #e do
       if type(e[i]) == "table" and not vm_is_runtime_expr(e[i], depth + 1) then
@@ -7068,7 +6947,7 @@ local function vm_is_runtime_expr(e, depth)
     end
     return true
   end
-  
+
   if k == "or" or k == "and" then
     for i = 2, #e do
       if type(e[i]) == "table" and not vm_is_runtime_expr(e[i], depth + 1) then
@@ -7077,28 +6956,28 @@ local function vm_is_runtime_expr(e, depth)
     end
     return true
   end
-  
+
   return false
 end
 
 local function vm_is_runtime_stmt(stmt)
   if type(stmt) ~= "table" then return false end
-  
+
   if vm_has_user_feature(stmt) then return false end
-  
+
   local k = stmt[1] or stmt.tag
-  
+
   if k == "let" or k == "setvar" then
     local varname = stmt[2]
     if vm_register_names[varname] then return true end
-    
+
     local val = stmt[3]
     if type(val) == "table" then
       return vm_is_runtime_expr(val)
     end
     return false
   end
-  
+
   if k == "assign" then
     local lhs = stmt[2]
     if type(lhs) == "table" then
@@ -7117,7 +6996,7 @@ local function vm_is_runtime_stmt(stmt)
         end
       end
     end
-    
+
     local rhs = stmt[3]
     if type(rhs) == "table" then
       for i = 1, #rhs do
@@ -7129,7 +7008,7 @@ local function vm_is_runtime_stmt(stmt)
     end
     return false
   end
-  
+
   if k == "callstmt" then
     local call = stmt[2]
     if type(call) == "table" then
@@ -7137,7 +7016,7 @@ local function vm_is_runtime_stmt(stmt)
     end
     return false
   end
-  
+
   if k == "local" then
     local vars = stmt[2]
     if type(vars) == "table" then
@@ -7156,7 +7035,7 @@ local function vm_is_runtime_stmt(stmt)
         end
       end
     end
-    
+
     local rhs = stmt[3]
     if type(rhs) == "table" then
       for i = 1, #rhs do
@@ -7168,7 +7047,7 @@ local function vm_is_runtime_stmt(stmt)
     end
     return false
   end
-  
+
   return false
 end
 
@@ -7176,9 +7055,9 @@ local function vm_expr_to_lua(e)
   if type(e) ~= "table" then
     return tostring(e)
   end
-  
+
   local k = e[1]
-  
+
   if k == "num" then
     return tostring(e[2])
   elseif k == "str" then
@@ -7192,7 +7071,7 @@ local function vm_expr_to_lua(e)
   elseif k == "index" then
     local base = vm_expr_to_lua(e[2])
     local key = vm_expr_to_lua(e[3])
-    if type(e[3]) == "table" and e[3][1] == "str" and isIdent(e[3][2]) then
+    if type(e[3]) == "table" and e[3][1] == "str" then
       return base .. "." .. e[3][2]
     end
     return base .. "[" .. key .. "]"
@@ -7236,13 +7115,13 @@ end
 local function vm_stmt_to_lua(stmt, indent)
   indent = indent or 0
   local pad = string.rep("  ", indent)
-  
+
   if type(stmt) ~= "table" then
     return nil
   end
-  
+
   local k = stmt[1] or stmt.tag
-  
+
   if k == "let" or k == "setvar" then
     local varname = stmt[2]
     local value = stmt[3]
@@ -7300,21 +7179,21 @@ end
 local function vm_interpret(decomp_result)
   local blocks = decomp_result.blocks
   local start_id = decomp_result.cont and decomp_result.cont.startid
-  
+
   if not start_id or not blocks[start_id] then
     return nil, "未找到起始块"
   end
-  
+
   local visited = {}
   local order = {}
   local queue = {start_id}
-  
+
   while #queue > 0 do
     local bid = table.remove(queue, 1)
     if not visited[bid] then
       visited[bid] = true
       table.insert(order, bid)
-      
+
       local block = blocks[bid]
       if block and block.term then
         local term = block.term
@@ -7327,10 +7206,10 @@ local function vm_interpret(decomp_result)
       end
     end
   end
-  
+
   local user_stmts = {}
   local runtime_stmts = {}
-  
+
   for _, bid in ipairs(order) do
     local block = blocks[bid]
     if block and block.body then
@@ -7343,7 +7222,7 @@ local function vm_interpret(decomp_result)
       end
     end
   end
-  
+
   return {
     user_stmts = user_stmts,
     runtime_stmts = runtime_stmts,
@@ -7354,720 +7233,44 @@ end
 
 local function vm_generate_code(interpret_result)
   local lines = {}
-  
+
   for _, stmt in ipairs(interpret_result.user_stmts) do
     local lua_code = vm_stmt_to_lua(stmt, 0)
     if lua_code then
       table.insert(lines, lua_code)
     end
   end
-  
+
   return table.concat(lines, "\n")
 end
 
--- ============================================================
--- 公共 API
--- ============================================================
-
 function M.deobfWeAreDevFull(code)
   local R = deobfuscate(code)
-  
-  -- 尝试使用VM字节码解释器提取用户代码
-  local vm_ok, vm_result = pcall(function() return vm_interpret(R) end)
-  if vm_ok and vm_result and type(vm_result) == "table" and vm_result.user_stmts and #vm_result.user_stmts > 0 then
+
+  local vm_result, vm_err = vm_interpret(R)
+  if vm_result and #vm_result.user_stmts > 0 then
+
     local has_user_feature = false
     for _, stmt in ipairs(vm_result.user_stmts) do
-      if vm_has_user_feature(stmt) then has_user_feature = true; break end
+      if vm_has_user_feature(stmt) then
+        has_user_feature = true
+        break
+      end
     end
+
     if has_user_feature then
       local user_code = vm_generate_code(vm_result)
       if user_code and #user_code > 0 then
-        local rbx_count = select(2, string.gsub(user_code, "rbxassetid", ""))
-        -- Quality checks: reject incomplete vm_interpret output
-        local quality_ok = true
-        -- 1. rbxassetid: if present but low, output is incomplete
-        if rbx_count > 0 and rbx_count < 40 then quality_ok = false end
-        -- 2. Syntax check: try to load the code
-        if quality_ok then
-          local load_ok = pcall(load, user_code)
-          if not load_ok then quality_ok = false end
-        end
-        -- 3. Unreduced string table access: single uppercase letter var with non-ASCII string key
-        if quality_ok then
-          for var, key in user_code:gmatch([==[(%u)%["([^"]+)"%]]==]) do
-            local has_high = false
-            for i = 1, #key do
-              if key:byte(i) > 127 then has_high = true; break end
-            end
-            if has_high then quality_ok = false; break end
-          end
-        end
-        -- 4. Invalid statements like l1 = l2 (runtime variable swaps with no effect)
-        if quality_ok then
-          if user_code:find("^l%d = l%d") then quality_ok = false end
-        end
-        if quality_ok then
-          return user_code
-        end
+        return user_code
       end
     end
   end
-  
-  -- 回退到原来的反编译流程
-  local dc_ok, result = pcall(function()
-    local dc = Decompiler_new(R)
-    local cg = CodeGen_new(dc)
-    return cg:gen_top()
-  end)
-  if not dc_ok or not result or #result == 0 then
-    -- Decompiler failed, use vm_interpret output if available
-    if vm_ok and vm_result and vm_result.user_stmts and #vm_result.user_stmts > 0 then
-      result = vm_generate_code(vm_result) or ""
-    else
-      result = ""
-    end
-  end
-  result = result:gsub("[^\n]*Tamper Detected[^\n]*\n?", "")
-  result = result:gsub("[^\n]*error%([^)]*Tamper[^)]*%)[^\n]*\n?", "")
-  return result
+
+  local dc = Decompiler_new(R)
+  local cg = CodeGen_new(dc)
+  return cg:gen_top()
 end
 
-local function deobfRunTool(toolId)
-    if toolId == "hook_loadstring" then
-        local wasActive = deobfHookActive
-        deobfHookLoadstring()
-        if not wasActive then
-            deobfShowHookLog()
-        end
-        return
-    end
-
-    local content = ""
-    if deobfSelectedFile and dataApi then
-        content = dataApi.readFile(deobfSelectedFile) or ""
-    end
-    if content == "" then
-        content = deobfEditorTextBox and deobfEditorTextBox.Text or ""
-    end
-    if content == "" then
-        AddLog("请先选择文件或输入代码", "warn")
-        return
-    end
-
-    if toolId == "detect_obf" then
-        AddLog("=== 混淆检测报告 ===", "info")
-        local results = deobfDetectObfuscation(content)
-        for _, line in ipairs(results) do
-            AddLog(line, "info")
-        end
-        deobfNotify("混淆检测完成，查看日志详情", 1)
-        return
-    end
-
-    if toolId == "prometheus_full" then
-        AddLog("=== Prometheus 完全反混淆 ===", "info")
-        AddLog("开始处理...", "info")
-
-        local formatted, totalChanges = deobfPrometheusFull(content)
-
-        if dataApi and deobfSelectedFile then
-            local backupName = deobfSelectedFile:gsub("%.([^%.]+)$", "_backup.%1")
-            dataApi.writeFile(backupName, content)
-            dataApi.writeFile(deobfSelectedFile, formatted)
-            if deobfViewMode == "editor" and deobfEditorTextBox then
-                deobfEditorTextBox.Text = formatted
-            end
-            AddLog("=== 反混淆完成 ===", "info")
-            AddLog("总计 " .. totalChanges .. " 处修改", "info")
-            AddLog("已应用到: " .. deobfSelectedFile .. " (备份: " .. backupName .. ")", "info")
-            deobfNotify("反混淆完成，已应用到 " .. deobfSelectedFile, 1)
-        else
-            AddLog("=== 反混淆完成 ===", "info")
-            AddLog("总计 " .. totalChanges .. " 处修改", "info")
-        end
-        return
-    end
-
-    if toolId == "wearedev_full" then
-        AddLog("=== WeAreDev 完全反混淆（VM逆向引擎）===", "info")
-        AddLog("管线：词法→解析→基本块→寄存器折叠→CFG→常量数组→LCG解密→容器解析→语义→upvalue还原→短路折叠→结构化→代码生成", "info")
-        local result, err = deobfWeAreDevV2(content)
-        if not result then
-            AddLog("反编译失败: " .. tostring(err), "warn")
-            return
-        end
-        AddLog("识别为 Vmify 结构: " .. tostring(result.isVmify), "info")
-        if result.lcgParams and result.lcgParams.mul45 then
-            AddLog(string.format("LCG 参数: mul45=%s add45=%s mul8=%s key8=%s",
-                tostring(result.lcgParams.mul45), tostring(result.lcgParams.add45),
-                tostring(result.lcgParams.mul8), tostring(result.lcgParams.key8)), "info")
-        end
-        AddLog("反编译输出长度: " .. #result.source .. " 字节", "info")
-        local outName = (deobfSelectedFile or "output"):gsub("%.lua$", "") .. "_deobf.lua"
-        if dataApi then
-            dataApi.writeFile(outName, result.source)
-            AddLog("结果已写入: " .. outName, "info")
-        end
-        if deobfEditorTextBox then
-            deobfEditorTextBox.Text = result.source
-        end
-        if deobfNotify then
-            deobfNotify("反混淆完成", "输出 " .. #result.source .. " 字节")
-        end
-        AddLog("=== 反混淆完成 ===", "info")
-        return
-    end
-
-    if toolId == "base_decode" then
-        local decoded, usedType = deobfBaseDecode(content, "auto", nil)
-        if decoded and #decoded > 0 then
-            AddLog("Base解码完成，使用编码: " .. usedType .. "，结果长度: " .. #decoded .. " 字节", "info")
-            if deobfEditorTextBox then
-                deobfEditorTextBox.Text = decoded
-            end
-            if dataApi and deobfSelectedFile then
-                dataApi.writeFile(deobfSelectedFile, decoded)
-            end
-            deobfNotify("Base解码完成 (" .. usedType .. ")", 1)
-        else
-            AddLog("Base解码失败或结果为空", "warn")
-            deobfNotify("解码失败", 2)
-        end
-        return
-    end
-
-    if toolId == "rename_vars" then
-        newContent, count = deobfRenameVars(content)
-        info = "重命名了 " .. count .. " 个变量"
-    elseif toolId == "string_decrypt" then
-        newContent, count = deobfStringDecrypt(content)
-        info = "解密了 " .. count .. " 个字符串"
-    elseif toolId == "luraph_clean" then
-        newContent, count = deobfCleanLuraph(content)
-        info = "清理了 " .. count .. " 处 Luraph 特征"
-    elseif toolId == "control_flow" then
-        newContent, count = deobfRestoreControlFlow(content)
-        info = "还原了 " .. count .. " 处控制流"
-    elseif toolId == "num_expr" then
-        newContent, count = deobfNumExprRestore(content)
-        info = "还原了 " .. count .. " 处数字表达式"
-    elseif toolId == "unsplit_str" then
-        newContent, count = deobfUnsplitStrings(content)
-        info = "合并了 " .. count .. " 处分割字符串"
-    elseif toolId == "unwrap_func" then
-        newContent, count = deobfUnwrapFunction(content)
-        info = "解除了 " .. count .. " 层函数包装"
-    elseif toolId == "const_array" then
-        newContent, count = deobfConstantArrayInline(content)
-        info = "内联了 " .. count .. " 个常量数组引用"
-    elseif toolId == "unproxify" then
-        newContent, count = deobfUnproxify(content)
-        info = "还原了 " .. count .. " 个代理变量"
-    elseif toolId == "gc_clean" then
-        newContent, count = deobfGcClean(content)
-        info = "清理了 " .. count .. " 行垃圾代码"
-    elseif toolId == "format" then
-        newContent = deobfFormatCode(content)
-        info = "代码已格式化"
-    elseif toolId == "analyze" then
-        local stats = deobfAnalyzeCode(content)
-        AddLog("=== 代码分析报告 ===", "info")
-        AddLog("总行数: " .. stats.totalLines, "info")
-        AddLog("总字符: " .. stats.totalChars, "info")
-        AddLog("函数数量: " .. stats.functionCount, "info")
-        AddLog("局部变量: " .. stats.localCount, "info")
-        AddLog("字符串数量: " .. stats.stringCount, "info")
-        AddLog("疑似混淆: " .. tostring(stats.likelyObfuscated), "info")
-        if #stats.obfuscators > 0 then
-            AddLog("检测到的混淆器: " .. table.concat(stats.obfuscators, ", "), "info")
-        end
-        return
-    end
-
-    if newContent ~= content then
-        local backupName = deobfSelectedFile:gsub("%.([^%.]+)$", "_backup.%1")
-        dataApi.writeFile(backupName, content)
-        dataApi.writeFile(deobfSelectedFile, newContent)
-        AddLog(info .. " (备份: " .. backupName .. ")", "info")
-        deobfNotify(info .. "，已应用到 " .. deobfSelectedFile, 1)
-
-        if deobfViewMode == "editor" and deobfEditorTextBox then
-            deobfEditorTextBox.Text = newContent
-        end
-    else
-        AddLog("没有需要修改的内容", "info")
-        deobfNotify("没有需要修改的内容", 2)
-    end
-    pcall(function() deobfRefreshFileList() end)
-end
-
-local function buildUI()
-    ensureDeps()
-
-    deobfLeftPanel = create("Frame", {
-        Position = UDim2.new(0, 0, 0, 0),
-        Size = UDim2.new(0, DEOBF_LEFT_W, 1, 0),
-        BackgroundColor3 = theme.surfaceLight,
-        BackgroundTransparency = 0.55,
-        BorderSizePixel = 0,
-        ZIndex = 3,
-    })
-    corner(theme.radiusLg, deobfLeftPanel)
-    stroke(theme.border, 1, deobfLeftPanel)
-    deobfLeftPanel.Parent = deobfPage
-
-    local leftHeader = create("Frame", {
-        Size = UDim2.new(1, 0, 0, 44),
-        Position = UDim2.new(0, 0, 0, 0),
-        BackgroundTransparency = 1,
-        ClipsDescendants = true,
-        ZIndex = 4,
-    })
-    leftHeader.Parent = deobfLeftPanel
-
-    local leftTitle = create("TextLabel", {
-        Position = UDim2.new(0, 14, 0, 0),
-        Size = UDim2.new(1, -28, 0, 44),
-        BackgroundTransparency = 1,
-        Text = "文件管理",
-        TextColor3 = theme.text,
-        TextSize = 13,
-        Font = Enum.Font.SourceSansBold,
-        TextXAlignment = Enum.TextXAlignment.Left,
-        TextYAlignment = Enum.TextYAlignment.Center,
-        ZIndex = 5,
-    })
-    leftTitle.Parent = leftHeader
-    deobfLeftTitle = leftTitle
-
-    deobfNewFileBtn = create("TextButton", {
-        AnchorPoint = Vector2.new(1, 0.5),
-        Position = UDim2.new(1, -12, 0.5, 0),
-        Size = UDim2.new(0, 32, 0, 28),
-        BackgroundColor3 = theme.accent,
-        BackgroundTransparency = 0.3,
-        BorderSizePixel = 0,
-        Text = "",
-        AutoButtonColor = false,
-        ZIndex = 5,
-    })
-    corner(8, deobfNewFileBtn)
-    local newFileIcon = GetIcon("plus", UDim2.new(0, 14, 0, 14), theme.text)
-    if newFileIcon then
-        newFileIcon.AnchorPoint = Vector2.new(0.5, 0.5)
-        newFileIcon.Position = UDim2.new(0.5, 0, 0.5, 0)
-        newFileIcon.ZIndex = 6
-        newFileIcon.Parent = deobfNewFileBtn
-    end
-    deobfNewFileBtn.Parent = leftHeader
-    deobfNewFileBtn.MouseButton1Click:Connect(deobfShowNewFileInput)
-
-    deobfNewFileInput = create("Frame", {
-        Size = UDim2.new(1, -56, 0, 32),
-        Position = UDim2.new(0, 12, 0.5, 0),
-        AnchorPoint = Vector2.new(0, 0.5),
-        BackgroundColor3 = theme.surface,
-        BackgroundTransparency = 1,
-        BorderSizePixel = 0,
-        ZIndex = 6,
-        Visible = false,
-        ClipsDescendants = true,
-    })
-    corner(12, deobfNewFileInput)
-    stroke(theme.accent, 1, deobfNewFileInput)
-    deobfNewFileInput.Parent = leftHeader
-
-    deobfNewFileInputBox = create("TextBox", {
-        Position = UDim2.new(0, 12, 0, 0),
-        Size = UDim2.new(1, -76, 1, 0),
-        BackgroundTransparency = 1,
-        Text = "",
-        PlaceholderText = "输入文件名...",
-        PlaceholderColor3 = theme.textDim,
-        TextColor3 = theme.text,
-        TextSize = 13,
-        Font = Enum.Font.SourceSans,
-        TextXAlignment = Enum.TextXAlignment.Left,
-        TextYAlignment = Enum.TextYAlignment.Center,
-        ClearTextOnFocus = false,
-        ZIndex = 7,
-    })
-    deobfNewFileInputBox.Parent = deobfNewFileInput
-    deobfNewFileInputBox.FocusLost:Connect(function(enterPressed)
-        if enterPressed then
-            deobfCreateNewFile()
-        end
-    end)
-
-    local confirmBtn = create("TextButton", {
-        AnchorPoint = Vector2.new(1, 0.5),
-        Position = UDim2.new(1, -40, 0.5, 0),
-        Size = UDim2.new(0, 26, 0, 26),
-        BackgroundColor3 = theme.green,
-        BackgroundTransparency = 0.2,
-        BorderSizePixel = 0,
-        Text = "",
-        ZIndex = 7,
-    })
-    corner(8, confirmBtn)
-    local confirmIcon = GetIcon("check", UDim2.new(0, 14, 0, 14), Color3.fromRGB(255,255,255))
-    if confirmIcon then
-        confirmIcon.AnchorPoint = Vector2.new(0.5, 0.5)
-        confirmIcon.Position = UDim2.new(0.5, 0, 0.5, 0)
-        confirmIcon.ZIndex = 8
-        confirmIcon.Active = false
-        confirmIcon.Parent = confirmBtn
-    end
-    confirmBtn.Parent = deobfNewFileInput
-    confirmBtn.AutoButtonColor = true
-    confirmBtn.Activated:Connect(function()
-        deobfCreateNewFile()
-    end)
-    confirmBtn.MouseButton1Click:Connect(deobfCreateNewFile)
-
-    local cancelBtn = create("TextButton", {
-        AnchorPoint = Vector2.new(1, 0.5),
-        Position = UDim2.new(1, -8, 0.5, 0),
-        Size = UDim2.new(0, 26, 0, 26),
-        BackgroundColor3 = theme.text,
-        BackgroundTransparency = 0.85,
-        BorderSizePixel = 0,
-        Text = "",
-        AutoButtonColor = true,
-        ZIndex = 7,
-    })
-    corner(8, cancelBtn)
-    local cancelIcon = GetIcon("x", UDim2.new(0, 14, 0, 14), theme.text)
-    if cancelIcon then
-        cancelIcon.AnchorPoint = Vector2.new(0.5, 0.5)
-        cancelIcon.Position = UDim2.new(0.5, 0, 0.5, 0)
-        cancelIcon.ZIndex = 8
-        cancelIcon.Active = false
-        cancelIcon.Parent = cancelBtn
-    end
-    cancelBtn.Parent = deobfNewFileInput
-    cancelBtn.Activated:Connect(function()
-        deobfHideNewFileInput(true)
-    end)
-
-    deobfFileListScroll = create("ScrollingFrame", {
-        Position = UDim2.new(0, 0, 0, 48),
-        Size = UDim2.new(1, 0, 1, -60),
-        BackgroundTransparency = 1,
-        BorderSizePixel = 0,
-        ScrollBarThickness = 3,
-        ScrollBarImageColor3 = theme.textDim,
-        CanvasSize = UDim2.new(0, 0, 0, 0),
-        ClipsDescendants = true,
-        ZIndex = 4,
-    })
-    deobfFileListScroll.Parent = deobfLeftPanel
-
-    deobfFileList = create("Frame", {
-        Size = UDim2.new(1, 0, 0, 0),
-        BackgroundTransparency = 1,
-        ZIndex = 5,
-    })
-    deobfFileList.Parent = deobfFileListScroll
-
-    local divV = create("Frame", {
-        Position = UDim2.new(0, DEOBF_LEFT_W + 4, 0, 0),
-        Size = UDim2.new(0, 1, 1, 0),
-        BackgroundColor3 = theme.border,
-        BackgroundTransparency = 0.5,
-        BorderSizePixel = 0,
-        ZIndex = 2,
-    })
-    divV.Parent = deobfPage
-
-    local rightX = DEOBF_LEFT_W + 8
-    deobfRightPanel = create("Frame", {
-        Position = UDim2.new(0, rightX, 0, 0),
-        Size = UDim2.new(1, -rightX, 1, 0),
-        BackgroundColor3 = theme.surfaceLight,
-        BackgroundTransparency = 0.55,
-        BorderSizePixel = 0,
-        ZIndex = 3,
-    })
-    corner(theme.radiusLg, deobfRightPanel)
-    stroke(theme.border, 1, deobfRightPanel)
-    deobfRightPanel.Parent = deobfPage
-
-    deobfToolsView = create("Frame", {
-        Size = UDim2.new(1, 0, 1, 0),
-        BackgroundTransparency = 1,
-        ZIndex = 4,
-        Visible = true,
-    })
-    deobfToolsView.Parent = deobfRightPanel
-
-    local toolsHeader = create("Frame", {
-        Size = UDim2.new(1, 0, 0, 44),
-        Position = UDim2.new(0, 0, 0, 0),
-        BackgroundTransparency = 1,
-        ZIndex = 5,
-    })
-    toolsHeader.Parent = deobfToolsView
-
-    local toolsTitle = create("TextLabel", {
-        Position = UDim2.new(0, 16, 0, 0),
-        Size = UDim2.new(1, -32, 0, 44),
-        BackgroundTransparency = 1,
-        Text = "反混淆工具",
-        TextColor3 = theme.text,
-        TextSize = 13,
-        Font = Enum.Font.SourceSansBold,
-        TextXAlignment = Enum.TextXAlignment.Left,
-        TextYAlignment = Enum.TextYAlignment.Center,
-        ZIndex = 6,
-    })
-    toolsTitle.Parent = toolsHeader
-
-    local toolsScroll = create("ScrollingFrame", {
-        Position = UDim2.new(0, 0, 0, 52),
-        Size = UDim2.new(1, 0, 1, -60),
-        BackgroundTransparency = 1,
-        BorderSizePixel = 0,
-        ScrollBarThickness = 3,
-        ScrollBarImageColor3 = theme.textDim,
-        CanvasSize = UDim2.new(0, 0, 0, 0),
-        ClipsDescendants = true,
-        ZIndex = 5,
-    })
-    toolsScroll.Parent = deobfToolsView
-
-    local toolsList = create("Frame", {
-        Size = UDim2.new(1, 0, 0, 0),
-        BackgroundTransparency = 1,
-        ZIndex = 6,
-    })
-    toolsList.Parent = toolsScroll
-
-    local colorMap = {
-        accent = theme.accent,
-        accent2 = theme.accent2,
-        green = theme.green,
-        warn = theme.warn,
-        red = theme.red,
-    }
-
-    local currentY = 12
-    local toolCount = 0
-    for _, cat in ipairs(DEOBF_TOOLS) do
-        local catTitle = create("TextLabel", {
-            Position = UDim2.new(0, 16, 0, currentY),
-            Size = UDim2.new(1, -32, 0, 24),
-            BackgroundTransparency = 1,
-            Text = cat.category,
-            TextColor3 = theme.textDim,
-            TextSize = 11,
-            Font = Enum.Font.SourceSansBold,
-            TextXAlignment = Enum.TextXAlignment.Left,
-            TextYAlignment = Enum.TextYAlignment.Center,
-            ZIndex = 6,
-        })
-        catTitle.Parent = toolsList
-        currentY = currentY + 24
-
-        local sep = create("Frame", {
-            Position = UDim2.new(0, 16, 0, currentY),
-            Size = UDim2.new(1, -32, 0, 1),
-            BackgroundColor3 = theme.border,
-            BackgroundTransparency = 0.5,
-            BorderSizePixel = 0,
-            ZIndex = 6,
-        })
-        sep.Parent = toolsList
-        currentY = currentY + 1 + 6
-
-        for _, tool in ipairs(cat.tools) do
-            toolCount = toolCount + 1
-            local btnY = currentY
-
-            local btn = create("TextButton", {
-                Position = UDim2.new(0, 16, 0, btnY),
-                Size = UDim2.new(1, -32, 0, 52),
-                BackgroundColor3 = theme.surface,
-                BackgroundTransparency = 0.4,
-                BorderSizePixel = 0,
-                Text = "",
-                AutoButtonColor = false,
-                ZIndex = 6,
-            })
-            corner(10, btn)
-
-            local iconColor = colorMap[tool.color] or theme.accent
-
-            local iconBg = create("Frame", {
-                Position = UDim2.new(0, 10, 0.5, 0),
-                AnchorPoint = Vector2.new(0, 0.5),
-                Size = UDim2.new(0, 32, 0, 32),
-                BackgroundColor3 = iconColor,
-                BackgroundTransparency = 0.8,
-                BorderSizePixel = 0,
-                ZIndex = 7,
-            })
-            corner(8, iconBg)
-            iconBg.Parent = btn
-
-            local icon = GetIcon(tool.icon, UDim2.new(0, 16, 0, 16), Color3.fromRGB(255,255,255))
-            if icon then
-                icon.AnchorPoint = Vector2.new(0.5, 0.5)
-                icon.Position = UDim2.new(0.5, 0, 0.5, 0)
-                icon.ZIndex = 8
-                icon.Parent = iconBg
-            end
-
-            local nameLbl = create("TextLabel", {
-                Position = UDim2.new(0, 52, 0, 8),
-                Size = UDim2.new(1, -64, 0, 18),
-                BackgroundTransparency = 1,
-                Text = tool.name,
-                TextColor3 = theme.text,
-                TextSize = 12,
-                Font = Enum.Font.SourceSansBold,
-                TextXAlignment = Enum.TextXAlignment.Left,
-                TextYAlignment = Enum.TextYAlignment.Center,
-                ZIndex = 7,
-            })
-            nameLbl.Parent = btn
-
-            local descLbl = create("TextLabel", {
-                Position = UDim2.new(0, 52, 0, 26),
-                Size = UDim2.new(1, -64, 0, 16),
-                BackgroundTransparency = 1,
-                Text = tool.desc,
-                TextColor3 = theme.textDim,
-                TextSize = 10,
-                Font = Enum.Font.SourceSans,
-                TextXAlignment = Enum.TextXAlignment.Left,
-                TextYAlignment = Enum.TextYAlignment.Center,
-                TextTruncate = Enum.TextTruncate.AtEnd,
-                ZIndex = 7,
-            })
-            descLbl.Parent = btn
-
-            local arrowIcon = GetIcon("chevron-right", UDim2.new(0, 12, 0, 12), theme.textDim)
-            if arrowIcon then
-                arrowIcon.AnchorPoint = Vector2.new(1, 0.5)
-                arrowIcon.Position = UDim2.new(1, -10, 0.5, 0)
-                arrowIcon.ZIndex = 7
-                arrowIcon.Parent = btn
-            end
-
-            btn.MouseEnter:Connect(function()
-                deobfTween(btn, {BackgroundColor3 = iconColor, BackgroundTransparency = 0.85}, 0.15)
-            end)
-            btn.MouseLeave:Connect(function()
-                if toolId == "hook_loadstring" and deobfHookActive then return end
-                deobfTween(btn, {BackgroundColor3 = theme.surface, BackgroundTransparency = 0.4}, 0.15)
-            end)
-            btn.MouseButton1Click:Connect(function()
-                deobfRunTool(tool.id)
-            end)
-
-            btn.Parent = toolsList
-            deobfToolButtons[tool.id] = btn
-            currentY = currentY + 62
-        end
-        currentY = currentY + 8
-    end
-
-    local toolsContentH = currentY + 12
-    toolsList.Size = UDim2.new(1, 0, 0, toolsContentH)
-    toolsScroll.CanvasSize = UDim2.new(0, 0, 0, toolsContentH)
-
-    deobfHookLogView = create("Frame", {
-        Size = UDim2.new(1, 0, 1, 0),
-        BackgroundTransparency = 1,
-        ZIndex = 4,
-        Visible = false,
-    })
-    deobfHookLogView.Parent = deobfRightPanel
-
-    local hookLogHeader = create("Frame", {
-        Size = UDim2.new(1, 0, 0, 44),
-        Position = UDim2.new(0, 0, 0, 0),
-        BackgroundTransparency = 1,
-        ZIndex = 5,
-    })
-    hookLogHeader.Parent = deobfHookLogView
-
-    local hookLogBackBtn = create("TextButton", {
-        Position = UDim2.new(0, 12, 0.5, 0),
-        AnchorPoint = Vector2.new(0, 0.5),
-        Size = UDim2.new(0, 32, 0, 32),
-        BackgroundColor3 = theme.surface,
-        BackgroundTransparency = 0.3,
-        BorderSizePixel = 0,
-        Text = "",
-        AutoButtonColor = false,
-        ZIndex = 6,
-    })
-    corner(8, hookLogBackBtn)
-    local hookBackIcon = GetIcon("chevron-left", UDim2.new(0, 14, 0, 14), theme.text)
-    if hookBackIcon then
-        hookBackIcon.AnchorPoint = Vector2.new(0.5, 0.5)
-        hookBackIcon.Position = UDim2.new(0.5, 0, 0.5, 0)
-        hookBackIcon.ZIndex = 7
-        hookBackIcon.Parent = hookLogBackBtn
-    end
-    hookLogBackBtn.Parent = hookLogHeader
-    hookLogBackBtn.MouseButton1Click:Connect(deobfShowTools)
-
-    local hookLogTitle = create("TextLabel", {
-        Position = UDim2.new(0, 52, 0, 0),
-        Size = UDim2.new(1, -120, 0, 44),
-        BackgroundTransparency = 1,
-        Text = "拦截记录",
-        TextColor3 = theme.text,
-        TextSize = 13,
-        Font = Enum.Font.SourceSansBold,
-        TextXAlignment = Enum.TextXAlignment.Left,
-        TextYAlignment = Enum.TextYAlignment.Center,
-        ZIndex = 6,
-    })
-    hookLogTitle.Parent = hookLogHeader
-
-    local hookStatusLabel = create("TextLabel", {
-        AnchorPoint = Vector2.new(1, 0.5),
-        Position = UDim2.new(1, -16, 0.5, 0),
-        Size = UDim2.new(0, 80, 0, 24),
-        BackgroundTransparency = 1,
-        Text = "监听中",
-        TextColor3 = theme.green,
-        TextSize = 11,
-        Font = Enum.Font.SourceSansBold,
-        TextXAlignment = Enum.TextXAlignment.Right,
-        TextYAlignment = Enum.TextYAlignment.Center,
-        ZIndex = 6,
-    })
-    hookStatusLabel.Parent = hookLogHeader
-
-    deobfHookLogScroll = create("ScrollingFrame", {
-        Position = UDim2.new(0, 0, 0, 52),
-        Size = UDim2.new(1, 0, 1, -60),
-        BackgroundTransparency = 1,
-        BorderSizePixel = 0,
-        ScrollBarThickness = 3,
-        ScrollBarImageColor3 = theme.textDim,
-        CanvasSize = UDim2.new(0, 0, 0, 0),
-        ClipsDescendants = true,
-        ZIndex = 5,
-    })
-    deobfHookLogScroll.Parent = deobfHookLogView
-
-    deobfHookLogList = create("Frame", {
-        Size = UDim2.new(1, 0, 0, 0),
-        BackgroundTransparency = 1,
-        ZIndex = 6,
-    })
-    deobfHookLogList.Parent = deobfHookLogScroll
-
-    deobfRefreshFileList()
-end
-
-buildUI()
 ]===]
 
 local pageDef = {

@@ -5929,6 +5929,15 @@ function vm_expr_to_lua(e)
         return vm_expr_to_lua(e[2][2]) .. "." .. e[3][2]
       end
     end
+    if type(e[2]) == "table" and e[2][1] == "index" then
+      local inner_base = e[2][2]
+      local inner_key = e[2][3]
+      if type(inner_base) == "table" and inner_base[1] == "var" and type(inner_key) == "table" and inner_key[1] == "var" then
+        if type(e[3]) == "table" and e[3][1] == "str" then
+          return string.format("%q", e[3][2])
+        end
+      end
+    end
     return base .. "[" .. key .. "]"
   elseif k == "call" then
     local func = vm_expr_to_lua(e[2])
@@ -5953,22 +5962,32 @@ function vm_expr_to_lua(e)
     if type(e[2]) == "table" then
       for i = 1, #e[2] do
         local entry = e[2][i]
-        if type(entry) == "table" and entry[1] and entry[2] ~= nil then
-          local key = vm_expr_to_lua(entry[1])
-          local val = vm_expr_to_lua(entry[2])
-          local key_str = nil
-          if type(entry[1]) == "table" and entry[1][1] == "str" and isIdent(entry[1][2]) then
-            key_str = entry[1][2]
-          elseif type(entry[1]) == "table" and entry[1][1] == "index" then
-            local kk = entry[1][3]
-            if type(kk) == "table" and kk[1] == "str" and isIdent(kk[2]) then
-              key_str = kk[2]
-            end
-          end
-          if key_str then
-            table.insert(entries, key_str .. " = " .. val)
+        if type(entry) == "table" and #entry >= 2 then
+          local key_part = entry[1]
+          local val_part = entry[2]
+          if key_part == nil or (type(key_part) == "table" and key_part[1] == "nil") then
+            table.insert(entries, vm_expr_to_lua(val_part))
           else
-            table.insert(entries, "[" .. key .. "] = " .. val)
+            local key = vm_expr_to_lua(key_part)
+            local val = vm_expr_to_lua(val_part)
+            local key_str = nil
+            if type(key_part) == "table" and key_part[1] == "str" and isIdent(key_part[2]) then
+              key_str = key_part[2]
+            elseif type(key_part) == "table" and key_part[1] == "index" then
+              local kk = key_part[3]
+              if type(kk) == "table" and kk[1] == "str" and isIdent(kk[2]) then
+                key_str = kk[2]
+              elseif type(kk) == "table" and kk[1] == "str" then
+                key_str = kk[2]
+              end
+            elseif type(key_part) == "table" and key_part[1] == "var" and isIdent(key_part[2]) then
+              key_str = key_part[2]
+            end
+            if key_str and isIdent(key_str) then
+              table.insert(entries, key_str .. " = " .. val)
+            else
+              table.insert(entries, "[" .. key .. "] = " .. val)
+            end
           end
         else
           table.insert(entries, vm_expr_to_lua(entry))
@@ -6154,13 +6173,16 @@ function vm_generate_code(interpret_result)
   local pending_str = nil
   local pending_var = nil
   
+  local pending_lines = {}
   for line in raw_result:gmatch("[^\n]+") do
     local str_var, str_val = line:match("^local (%w+) = \"(.+)\"$")
     if str_var and str_val then
       if pending_str then
-        local q = string.char(34)
-        table.insert(rebuilt, "local " .. pending_var .. " = " .. q .. pending_str .. q)
+        for _, pl in ipairs(pending_lines) do
+          table.insert(rebuilt, pl)
+        end
       end
+      pending_lines = {}
       pending_str = str_val
       pending_var = str_var
     else
@@ -6175,18 +6197,22 @@ function vm_generate_code(interpret_result)
           table.insert(rebuilt, "-- UI调用: " .. replaced)
           pending_str = nil
           pending_var = nil
+          pending_lines = {}
           matched = true
         end
       end
       if not matched then
         if pending_str then
-          local q = string.char(34)
-          table.insert(rebuilt, "local " .. pending_var .. " = " .. q .. pending_str .. q)
-          pending_str = nil
-          pending_var = nil
+          table.insert(pending_lines, line)
+        else
+          table.insert(rebuilt, line)
         end
-        table.insert(rebuilt, line)
       end
+    end
+  end
+  if pending_str then
+    for _, pl in ipairs(pending_lines) do
+      table.insert(rebuilt, pl)
     end
   end
   

@@ -143,6 +143,36 @@ local function deobfFixForInConstAssign(src)
 end
 
 local DEOBFUSCATOR_PAGE_SOURCE = [===[
+__deobf = {}
+pcall(function()
+    local ok, ge = pcall(function() return getgenv() end)
+    local env = (ok and type(ge) == "table") and ge or getfenv(0)
+    if type(env) == "table" then
+        __deobf.env = env
+        __deobf.game = env.game or game
+        __deobf.Instance = env.Instance or Instance
+        __deobf.new = __deobf.Instance and __deobf.Instance.new or Instance.new
+        setfenv(1, setmetatable({}, {
+            __index = function(_, k) return env[k] end,
+            __newindex = function(_, k, v) env[k] = v end,
+        }))
+    end
+end)
+function __deobf.svc(name)
+    if __deobf.game and __deobf.game.GetService then
+        local ok, s = pcall(function() return __deobf.game:GetService(name) end)
+        if ok then return s end
+    end
+    return nil
+end
+__deobf.http = __deobf.svc("HttpService")
+__deobf.writefile = __deobf.env and __deobf.env.writefile
+__deobf.readfile = __deobf.env and __deobf.env.readfile
+__deobf.isfile = __deobf.env and __deobf.env.isfile
+__deobf.makefolder = __deobf.env and __deobf.env.makefolder
+__deobf.delfile = __deobf.env and __deobf.env.delfile
+__deobf.listfiles = __deobf.env and __deobf.env.listfiles
+
 deobfPage.Name = "deobfuscator"
 
 local svc = nil

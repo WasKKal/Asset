@@ -6171,7 +6171,7 @@ function vm_generate_code(interpret_result)
         if table_content:find(pattern) then
           local q = string.char(34)
           local gsub_pattern = "=%s*" .. pending_var .. "(%s*[,}])"
-          local replaced = table_content:gsub(gsub_pattern, "=" .. q .. pending_str .. q .. "%1")
+          local replaced = table_content:gsub(gsub_pattern, "= " .. q .. pending_str .. q .. "%1")
           table.insert(rebuilt, "-- UI调用: " .. replaced)
           pending_str = nil
           pending_var = nil
@@ -6190,12 +6190,28 @@ function vm_generate_code(interpret_result)
     end
   end
   
-  if pending_str then
-    local q = string.char(34)
-    table.insert(rebuilt, "local " .. pending_var .. " = " .. q .. pending_str .. q)
+  -- 第二轮：识别UI组件类型并还原函数调用
+  local final_result = {}
+  for i, line in ipairs(rebuilt) do
+    if line:find("^-- UI调用:") then
+      local params = line:gsub("^-- UI调用:", "")
+      local ui_type = "Unknown"
+      if params:find("Values") and params:find("Default") then
+        ui_type = "Dropdown"
+      elseif params:find("Min") and params:find("Max") then
+        ui_type = "Slider"
+      elseif params:find("Description") and params:find("Value") then
+        ui_type = "Toggle"
+      elseif params:find("Callback") and not params:find("Value") then
+        ui_type = "Button"
+      end
+      table.insert(final_result, "-- " .. ui_type .. ": " .. params)
+    else
+      table.insert(final_result, line)
+    end
   end
   
-  return table.concat(rebuilt, "\n")
+  return table.concat(final_result, "\n")
 end
 
 -- ============================================================

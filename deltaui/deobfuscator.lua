@@ -5921,6 +5921,16 @@ local function eliminate_runtime_code(body, R)
     for i = 2, #e do if type(e[i]) == "table" and has_user_func_call(e[i]) then return true end end
     return false
   end
+  local function has_user_arg(e)
+    if type(e) ~= "table" then return false end
+    for i = 3, #e do
+      if type(e[i]) == "table" then
+        if has_user_string(e[i]) then return true end
+        if has_user_func_call(e[i]) then return true end
+      end
+    end
+    return false
+  end
   local function has_only_runtime_funcs(e)
     if type(e) ~= "table" then return false end
     local found = false
@@ -5930,11 +5940,17 @@ local function eliminate_runtime_code(body, R)
         if user_funcs[name] then return false end
         if runtime_func_names[name] or runtime_lib_funcs[name] then found = true end
       end
-      if is_upval_func_call(e) then found = true end
+      if is_upval_func_call(e) then
+        if has_user_arg(e) then return false end
+        found = true
+      end
       local fn = e[2]
       if type(fn)=="table" and fn[1]=="index" then
         local base = fn[2]
-        if type(base)=="table" and base[1]=="var" and runtime_vars[base[2]] then found = true end
+        if type(base)=="table" and base[1]=="var" and runtime_vars[base[2]] then
+          if has_user_arg(e) then return false end
+          found = true
+        end
       end
     end
     for i = 2, #e do

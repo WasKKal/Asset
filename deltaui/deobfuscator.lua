@@ -5844,6 +5844,9 @@ function vm_is_runtime_stmt(stmt)
 end
 
 function vm_expr_to_lua(e)
+  if type(e) == "boolean" then
+    return e and "true" or "false"
+  end
   if type(e) ~= "table" then
     return tostring(e)
   end
@@ -5873,6 +5876,12 @@ function vm_expr_to_lua(e)
         if s:byte(i) > 127 then has_high = true; break end
       end
       if has_high and type(e[2]) == "table" and e[2][1] == "index" then
+        return string.format("%q", s)
+      end
+      if type(e[2]) == "table" and e[2][1] == "index" then
+        if isIdent(s) then
+          return s
+        end
         return string.format("%q", s)
       end
     end
@@ -5911,7 +5920,27 @@ function vm_expr_to_lua(e)
     local entries = {}
     if type(e[2]) == "table" then
       for i = 1, #e[2] do
-        table.insert(entries, vm_expr_to_lua(e[2][i]))
+        local entry = e[2][i]
+        if type(entry) == "table" and entry[1] and entry[2] ~= nil then
+          local key = vm_expr_to_lua(entry[1])
+          local val = vm_expr_to_lua(entry[2])
+          local key_str = nil
+          if type(entry[1]) == "table" and entry[1][1] == "str" and isIdent(entry[1][2]) then
+            key_str = entry[1][2]
+          elseif type(entry[1]) == "table" and entry[1][1] == "index" then
+            local kk = entry[1][3]
+            if type(kk) == "table" and kk[1] == "str" and isIdent(kk[2]) then
+              key_str = kk[2]
+            end
+          end
+          if key_str then
+            table.insert(entries, key_str .. " = " .. val)
+          else
+            table.insert(entries, "[" .. key .. "] = " .. val)
+          end
+        else
+          table.insert(entries, vm_expr_to_lua(entry))
+        end
       end
     end
     return "{" .. table.concat(entries, ", ") .. "}"
@@ -6047,13 +6076,40 @@ end
 
 function vm_generate_code(interpret_result)
   local lines = {}
+  local constants = {}
   
   for _, stmt in ipairs(interpret_result.user_stmts) do
+    local k = stmt[1] or stmt.tag
+    local varname = stmt[2]
+    local value = stmt[3]
+    
+    if k == "setvar" or k == "let" then
+      if type(value) == "table" and value[1] == "str" then
+        constants[varname] = value[2]
+      elseif type(value) == "table" and value[1] == "num" then
+        constants[varname] = value[2]
+      elseif type(value) == "table" and value[1] == "bool" then
+        constants[varname] = value[2]
+      end
+    end
+    
     local lua_code = vm_stmt_to_lua(stmt, 0)
     if lua_code then
       if lua_code:find("^local %u = t%(") then goto continue end
       if lua_code:find("^local %u = {nil") then goto continue end
       if lua_code:find("^local %a = {nil") then goto continue end
+      if lua_code:find("^local %u = {__index") then goto continue end
+      
+      for var, val in pairs(constants) do
+        if type(val) == "string" then
+          lua_code = lua_code:gsub("%f[%a]" .. var .. "%f[^%a]", string.format("%q", val))
+        elseif type(val) == "number" then
+          lua_code = lua_code:gsub("%f[%a]" .. var .. "%f[^%a]", tostring(val))
+        elseif type(val) == "boolean" then
+          lua_code = lua_code:gsub("%f[%a]" .. var .. "%f[^%a]", tostring(val))
+        end
+      end
+      
       table.insert(lines, lua_code)
     end
     ::continue::

@@ -6445,7 +6445,6 @@ function M.deobfWeAreDevFull(code)
   local cg = CodeGen_new(dc)
   return cg:gen_top()
 end
--- 用户代码提取器：从反编译输出中提取并去重用户代码
 function M.extract_user_code(decompiled)
   local lines = {}
   for line in decompiled:gmatch("[^\n]+") do
@@ -6998,6 +6997,7 @@ deobfWeAreDevFull = M.deobfWeAreDevFull
 extract_user_code = M.extract_user_code
 deobfWeAreDevClean = M.deobfWeAreDevClean
 interpret_block = M.interpret_block
+
 -- ============================================================
 -- VM解释器v2：基于使用模式和语句模式的运行时代码消除
 -- ============================================================
@@ -7521,6 +7521,641 @@ function M.interpret_block_v2(block, runtime_vars)
   return user_stmts, runtime_stmts
 end
 
+local function deobfRunTool(toolId)
+    if toolId == "hook_loadstring" then
+        local wasActive = deobfHookActive
+        deobfHookLoadstring()
+        if not wasActive then
+            deobfShowHookLog()
+        end
+        return
+    end
+
+    local content = ""
+    if deobfSelectedFile and dataApi then
+        content = dataApi.readFile(deobfSelectedFile) or ""
+    end
+    if content == "" then
+        content = deobfEditorTextBox and deobfEditorTextBox.Text or ""
+    end
+    if content == "" then
+        AddLog("请先选择文件或输入代码", "warn")
+        return
+    end
+
+    if toolId == "detect_obf" then
+        AddLog("=== 混淆检测报告 ===", "info")
+        local results = deobfDetectObfuscation(content)
+        for _, line in ipairs(results) do
+            AddLog(line, "info")
+        end
+        deobfNotify("混淆检测完成，查看日志详情", 1)
+        return
+    end
+
+    if toolId == "prometheus_full" then
+        AddLog("=== Prometheus 完全反混淆 ===", "info")
+        AddLog("开始处理...", "info")
+
+        local formatted, totalChanges = deobfPrometheusFull(content)
+
+        if dataApi and deobfSelectedFile then
+            local backupName = deobfSelectedFile:gsub("%.([^%.]+)$", "_backup.%1")
+            dataApi.writeFile(backupName, content)
+            dataApi.writeFile(deobfSelectedFile, formatted)
+            if deobfViewMode == "editor" and deobfEditorTextBox then
+                deobfEditorTextBox.Text = formatted
+            end
+            AddLog("=== 反混淆完成 ===", "info")
+            AddLog("总计 " .. totalChanges .. " 处修改", "info")
+            AddLog("已应用到: " .. deobfSelectedFile .. " (备份: " .. backupName .. ")", "info")
+            deobfNotify("反混淆完成，已应用到 " .. deobfSelectedFile, 1)
+        else
+            AddLog("=== 反混淆完成 ===", "info")
+            AddLog("总计 " .. totalChanges .. " 处修改", "info")
+        end
+        return
+    end
+
+    if toolId == "wearedev_full" then
+        AddLog("=== WeAreDev 完全反混淆（VM逆向引擎）===", "info")
+        AddLog("管线：词法→解析→基本块→寄存器折叠→CFG→常量数组→LCG解密→容器解析→语义→upvalue还原→短路折叠→结构化→代码生成", "info")
+        local result, err = deobfWeAreDevV2(content)
+        if not result then
+            AddLog("反编译失败: " .. tostring(err), "warn")
+            return
+        end
+        AddLog("识别为 Vmify 结构: " .. tostring(result.isVmify), "info")
+        if result.lcgParams and result.lcgParams.mul45 then
+            AddLog(string.format("LCG 参数: mul45=%s add45=%s mul8=%s key8=%s",
+                tostring(result.lcgParams.mul45), tostring(result.lcgParams.add45),
+                tostring(result.lcgParams.mul8), tostring(result.lcgParams.key8)), "info")
+        end
+        AddLog("反编译输出长度: " .. #result.source .. " 字节", "info")
+        local outName = (deobfSelectedFile or "output"):gsub("%.lua$", "") .. "_deobf.lua"
+        if dataApi then
+            dataApi.writeFile(outName, result.source)
+            AddLog("结果已写入: " .. outName, "info")
+        end
+        if deobfEditorTextBox then
+            deobfEditorTextBox.Text = result.source
+        end
+        if deobfNotify then
+            deobfNotify("反混淆完成", "输出 " .. #result.source .. " 字节")
+        end
+        AddLog("=== 反混淆完成 ===", "info")
+        return
+    end
+
+    if toolId == "base_decode" then
+        local decoded, usedType = deobfBaseDecode(content, "auto", nil)
+        if decoded and #decoded > 0 then
+            AddLog("Base解码完成，使用编码: " .. usedType .. "，结果长度: " .. #decoded .. " 字节", "info")
+            if deobfEditorTextBox then
+                deobfEditorTextBox.Text = decoded
+            end
+            if dataApi and deobfSelectedFile then
+                dataApi.writeFile(deobfSelectedFile, decoded)
+            end
+            deobfNotify("Base解码完成 (" .. usedType .. ")", 1)
+        else
+            AddLog("Base解码失败或结果为空", "warn")
+            deobfNotify("解码失败", 2)
+        end
+        return
+    end
+
+    if toolId == "rename_vars" then
+        newContent, count = deobfRenameVars(content)
+        info = "重命名了 " .. count .. " 个变量"
+    elseif toolId == "string_decrypt" then
+        newContent, count = deobfStringDecrypt(content)
+        info = "解密了 " .. count .. " 个字符串"
+    elseif toolId == "luraph_clean" then
+        newContent, count = deobfCleanLuraph(content)
+        info = "清理了 " .. count .. " 处 Luraph 特征"
+    elseif toolId == "control_flow" then
+        newContent, count = deobfRestoreControlFlow(content)
+        info = "还原了 " .. count .. " 处控制流"
+    elseif toolId == "num_expr" then
+        newContent, count = deobfNumExprRestore(content)
+        info = "还原了 " .. count .. " 处数字表达式"
+    elseif toolId == "unsplit_str" then
+        newContent, count = deobfUnsplitStrings(content)
+        info = "合并了 " .. count .. " 处分割字符串"
+    elseif toolId == "unwrap_func" then
+        newContent, count = deobfUnwrapFunction(content)
+        info = "解除了 " .. count .. " 层函数包装"
+    elseif toolId == "const_array" then
+        newContent, count = deobfConstantArrayInline(content)
+        info = "内联了 " .. count .. " 个常量数组引用"
+    elseif toolId == "unproxify" then
+        newContent, count = deobfUnproxify(content)
+        info = "还原了 " .. count .. " 个代理变量"
+    elseif toolId == "gc_clean" then
+        newContent, count = deobfGcClean(content)
+        info = "清理了 " .. count .. " 行垃圾代码"
+    elseif toolId == "format" then
+        newContent = deobfFormatCode(content)
+        info = "代码已格式化"
+    elseif toolId == "analyze" then
+        local stats = deobfAnalyzeCode(content)
+        AddLog("=== 代码分析报告 ===", "info")
+        AddLog("总行数: " .. stats.totalLines, "info")
+        AddLog("总字符: " .. stats.totalChars, "info")
+        AddLog("函数数量: " .. stats.functionCount, "info")
+        AddLog("局部变量: " .. stats.localCount, "info")
+        AddLog("字符串数量: " .. stats.stringCount, "info")
+        AddLog("疑似混淆: " .. tostring(stats.likelyObfuscated), "info")
+        if #stats.obfuscators > 0 then
+            AddLog("检测到的混淆器: " .. table.concat(stats.obfuscators, ", "), "info")
+        end
+        return
+    end
+
+    if newContent ~= content then
+        local backupName = deobfSelectedFile:gsub("%.([^%.]+)$", "_backup.%1")
+        dataApi.writeFile(backupName, content)
+        dataApi.writeFile(deobfSelectedFile, newContent)
+        AddLog(info .. " (备份: " .. backupName .. ")", "info")
+        deobfNotify(info .. "，已应用到 " .. deobfSelectedFile, 1)
+
+        if deobfViewMode == "editor" and deobfEditorTextBox then
+            deobfEditorTextBox.Text = newContent
+        end
+    else
+        AddLog("没有需要修改的内容", "info")
+        deobfNotify("没有需要修改的内容", 2)
+    end
+end
+
+local function buildUI()
+    ensureDeps()
+
+    deobfLeftPanel = create("Frame", {
+        Position = UDim2.new(0, 0, 0, 0),
+        Size = UDim2.new(0, DEOBF_LEFT_W, 1, 0),
+        BackgroundColor3 = theme.surfaceLight,
+        BackgroundTransparency = 0.55,
+        BorderSizePixel = 0,
+        ZIndex = 3,
+    })
+    corner(theme.radiusLg, deobfLeftPanel)
+    stroke(theme.border, 1, deobfLeftPanel)
+    deobfLeftPanel.Parent = deobfPage
+
+    local leftHeader = create("Frame", {
+        Size = UDim2.new(1, 0, 0, 44),
+        Position = UDim2.new(0, 0, 0, 0),
+        BackgroundTransparency = 1,
+        ClipsDescendants = true,
+        ZIndex = 4,
+    })
+    leftHeader.Parent = deobfLeftPanel
+
+    local leftTitle = create("TextLabel", {
+        Position = UDim2.new(0, 14, 0, 0),
+        Size = UDim2.new(1, -28, 0, 44),
+        BackgroundTransparency = 1,
+        Text = "文件管理",
+        TextColor3 = theme.text,
+        TextSize = 13,
+        Font = Enum.Font.SourceSansBold,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        TextYAlignment = Enum.TextYAlignment.Center,
+        ZIndex = 5,
+    })
+    leftTitle.Parent = leftHeader
+    deobfLeftTitle = leftTitle
+
+    deobfNewFileBtn = create("TextButton", {
+        AnchorPoint = Vector2.new(1, 0.5),
+        Position = UDim2.new(1, -12, 0.5, 0),
+        Size = UDim2.new(0, 32, 0, 28),
+        BackgroundColor3 = theme.accent,
+        BackgroundTransparency = 0.3,
+        BorderSizePixel = 0,
+        Text = "",
+        AutoButtonColor = false,
+        ZIndex = 5,
+    })
+    corner(8, deobfNewFileBtn)
+    local newFileIcon = GetIcon("plus", UDim2.new(0, 14, 0, 14), theme.text)
+    if newFileIcon then
+        newFileIcon.AnchorPoint = Vector2.new(0.5, 0.5)
+        newFileIcon.Position = UDim2.new(0.5, 0, 0.5, 0)
+        newFileIcon.ZIndex = 6
+        newFileIcon.Parent = deobfNewFileBtn
+    end
+    deobfNewFileBtn.Parent = leftHeader
+    deobfNewFileBtn.MouseButton1Click:Connect(deobfShowNewFileInput)
+
+    deobfNewFileInput = create("Frame", {
+        Size = UDim2.new(1, -56, 0, 32),
+        Position = UDim2.new(0, 12, 0.5, 0),
+        AnchorPoint = Vector2.new(0, 0.5),
+        BackgroundColor3 = theme.surface,
+        BackgroundTransparency = 1,
+        BorderSizePixel = 0,
+        ZIndex = 6,
+        Visible = false,
+        ClipsDescendants = true,
+    })
+    corner(12, deobfNewFileInput)
+    stroke(theme.accent, 1, deobfNewFileInput)
+    deobfNewFileInput.Parent = leftHeader
+
+    deobfNewFileInputBox = create("TextBox", {
+        Position = UDim2.new(0, 12, 0, 0),
+        Size = UDim2.new(1, -76, 1, 0),
+        BackgroundTransparency = 1,
+        Text = "",
+        PlaceholderText = "输入文件名...",
+        PlaceholderColor3 = theme.textDim,
+        TextColor3 = theme.text,
+        TextSize = 13,
+        Font = Enum.Font.SourceSans,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        TextYAlignment = Enum.TextYAlignment.Center,
+        ClearTextOnFocus = false,
+        ZIndex = 7,
+    })
+    deobfNewFileInputBox.Parent = deobfNewFileInput
+    deobfNewFileInputBox.FocusLost:Connect(function(enterPressed)
+        if enterPressed then
+            deobfCreateNewFile()
+        end
+    end)
+
+    local confirmBtn = create("TextButton", {
+        AnchorPoint = Vector2.new(1, 0.5),
+        Position = UDim2.new(1, -40, 0.5, 0),
+        Size = UDim2.new(0, 26, 0, 26),
+        BackgroundColor3 = theme.green,
+        BackgroundTransparency = 0.2,
+        BorderSizePixel = 0,
+        Text = "",
+        ZIndex = 7,
+    })
+    corner(8, confirmBtn)
+    local confirmIcon = GetIcon("check", UDim2.new(0, 14, 0, 14), Color3.fromRGB(255,255,255))
+    if confirmIcon then
+        confirmIcon.AnchorPoint = Vector2.new(0.5, 0.5)
+        confirmIcon.Position = UDim2.new(0.5, 0, 0.5, 0)
+        confirmIcon.ZIndex = 8
+        confirmIcon.Active = false
+        confirmIcon.Parent = confirmBtn
+    end
+    confirmBtn.Parent = deobfNewFileInput
+    confirmBtn.AutoButtonColor = true
+    confirmBtn.Activated:Connect(function()
+        deobfCreateNewFile()
+    end)
+    confirmBtn.MouseButton1Click:Connect(deobfCreateNewFile)
+
+    local cancelBtn = create("TextButton", {
+        AnchorPoint = Vector2.new(1, 0.5),
+        Position = UDim2.new(1, -8, 0.5, 0),
+        Size = UDim2.new(0, 26, 0, 26),
+        BackgroundColor3 = theme.text,
+        BackgroundTransparency = 0.85,
+        BorderSizePixel = 0,
+        Text = "",
+        AutoButtonColor = true,
+        ZIndex = 7,
+    })
+    corner(8, cancelBtn)
+    local cancelIcon = GetIcon("x", UDim2.new(0, 14, 0, 14), theme.text)
+    if cancelIcon then
+        cancelIcon.AnchorPoint = Vector2.new(0.5, 0.5)
+        cancelIcon.Position = UDim2.new(0.5, 0, 0.5, 0)
+        cancelIcon.ZIndex = 8
+        cancelIcon.Active = false
+        cancelIcon.Parent = cancelBtn
+    end
+    cancelBtn.Parent = deobfNewFileInput
+    cancelBtn.Activated:Connect(function()
+        deobfHideNewFileInput(true)
+    end)
+
+    deobfFileListScroll = create("ScrollingFrame", {
+        Position = UDim2.new(0, 0, 0, 48),
+        Size = UDim2.new(1, 0, 1, -60),
+        BackgroundTransparency = 1,
+        BorderSizePixel = 0,
+        ScrollBarThickness = 3,
+        ScrollBarImageColor3 = theme.textDim,
+        CanvasSize = UDim2.new(0, 0, 0, 0),
+        ClipsDescendants = true,
+        ZIndex = 4,
+    })
+    deobfFileListScroll.Parent = deobfLeftPanel
+
+    deobfFileList = create("Frame", {
+        Size = UDim2.new(1, 0, 0, 0),
+        BackgroundTransparency = 1,
+        ZIndex = 5,
+    })
+    deobfFileList.Parent = deobfFileListScroll
+
+    local divV = create("Frame", {
+        Position = UDim2.new(0, DEOBF_LEFT_W + 4, 0, 0),
+        Size = UDim2.new(0, 1, 1, 0),
+        BackgroundColor3 = theme.border,
+        BackgroundTransparency = 0.5,
+        BorderSizePixel = 0,
+        ZIndex = 2,
+    })
+    divV.Parent = deobfPage
+
+    local rightX = DEOBF_LEFT_W + 8
+    deobfRightPanel = create("Frame", {
+        Position = UDim2.new(0, rightX, 0, 0),
+        Size = UDim2.new(1, -rightX, 1, 0),
+        BackgroundColor3 = theme.surfaceLight,
+        BackgroundTransparency = 0.55,
+        BorderSizePixel = 0,
+        ZIndex = 3,
+    })
+    corner(theme.radiusLg, deobfRightPanel)
+    stroke(theme.border, 1, deobfRightPanel)
+    deobfRightPanel.Parent = deobfPage
+
+    deobfToolsView = create("Frame", {
+        Size = UDim2.new(1, 0, 1, 0),
+        BackgroundTransparency = 1,
+        ZIndex = 4,
+        Visible = true,
+    })
+    deobfToolsView.Parent = deobfRightPanel
+
+    local toolsHeader = create("Frame", {
+        Size = UDim2.new(1, 0, 0, 44),
+        Position = UDim2.new(0, 0, 0, 0),
+        BackgroundTransparency = 1,
+        ZIndex = 5,
+    })
+    toolsHeader.Parent = deobfToolsView
+
+    local toolsTitle = create("TextLabel", {
+        Position = UDim2.new(0, 16, 0, 0),
+        Size = UDim2.new(1, -32, 0, 44),
+        BackgroundTransparency = 1,
+        Text = "反混淆工具",
+        TextColor3 = theme.text,
+        TextSize = 13,
+        Font = Enum.Font.SourceSansBold,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        TextYAlignment = Enum.TextYAlignment.Center,
+        ZIndex = 6,
+    })
+    toolsTitle.Parent = toolsHeader
+
+    local toolsScroll = create("ScrollingFrame", {
+        Position = UDim2.new(0, 0, 0, 52),
+        Size = UDim2.new(1, 0, 1, -60),
+        BackgroundTransparency = 1,
+        BorderSizePixel = 0,
+        ScrollBarThickness = 3,
+        ScrollBarImageColor3 = theme.textDim,
+        CanvasSize = UDim2.new(0, 0, 0, 0),
+        ClipsDescendants = true,
+        ZIndex = 5,
+    })
+    toolsScroll.Parent = deobfToolsView
+
+    local toolsList = create("Frame", {
+        Size = UDim2.new(1, 0, 0, 0),
+        BackgroundTransparency = 1,
+        ZIndex = 6,
+    })
+    toolsList.Parent = toolsScroll
+
+    local colorMap = {
+        accent = theme.accent,
+        accent2 = theme.accent2,
+        green = theme.green,
+        warn = theme.warn,
+        red = theme.red,
+    }
+
+    local currentY = 12
+    local toolCount = 0
+    for _, cat in ipairs(DEOBF_TOOLS) do
+        local catTitle = create("TextLabel", {
+            Position = UDim2.new(0, 16, 0, currentY),
+            Size = UDim2.new(1, -32, 0, 24),
+            BackgroundTransparency = 1,
+            Text = cat.category,
+            TextColor3 = theme.textDim,
+            TextSize = 11,
+            Font = Enum.Font.SourceSansBold,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            TextYAlignment = Enum.TextYAlignment.Center,
+            ZIndex = 6,
+        })
+        catTitle.Parent = toolsList
+        currentY = currentY + 24
+
+        local sep = create("Frame", {
+            Position = UDim2.new(0, 16, 0, currentY),
+            Size = UDim2.new(1, -32, 0, 1),
+            BackgroundColor3 = theme.border,
+            BackgroundTransparency = 0.5,
+            BorderSizePixel = 0,
+            ZIndex = 6,
+        })
+        sep.Parent = toolsList
+        currentY = currentY + 1 + 6
+
+        for _, tool in ipairs(cat.tools) do
+            toolCount = toolCount + 1
+            local btnY = currentY
+
+            local btn = create("TextButton", {
+                Position = UDim2.new(0, 16, 0, btnY),
+                Size = UDim2.new(1, -32, 0, 52),
+                BackgroundColor3 = theme.surface,
+                BackgroundTransparency = 0.4,
+                BorderSizePixel = 0,
+                Text = "",
+                AutoButtonColor = false,
+                ZIndex = 6,
+            })
+            corner(10, btn)
+
+            local iconColor = colorMap[tool.color] or theme.accent
+
+            local iconBg = create("Frame", {
+                Position = UDim2.new(0, 10, 0.5, 0),
+                AnchorPoint = Vector2.new(0, 0.5),
+                Size = UDim2.new(0, 32, 0, 32),
+                BackgroundColor3 = iconColor,
+                BackgroundTransparency = 0.8,
+                BorderSizePixel = 0,
+                ZIndex = 7,
+            })
+            corner(8, iconBg)
+            iconBg.Parent = btn
+
+            local icon = GetIcon(tool.icon, UDim2.new(0, 16, 0, 16), Color3.fromRGB(255,255,255))
+            if icon then
+                icon.AnchorPoint = Vector2.new(0.5, 0.5)
+                icon.Position = UDim2.new(0.5, 0, 0.5, 0)
+                icon.ZIndex = 8
+                icon.Parent = iconBg
+            end
+
+            local nameLbl = create("TextLabel", {
+                Position = UDim2.new(0, 52, 0, 8),
+                Size = UDim2.new(1, -64, 0, 18),
+                BackgroundTransparency = 1,
+                Text = tool.name,
+                TextColor3 = theme.text,
+                TextSize = 12,
+                Font = Enum.Font.SourceSansBold,
+                TextXAlignment = Enum.TextXAlignment.Left,
+                TextYAlignment = Enum.TextYAlignment.Center,
+                ZIndex = 7,
+            })
+            nameLbl.Parent = btn
+
+            local descLbl = create("TextLabel", {
+                Position = UDim2.new(0, 52, 0, 26),
+                Size = UDim2.new(1, -64, 0, 16),
+                BackgroundTransparency = 1,
+                Text = tool.desc,
+                TextColor3 = theme.textDim,
+                TextSize = 10,
+                Font = Enum.Font.SourceSans,
+                TextXAlignment = Enum.TextXAlignment.Left,
+                TextYAlignment = Enum.TextYAlignment.Center,
+                TextTruncate = Enum.TextTruncate.AtEnd,
+                ZIndex = 7,
+            })
+            descLbl.Parent = btn
+
+            local arrowIcon = GetIcon("chevron-right", UDim2.new(0, 12, 0, 12), theme.textDim)
+            if arrowIcon then
+                arrowIcon.AnchorPoint = Vector2.new(1, 0.5)
+                arrowIcon.Position = UDim2.new(1, -10, 0.5, 0)
+                arrowIcon.ZIndex = 7
+                arrowIcon.Parent = btn
+            end
+
+            btn.MouseEnter:Connect(function()
+                deobfTween(btn, {BackgroundColor3 = iconColor, BackgroundTransparency = 0.85}, 0.15)
+            end)
+            btn.MouseLeave:Connect(function()
+                if toolId == "hook_loadstring" and deobfHookActive then return end
+                deobfTween(btn, {BackgroundColor3 = theme.surface, BackgroundTransparency = 0.4}, 0.15)
+            end)
+            btn.MouseButton1Click:Connect(function()
+                deobfRunTool(tool.id)
+            end)
+
+            btn.Parent = toolsList
+            deobfToolButtons[tool.id] = btn
+            currentY = currentY + 62
+        end
+        currentY = currentY + 8
+    end
+
+    local toolsContentH = currentY + 12
+    toolsList.Size = UDim2.new(1, 0, 0, toolsContentH)
+    toolsScroll.CanvasSize = UDim2.new(0, 0, 0, toolsContentH)
+
+    deobfHookLogView = create("Frame", {
+        Size = UDim2.new(1, 0, 1, 0),
+        BackgroundTransparency = 1,
+        ZIndex = 4,
+        Visible = false,
+    })
+    deobfHookLogView.Parent = deobfRightPanel
+
+    local hookLogHeader = create("Frame", {
+        Size = UDim2.new(1, 0, 0, 44),
+        Position = UDim2.new(0, 0, 0, 0),
+        BackgroundTransparency = 1,
+        ZIndex = 5,
+    })
+    hookLogHeader.Parent = deobfHookLogView
+
+    local hookLogBackBtn = create("TextButton", {
+        Position = UDim2.new(0, 12, 0.5, 0),
+        AnchorPoint = Vector2.new(0, 0.5),
+        Size = UDim2.new(0, 32, 0, 32),
+        BackgroundColor3 = theme.surface,
+        BackgroundTransparency = 0.3,
+        BorderSizePixel = 0,
+        Text = "",
+        AutoButtonColor = false,
+        ZIndex = 6,
+    })
+    corner(8, hookLogBackBtn)
+    local hookBackIcon = GetIcon("chevron-left", UDim2.new(0, 14, 0, 14), theme.text)
+    if hookBackIcon then
+        hookBackIcon.AnchorPoint = Vector2.new(0.5, 0.5)
+        hookBackIcon.Position = UDim2.new(0.5, 0, 0.5, 0)
+        hookBackIcon.ZIndex = 7
+        hookBackIcon.Parent = hookLogBackBtn
+    end
+    hookLogBackBtn.Parent = hookLogHeader
+    hookLogBackBtn.MouseButton1Click:Connect(deobfShowTools)
+
+    local hookLogTitle = create("TextLabel", {
+        Position = UDim2.new(0, 52, 0, 0),
+        Size = UDim2.new(1, -120, 0, 44),
+        BackgroundTransparency = 1,
+        Text = "拦截记录",
+        TextColor3 = theme.text,
+        TextSize = 13,
+        Font = Enum.Font.SourceSansBold,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        TextYAlignment = Enum.TextYAlignment.Center,
+        ZIndex = 6,
+    })
+    hookLogTitle.Parent = hookLogHeader
+
+    local hookStatusLabel = create("TextLabel", {
+        AnchorPoint = Vector2.new(1, 0.5),
+        Position = UDim2.new(1, -16, 0.5, 0),
+        Size = UDim2.new(0, 80, 0, 24),
+        BackgroundTransparency = 1,
+        Text = "监听中",
+        TextColor3 = theme.green,
+        TextSize = 11,
+        Font = Enum.Font.SourceSansBold,
+        TextXAlignment = Enum.TextXAlignment.Right,
+        TextYAlignment = Enum.TextYAlignment.Center,
+        ZIndex = 6,
+    })
+    hookStatusLabel.Parent = hookLogHeader
+
+    deobfHookLogScroll = create("ScrollingFrame", {
+        Position = UDim2.new(0, 0, 0, 52),
+        Size = UDim2.new(1, 0, 1, -60),
+        BackgroundTransparency = 1,
+        BorderSizePixel = 0,
+        ScrollBarThickness = 3,
+        ScrollBarImageColor3 = theme.textDim,
+        CanvasSize = UDim2.new(0, 0, 0, 0),
+        ClipsDescendants = true,
+        ZIndex = 5,
+    })
+    deobfHookLogScroll.Parent = deobfHookLogView
+
+    deobfHookLogList = create("Frame", {
+        Size = UDim2.new(1, 0, 0, 0),
+        BackgroundTransparency = 1,
+        ZIndex = 6,
+    })
+    deobfHookLogList.Parent = deobfHookLogScroll
+
+    deobfRefreshFileList()
+end
+
+buildUI()
 ]===]
 
 local pageDef = {

@@ -6138,9 +6138,11 @@ local function vm_restore_user_code(decomp_result)
   local function is_global_access(e)
     if type(e) ~= "table" or e[1] ~= "index" then return false end
     local base = e[2]
-    if type(base) ~= "table" or base[1] ~= "index" then return false end
-    local base2 = base[2]
-    if type(base2) ~= "table" or base2[1] ~= "index" then return false end
+    local key = e[3]
+    if type(base) ~= "table" or base[1] ~= "var" or base[2] ~= "F" then return false end
+    if type(key) ~= "table" or key[1] ~= "index" then return false end
+    local key_base = key[2]
+    if type(key_base) ~= "table" or key_base[1] ~= "index" then return false end
     return true
   end
 
@@ -6171,6 +6173,12 @@ local function vm_restore_user_code(decomp_result)
     if k == "index" then
       if is_global_access(e) then
         local key = e[3]
+        if type(key) == "table" and key[1] == "index" then
+          local inner_key = key[3]
+          if type(inner_key) == "table" and inner_key[1] == "str" then
+            return "_G." .. inner_key[2]
+          end
+        end
         if type(key) == "table" and key[1] == "str" then return "_G." .. key[2] end
         return "_G[" .. restore_expr(key, known, depth+1) .. "]"
       end
@@ -6178,6 +6186,10 @@ local function vm_restore_user_code(decomp_result)
       if is_const then return string.format("%q", const_name) end
       local base = restore_expr(e[2], known, depth+1)
       local key = e[3]
+      local key_is_const, key_const_name = is_const_table_index(key)
+      if key_is_const and key_const_name:match("^[%a_][%w_]*$") then
+        return base .. "." .. key_const_name
+      end
       if type(key) == "table" and key[1] == "str" and key[2]:match("^[%a_][%w_]*$") then
         return base .. "." .. key[2]
       end
@@ -6199,7 +6211,10 @@ local function vm_restore_user_code(decomp_result)
             table.remove(args, 1)
             return base_str .. ":" .. mname .. "(" .. table.concat(args, ", ") .. ")"
           end
-          return base_str .. "." .. mname .. "(" .. table.concat(args, ", ") .. ")"
+          if mname:match("^[%a_][%w_]*$") then
+            return base_str .. "." .. mname .. "(" .. table.concat(args, ", ") .. ")"
+          end
+          return base_str .. "[" .. string.format("%q", mname) .. "](" .. table.concat(args, ", ") .. ")"
         end
       end
       local func_str = restore_expr(func, known, depth+1)

@@ -6371,6 +6371,14 @@ end
 
 M.deobfuscate = deobfuscate
 
+vm_user_code_patterns = {
+  "print", "warn", "error", "assert", "tostring", "tonumber", "type",
+  "game", "workspace", "script", "Instance", "Color3", "UDim2", "Vector3", "CFrame",
+  "rbxassetid", "TweenInfo", "Enum", "task", "tick", "os", "time",
+  "pairs", "ipairs", "next", "select", "unpack", "setmetatable", "getmetatable",
+  "string", "math", "table", "coroutine", "bit32",
+}
+
 function vm_has_user_feature(e, depth)
   depth = depth or 0
   if depth > 15 then return false end
@@ -6411,6 +6419,9 @@ function vm_has_user_feature(e, depth)
   return false
 end
 
+local vm_runtime_lib_funcs = {
+  string = true, math = true, table = true, os = true, bit32 = true, coroutine = true,
+}
 local vm_register_names = {
   l = true, a = true, h = true, c = true, o = true,
   V = true, v = true, W = true, z = true, K = true,
@@ -7210,6 +7221,7 @@ local vm_runtime_var_names = {
 }
 
 local function vm_is_runtime_expr(e, runtime_vars, depth)
+  runtime_vars = runtime_vars or {}
   depth = depth or 0
   if depth > 20 then return false end
   if type(e) ~= "table" then return false end
@@ -7336,6 +7348,7 @@ local function vm_is_runtime_expr(e, runtime_vars, depth)
 end
 
 local function vm_is_runtime_stmt(stmt, runtime_vars)
+  runtime_vars = runtime_vars or {}
   if type(stmt) ~= "table" then return false end
   local k = stmt[1] or stmt.tag
 

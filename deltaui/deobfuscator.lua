@@ -5126,39 +5126,38 @@ local function optimize_blocks(blocks, cont)
     local preds, succs = build_maps()
     local to_remove = {}
     for bid, b in pairs(blocks) do
-      if #b.body ~= 0 then goto continue end  -- only empty blocks
-      if #preds[bid] == 0 then goto continue end
-      local tm = b.term
-      local single_succ = nil
-      if tm and tm[1] == "jmp" and blocks[tm[2]] then
-        single_succ = tm[2]
-      elseif tm and tm[1] == "branch" and tm[3] == tm[4] and blocks[tm[3]] then
-        single_succ = tm[3]  -- degenerate branch: both paths same
-      elseif #succs[bid] == 1 and succs[bid][1] ~= bid then
-        single_succ = succs[bid][1]
+      if #b.body == 0 and #preds[bid] ~= 0 then
+        local tm = b.term
+        local single_succ = nil
+        if tm and tm[1] == "jmp" and blocks[tm[2]] then
+          single_succ = tm[2]
+        elseif tm and tm[1] == "branch" and tm[3] == tm[4] and blocks[tm[3]] then
+          single_succ = tm[3]
+        elseif #succs[bid] == 1 and succs[bid][1] ~= bid then
+          single_succ = succs[bid][1]
+        end
+        if single_succ and single_succ ~= bid and blocks[single_succ] then
+          to_remove[#to_remove+1] = {bid, single_succ}
+        end
       end
-      if single_succ and single_succ ~= bid and blocks[single_succ] then
-        to_remove[#to_remove+1] = {bid, single_succ}
-      end
-      ::continue::
     end
     if #to_remove == 0 then break end
     for _, item in ipairs(to_remove) do
       local bid, single_succ = item[1], item[2]
-      if not blocks[bid] or not blocks[single_succ] then goto skip end
-      for _, p in ipairs(preds[bid]) do
-        local pb = blocks[p]
-        if pb and pb.term then
-          if pb.term[1] == "jmp" and pb.term[2] == bid then pb.term[2] = single_succ end
-          if pb.term[1] == "branch" then
-            if pb.term[3] == bid then pb.term[3] = single_succ end
-            if pb.term[4] == bid then pb.term[4] = single_succ end
+      if blocks[bid] and blocks[single_succ] then
+        for _, p in ipairs(preds[bid]) do
+          local pb = blocks[p]
+          if pb and pb.term then
+            if pb.term[1] == "jmp" and pb.term[2] == bid then pb.term[2] = single_succ end
+            if pb.term[1] == "branch" then
+              if pb.term[3] == bid then pb.term[3] = single_succ end
+              if pb.term[4] == bid then pb.term[4] = single_succ end
+            end
           end
         end
+        blocks[bid] = nil
+        eliminated = eliminated + 1
       end
-      blocks[bid] = nil
-      eliminated = eliminated + 1
-      ::skip::
     end
   end
 
@@ -5193,11 +5192,11 @@ local function optimize_blocks(blocks, cont)
   local preds, succs = build_maps()
   local groups = {}
   for bid, b in pairs(blocks) do
-    if func_entries[bid] or entry_blocks[bid] then goto skip_group end
-    local key = block_key(b)
-    if not groups[key] then groups[key] = {} end
-    groups[key][#groups[key]+1] = bid
-    ::skip_group::
+    if not func_entries[bid] and not entry_blocks[bid] then
+      local key = block_key(b)
+      if not groups[key] then groups[key] = {} end
+      groups[key][#groups[key]+1] = bid
+    end
   end
 
   local deduped = 0
@@ -6291,22 +6290,12 @@ local function eliminate_runtime_code(body, R)
           if has_user_arg(e) then return false end
           found = true
         end
-        -- Indirect runtime calls: short-var table index like l[G](...), a[v](...)
-        if type(base)=="table" and base[1]=="var" and type(base[2])=="string" and #base[2]<=2 then
-          local has_user = false
-          for i = 3, #e do
-            if type(e[i])=="table" and (has_user_string(e[i]) or has_user_func_call(e[i])) then
-              has_user = true; break
-            end
-          end
-          if not has_user then found = true end
-        end
       end
     end
     for i = 2, #e do
       if type(e[i]) == "table" then
-        if has_user_func_call(e[i]) then return false end
         local r = has_only_runtime_funcs(e[i])
+        if r == false then return false end
         if r == true then found = true end
       end
     end
@@ -6384,14 +6373,7 @@ local function eliminate_runtime_code(body, R)
     for i = 2, #e do r[i] = type(e[i])=="table" and expr_subst(e[i], subst) or e[i] end
     return r
   end
-  local function has_tamper(e)
-    if type(e) ~= "table" then return false end
-    if e[1] == "str" and type(e[2]) == "string" and e[2]:find("Tamper", 1, true) then return true end
-    for i = 2, #e do if type(e[i]) == "table" and has_tamper(e[i]) then return true end end
-    return false
-  end
   local function is_pure_runtime(s)
-    if has_tamper(s) then return true end
     if stmt_has_user(s) then return false end
     local k = s[1] or s.tag
     if k == "callstmt" then return has_only_runtime_funcs(s[2]) == true end
@@ -6566,7 +6548,6 @@ local function CodeGen_new(decompiler, param_names, indent)
       local curmap = {}
       for i, kv in ipairs(table_node[2]) do curmap[i] = kv[2] end
       local narg, body, rest, reach = self.dc:decompile_func(cid, curmap)
-      body = eliminate_runtime_code(body, self.dc.R)
       local names = self.param_names[cid]
       if not names then
         names = {}
@@ -7364,6 +7345,33 @@ end
 -- ============================================================
 -- 公共 API
 -- ============================================================
+
+function M.deobfWeAreDevFull(code)
+  local R = deobfuscate(code)
+  
+  -- 尝试使用VM字节码解释器提取用户代码
+  local vm_ok, vm_result = pcall(function() return vm_interpret(R) end)
+  if vm_ok and vm_result and type(vm_result) == "table" and vm_result.user_stmts and #vm_result.user_stmts > 0 then
+    local has_user_feature = false
+    for _, stmt in ipairs(vm_result.user_stmts) do
+      if vm_has_user_feature(stmt) then has_user_feature = true; break end
+    end
+    if has_user_feature then
+      local user_code = vm_generate_code(vm_result)
+      if user_code and #user_code > 0 then
+        return user_code
+      end
+    end
+  end
+  
+  -- 回退到原来的反编译流程
+  local dc = Decompiler_new(R)
+  local cg = CodeGen_new(dc)
+  local result = cg:gen_top()
+  result = result:gsub("[^\n]*Tamper Detected[^\n]*\n?", "")
+  result = result:gsub("[^\n]*error%([^)]*Tamper[^)]*%)[^\n]*\n?", "")
+  return result
+end
 
 function M.deobfWeAreDevFull(code)
   local R = deobfuscate(code)

@@ -6070,6 +6070,199 @@ function vm_stmt_to_lua(stmt, indent)
   end
 end
 
+local function vm_is_user_block(block)
+  if not block or not block.body then return false end
+  local roblox_api = {
+    GetDescendants=true, FindFirstChild=true, IsA=true, BreakJoints=true,
+    ChangeState=true, GetService=true, Connect=true, wait=true, new=true,
+    FindFirstChildOfClass=true, GetChildren=true, Clone=true, Destroy=true,
+    FindFirstAncestor=true, FindFirstAncestorOfClass=true, GetFullName=true,
+    IsA=true, IsDescendantOf=true, WaitForChild=true, GetAttribute=true,
+    SetAttribute=true, GetAttributes=true, GetAttributeChangedSignal=true,
+    firetouchinterest=true, GetMass=true, GetRootPart=true,
+    GetState=true, ApplyImpulse=true, AssemblyLinearVelocity=true,
+    PivotTo=true, GetPivot=true, MoveTo=true, Move=true,
+    LookAt=true, PointToObjectSpace=true, PointToWorldSpace=true,
+    VectorToObjectSpace=true, VectorToWorldSpace=true,
+    CFrame=true, UDim2=true, UDim=true, Vector2=true, Vector3=true,
+    Color3=true, BrickColor=true, Ray=true, Region3=true,
+    TweenInfo=true, NumberRange=true, NumberSequence=true, ColorSequence=true,
+    fromRGB=true, fromHSV=true, new=true, fromNormalId=true, fromAxis=true,
+    fromEulerAnglesXYZ=true, fromEulerAnglesYXZ=true, Angles=true,
+    fromMatrix=true, fromOrientation=true, lookAt=true,
+    fromScale=true, fromOffset=true, new=true
+  }
+  for _, stmt in ipairs(block.body) do
+    local function has_user_call(e)
+      if type(e) ~= "table" then return false end
+      if e[1] == "call" or e[1] == "callstmt" then
+        local func = e[2]
+        if type(func) == "table" and func[1] == "index" then
+          local function get_func_name(f)
+            if type(f) ~= "table" then return nil end
+            if f[1] == "str" then return f[2] end
+            if f[1] == "index" then return get_func_name(f[3]) end
+            return nil
+          end
+          local fname = get_func_name(func[3])
+          if fname and roblox_api[fname] then
+            return true
+          end
+          if fname and not fname:find("^%l") and #fname > 2 then
+            local runtime_funcs = {pcall=true, xpcall=true, error=true, assert=true, 
+              tostring=true, tonumber=true, type=true, select=true, unpack=true,
+              rawget=true, rawset=true, rawequal=true, pairs=true, ipairs=true, next=true,
+              setmetatable=true, getmetatable=true, newproxy=true, loadstring=true, load=true,
+              print=true, warn=true, spawn=true, delay=true, tick=true, time=true,
+              typeof=true, gcinfo=true, collectgarbage=true, newproxy=true}
+            if not runtime_funcs[fname] then
+              return true
+            end
+          end
+        end
+      end
+      for k, v in pairs(e) do
+        if type(v) == "table" and has_user_call(v) then return true end
+      end
+      return false
+    end
+    if has_user_call(stmt) then return true end
+  end
+  return false
+end
+
+local function vm_restore_user_code(decomp_result)
+  local blocks = decomp_result.blocks
+  local user_blocks = {}
+  
+  for bid, block in pairs(blocks) do
+    if vm_is_user_block(block) then
+      table.insert(user_blocks, {bid=bid, block=block})
+    end
+  end
+  
+  table.sort(user_blocks, function(a, b) return a.bid < b.bid end)
+  
+  local function restore_expr(e)
+    if type(e) ~= "table" then return tostring(e) end
+    local k = e[1]
+    if k == "var" then return tostring(e[2])
+    elseif k == "str" then return string.format("%q", e[2])
+    elseif k == "num" then return tostring(e[2])
+    elseif k == "nil" then return "nil"
+    elseif k == "true" then return "true"
+    elseif k == "false" then return "false"
+    elseif k == "index" then
+      local base = restore_expr(e[2])
+      local key = e[3]
+      local function get_str_key(k)
+        if type(k) == "table" and k[1] == "str" then
+          return k[2]
+        end
+        if type(k) == "table" and k[1] == "index" then
+          return get_str_key(k[3])
+        end
+        return nil
+      end
+      local str_key = get_str_key(key)
+      if str_key and str_key:match("^[%a_][%w_]*$") then
+        return base .. "." .. str_key
+      end
+      if str_key then
+        return base .. "[\"" .. str_key .. "\"]"
+      end
+      return base .. "[" .. restore_expr(key) .. "]"
+    elseif k == "call" then
+      local func = e[2]
+      local args = {}
+      if type(e[3]) == "table" then
+        for i = 1, #e[3] do
+          table.insert(args, restore_expr(e[3][i]))
+        end
+      end
+      if type(func) == "table" and func[1] == "index" then
+        local base = restore_expr(func[2])
+        local key = func[3]
+        local mname = nil
+        if type(key) == "table" and key[1] == "str" then
+          mname = key[2]
+        elseif type(key) == "table" and key[1] == "index" then
+          local inner_key = key[3]
+          if type(inner_key) == "table" and inner_key[1] == "str" then
+            mname = inner_key[2]
+          end
+        end
+        if mname and #args > 0 and args[1] == base then
+          table.remove(args, 1)
+          return base .. ":" .. mname .. "(" .. table.concat(args, ", ") .. ")"
+        end
+        return base .. "." .. (mname or "?") .. "(" .. table.concat(args, ", ") .. ")"
+      end
+      return restore_expr(func) .. "(" .. table.concat(args, ", ") .. ")"
+    elseif k == "bin" then
+      return "(" .. restore_expr(e[3]) .. " " .. e[2] .. " " .. restore_expr(e[4]) .. ")"
+    elseif k == "table" then
+      return "{...}"
+    elseif k == "func" then
+      return "function(...) end"
+    else
+      return tostring(k)
+    end
+  end
+  
+  local function restore_stmt(stmt)
+    if type(stmt) ~= "table" then return nil end
+    local k = stmt[1]
+    if k == "let" or k == "setvar" then
+      return stmt[2] .. " = " .. restore_expr(stmt[3])
+    elseif k == "assign" then
+      return restore_expr(stmt[2]) .. " = " .. restore_expr(stmt[3])
+    elseif k == "callstmt" then
+      return restore_expr(stmt[2])
+    elseif k == "local" then
+      return "local " .. tostring(stmt[2])
+    else
+      return nil
+    end
+  end
+  
+  local result = {}
+  local runtime_patterns = {
+    "p%[", "alloc", "mkclosure", "pcall", "error%(", "Tamper",
+    "string%.", "math%.", "table%.", "os%.", "coroutine%.", "bit32%.",
+    "tostring", "tonumber", "type%(", "select%(", "unpack%(",
+    "rawget", "rawset", "rawequal", "pairs%(", "ipairs%(", "next%(",
+    "setmetatable", "getmetatable", "newproxy", "loadstring", "load%(",
+    "= %{%.%.%.%}", "table: 0x", "p%.?%(", "gc%(", "collectgarbage",
+    "random", "byte%(", "len%(", "gsub", "gmatch",
+    "%% 256", "%% 257", "%% 35184372088832", "%% 65536",
+    "p%.%?", "= p%.",
+    "^%w+ = t%(%w+%)$", "^%w+ = t%(%w+%)",
+    "HttpGet", "CreateWindow", ":Activate%(",
+    "^%w+ = nil$", "= nil$"
+  }
+  
+  for _, ub in ipairs(user_blocks) do
+    for _, stmt in ipairs(ub.block.body) do
+      local restored = restore_stmt(stmt)
+      if restored then
+        local is_runtime = false
+        for _, pat in ipairs(runtime_patterns) do
+          if restored:find(pat) then
+            is_runtime = true
+            break
+          end
+        end
+        if not is_runtime and #restored > 5 then
+          table.insert(result, restored)
+        end
+      end
+    end
+  end
+  
+  return result
+end
+
 function vm_interpret(decomp_result)
   local blocks = decomp_result.blocks
   local start_id = decomp_result.cont and decomp_result.cont.startid
@@ -6125,7 +6318,14 @@ function vm_interpret(decomp_result)
   }
 end
 
-function vm_generate_code(interpret_result)
+function vm_generate_code(interpret_result, decomp_result)
+  if decomp_result then
+    local user_code = vm_restore_user_code(decomp_result)
+    if #user_code > 0 then
+      return "-- 还原的用户功能逻辑:\n" .. table.concat(user_code, "\n")
+    end
+  end
+
   local lines = {}
   local constants = {}
   
@@ -6255,7 +6455,7 @@ function M.deobfWeAreDevFull(code)
       if vm_has_user_feature(stmt) then has_user_feature = true; break end
     end
     if has_user_feature then
-      local user_code = vm_generate_code(vm_result)
+      local user_code = vm_generate_code(vm_result, R)
       if user_code and #user_code > 0 then
         local rbx_count = select(2, string.gsub(user_code, "rbxassetid", ""))
         -- Quality checks: reject incomplete vm_interpret output
@@ -6297,7 +6497,7 @@ function M.deobfWeAreDevFull(code)
   if not dc_ok or not result or #result == 0 then
     -- Decompiler failed, use vm_interpret output if available
     if vm_ok and vm_result and vm_result.user_stmts and #vm_result.user_stmts > 0 then
-      result = vm_generate_code(vm_result) or ""
+      result = vm_generate_code(vm_result, R) or ""
     else
       result = ""
     end

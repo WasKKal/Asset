@@ -5927,6 +5927,9 @@ local function eliminate_runtime_code(body, R)
       if type(e[i]) == "table" then
         if has_user_string(e[i]) then return true end
         if has_user_func_call(e[i]) then return true end
+        local k = e[i][1]
+        if k == "num" or k == "str" or k == "boolean" then return true end
+        if k == "var" and type(e[i][2]) == "string" and #e[i][2] <= 2 then return true end
       end
     end
     return false

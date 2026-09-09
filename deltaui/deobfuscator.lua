@@ -6372,11 +6372,10 @@ end
 M.deobfuscate = deobfuscate
 
 vm_user_code_patterns = {
-  "print", "warn", "error", "assert", "tostring", "tonumber", "type",
+  "print", "warn",
   "game", "workspace", "script", "Instance", "Color3", "UDim2", "Vector3", "CFrame",
-  "rbxassetid", "TweenInfo", "Enum", "task", "tick", "os", "time",
-  "pairs", "ipairs", "next", "select", "unpack", "setmetatable", "getmetatable",
-  "string", "math", "table", "coroutine", "bit32",
+  "rbxassetid", "TweenInfo", "Enum", "task", "tick",
+  "wait", "spawn", "delay", "Require", "LoadLibrary",
 }
 
 function vm_has_user_feature(e, depth)
@@ -7202,7 +7201,7 @@ function M.deobfWeAreDevClean(code)
   return decompiled
 end
 
-local vm_runtime_funcs = {
+vm_runtime_funcs = {
   alloc = true, setmetatable = true, getmetatable = true, newproxy = true,
   pcall = true, xpcall = true, error = true, assert = true,
   tostring = true, tonumber = true, type = true, select = true, unpack = true,
@@ -7211,11 +7210,11 @@ local vm_runtime_funcs = {
   string = true, math = true, table = true, os = true, bit32 = true, coroutine = true,
 }
 
-local vm_special_runtime_funcs = {
+vm_special_runtime_funcs = {
   W = true,
 }
 
-local vm_runtime_var_names = {
+vm_runtime_var_names = {
   V = true, v = true, W = true, z = true, K = true,
   g = true, j = true, G = true, S = true,
 }

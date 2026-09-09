@@ -8048,6 +8048,7 @@ function M.is_runtime_stmt_pattern(stmt)
 end
 
 -- 改进的interpret_block：结合使用模式和语句模式
+function M.interpret_block_v2(block, runtime_vars)
   runtime_vars = runtime_vars or {}
   
   local rv = {}
@@ -8290,7 +8291,6 @@ local function deobfNumExprRestore(code)
     return result, count
 end
 
-end
 local function deobfUnsplitStrings(code)
     if type(code) ~= "string" or #code == 0 then return code or "", 0 end
     local result = code

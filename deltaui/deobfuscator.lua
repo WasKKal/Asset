@@ -5866,6 +5866,28 @@ function vm_expr_to_lua(e)
     if type(e[3]) == "table" and e[3][1] == "str" and isIdent(e[3][2]) then
       return base .. "." .. e[3][2]
     end
+    if type(e[3]) == "table" and e[3][1] == "str" then
+      local s = e[3][2]
+      local has_high = false
+      for i = 1, #s do
+        if s:byte(i) > 127 then has_high = true; break end
+      end
+      if has_high and type(e[2]) == "table" and e[2][1] == "index" then
+        return string.format("%q", s)
+      end
+    end
+    if type(e[3]) == "table" and e[3][1] == "index" then
+      local key_base = e[3][2]
+      local key_key = e[3][3]
+      if type(key_base) == "table" and key_base[1] == "index" and type(key_key) == "table" and key_key[1] == "str" and isIdent(key_key[2]) then
+        return base .. "." .. key_key[2]
+      end
+    end
+    if type(e[2]) == "table" and e[2][1] == "index" and type(e[2][2]) == "table" and e[2][2][1] == "var" then
+      if type(e[3]) == "table" and e[3][1] == "str" and isIdent(e[3][2]) then
+        return vm_expr_to_lua(e[2][2]) .. "." .. e[3][2]
+      end
+    end
     return base .. "[" .. key .. "]"
   elseif k == "call" then
     local func = vm_expr_to_lua(e[2])
@@ -6029,8 +6051,12 @@ function vm_generate_code(interpret_result)
   for _, stmt in ipairs(interpret_result.user_stmts) do
     local lua_code = vm_stmt_to_lua(stmt, 0)
     if lua_code then
+      if lua_code:find("^local %u = t%(") then goto continue end
+      if lua_code:find("^local %u = {nil") then goto continue end
+      if lua_code:find("^local %a = {nil") then goto continue end
       table.insert(lines, lua_code)
     end
+    ::continue::
   end
   
   return table.concat(lines, "\n")

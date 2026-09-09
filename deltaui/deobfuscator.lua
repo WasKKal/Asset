@@ -143,6 +143,7 @@ local function deobfFixForInConstAssign(src)
 end
 
 local DEOBFUSCATOR_PAGE_SOURCE = [===[
+
 __deobf = {}
 pcall(function()
     local ok, ge = pcall(function() return getgenv() end)
@@ -4475,20 +4476,25 @@ local function simplify_block(stats, posvar, retvar, decrypt, special_globals, i
         if name == posvar then
           out[#out+1] = {"setvar", name, val}
           known[name] = nil
-        elseif not special_globals[name] and isAst(val) and (val[1] == "num" or val[1] == "str") and not expr_has_call(val) then
-          known[name] = val
-        elseif role[name] == "temp" and not special_globals[name] then
+        elseif not special_globals[name] then
           local plain = try_decrypt(val, decrypt)
           if plain ~= nil then
             known[name] = {"str", plain}
-          elseif expr_has_call(val) then
-            out[#out+1] = {"let", name, val}
-            known[name] = nil
-          elseif isAst(val) and val[1] == "table" then
-            out[#out+1] = {"let", name, val}
-            known[name] = nil
-          else
+          elseif isAst(val) and (val[1] == "num" or val[1] == "str") and not expr_has_call(val) then
             known[name] = val
+          elseif role[name] == "temp" then
+            if expr_has_call(val) then
+              out[#out+1] = {"let", name, val}
+              known[name] = nil
+            elseif isAst(val) and val[1] == "table" then
+              out[#out+1] = {"let", name, val}
+              known[name] = nil
+            else
+              known[name] = val
+            end
+          else
+            out[#out+1] = {"setvar", name, val}
+            known[name] = nil
           end
         else
           out[#out+1] = {"setvar", name, val}
@@ -4513,20 +4519,25 @@ local function simplify_block(stats, posvar, retvar, decrypt, special_globals, i
       if name == posvar then
         out[#out+1] = {"setvar", name, val}
         known[name] = nil
-      elseif not special_globals[name] and isAst(val) and (val[1] == "num" or val[1] == "str") and not expr_has_call(val) then
-        known[name] = val
-      elseif role[name] == "temp" and not special_globals[name] then
+      elseif not special_globals[name] then
         local plain = try_decrypt(val, decrypt)
         if plain ~= nil then
           known[name] = {"str", plain}
-        elseif expr_has_call(val) then
-          out[#out+1] = {"setvar", name, val}
-          known[name] = nil
-        elseif isAst(val) and val[1] == "table" then
-          out[#out+1] = {"setvar", name, val}
-          known[name] = nil
-        else
+        elseif isAst(val) and (val[1] == "num" or val[1] == "str") and not expr_has_call(val) then
           known[name] = val
+        elseif role[name] == "temp" then
+          if expr_has_call(val) then
+            out[#out+1] = {"setvar", name, val}
+            known[name] = nil
+          elseif isAst(val) and val[1] == "table" then
+            out[#out+1] = {"setvar", name, val}
+            known[name] = nil
+          else
+            known[name] = val
+          end
+        else
+          out[#out+1] = {"setvar", name, val}
+          known[name] = nil
         end
       else
         out[#out+1] = {"setvar", name, val}
@@ -4535,20 +4546,25 @@ local function simplify_block(stats, posvar, retvar, decrypt, special_globals, i
     elseif k == "let" then
       local name = st[2]
       local val = sub(st[3])
-      if not special_globals[name] and isAst(val) and (val[1] == "num" or val[1] == "str") and not expr_has_call(val) then
-        known[name] = val
-      elseif role[name] == "temp" and not special_globals[name] then
+      if not special_globals[name] then
         local plain = try_decrypt(val, decrypt)
         if plain ~= nil then
           known[name] = {"str", plain}
-        elseif expr_has_call(val) then
-          out[#out+1] = {"let", name, val}
-          known[name] = nil
-        elseif isAst(val) and val[1] == "table" then
-          out[#out+1] = {"let", name, val}
-          known[name] = nil
-        else
+        elseif isAst(val) and (val[1] == "num" or val[1] == "str") and not expr_has_call(val) then
           known[name] = val
+        elseif role[name] == "temp" then
+          if expr_has_call(val) then
+            out[#out+1] = {"let", name, val}
+            known[name] = nil
+          elseif isAst(val) and val[1] == "table" then
+            out[#out+1] = {"let", name, val}
+            known[name] = nil
+          else
+            known[name] = val
+          end
+        else
+          out[#out+1] = {"let", name, val}
+          known[name] = nil
         end
       else
         out[#out+1] = {"let", name, val}
@@ -4799,10 +4815,22 @@ local function make_sema(cont)
   for n, r in pairs(cont.role) do if r == "alloc" then alloc[n] = true end end
   local free = {}
   for n, r in pairs(cont.role) do if r == "free" then free[n] = true end end
+  local gc_names = {}
+  for n, r in pairs(cont.role) do if r == "gc" then gc_names[n] = true end end
+  local emptytable_names = {}
+  for n, r in pairs(cont.role) do if r == "emptytable" then emptytable_names[n] = true end end
   local closures = cont.closures
   local vclosures = {}
   for _, n in ipairs(cont.vclosure) do vclosures[n] = true end
   local curup = cont.curupvar
+
+  local function is_strtable(base)
+    if not isAst(base) then return false end
+    if base[1] == "var" and gc_names[base[2]] then return true end
+    if base[1] == "index" and isAst(base[2]) and base[2][1] == "var" and emptytable_names[base[2][2]]
+       and isAst(base[3]) and base[3][1] == "var" and gc_names[base[3][2]] then return true end
+    return false
+  end
 
   local function rw(e)
     if not isAst(e) then return e end
@@ -4812,6 +4840,9 @@ local function make_sema(cont)
       local key = rw(e[3])
       if isAst(base) and base[1] == "var" and env_names[base[2]] and isAst(key) and key[1] == "str" then
         return {"var", key[2]}
+      end
+      if isAst(key) and key[1] == "str" and is_strtable(base) then
+        return key
       end
       return {"index", base, key}
     end
@@ -4899,6 +4930,134 @@ M.make_sema = make_sema
 M.rewrite_block = rewrite_block
 
 -- ============================================================
+-- 字符串表别名传播 pass
+-- 追踪被赋值为字符串表(C / l[C])的变量别名, 将 alias["str"] 还原为 "str"
+-- ============================================================
+local function strtable_alias_pass(blocks, cont)
+  local gc_names = {}
+  for n, r in pairs(cont.role) do if r == "gc" then gc_names[n] = true end end
+  local emptytable_names = {}
+  for n, r in pairs(cont.role) do if r == "emptytable" then emptytable_names[n] = true end end
+
+  local function is_strtable_ref(e, alias)
+    if not isAst(e) then return false end
+    if e[1] == "var" and gc_names[e[2]] then return true end
+    if e[1] == "var" and alias[e[2]] then return true end
+    if e[1] == "index" and isAst(e[2]) and e[2][1] == "var" and emptytable_names[e[2][2]]
+       and isAst(e[3]) and e[3][1] == "var" and gc_names[e[3][2]] then return true end
+    return false
+  end
+
+  local function rw_expr(e, alias, known)
+    if not isAst(e) then return e end
+    local k = e[1]
+    if k == "var" then
+      if known[e[2]] ~= nil then return known[e[2]] end
+      return e
+    end
+    if k == "index" then
+      local base = rw_expr(e[2], alias, known)
+      local key = rw_expr(e[3], alias, known)
+      if isAst(key) and key[1] == "str" then
+        -- base is string table (C / l[C] / alias): table["str"] -> "str"
+        if is_strtable_ref(base, alias) then
+          return key
+        end
+        -- base is known string variable (stale alias): str_var["str"] -> "str"
+        if isAst(base) and base[1] == "var" and known[base[2]] ~= nil then
+          return key
+        end
+        -- base is string literal: "str"["key"] -> "key"
+        if isAst(base) and base[1] == "str" then
+          return key
+        end
+      end
+      return {"index", base, key}
+    end
+    if k == "call" then
+      local fn = rw_expr(e[2], alias, known)
+      local args = {}
+      for _, a in ipairs(e[3]) do args[#args+1] = rw_expr(a, alias, known) end
+      return {"call", fn, args}
+    end
+    if k == "selfcall" then
+      local args = {}
+      for _, a in ipairs(e[4]) do args[#args+1] = rw_expr(a, alias, known) end
+      return {"selfcall", rw_expr(e[2], alias, known), e[3], args}
+    end
+    if k == "bin" then return {"bin", e[2], rw_expr(e[3], alias, known), rw_expr(e[4], alias, known)} end
+    if k == "un" then return {"un", e[2], rw_expr(e[3], alias, known)} end
+    if k == "table" then
+      local entries = {}
+      for _, a in ipairs(e[2]) do
+        if a[1] == nil then
+          entries[#entries+1] = {nil, rw_expr(a[2], alias, known)}
+        else
+          entries[#entries+1] = {rw_expr(a[1], alias, known), rw_expr(a[2], alias, known)}
+        end
+      end
+      return {"table", entries}
+    end
+    return e
+  end
+
+  local function update_known(name, val, alias, known)
+    alias[name] = nil
+    known[name] = nil
+    if is_strtable_ref(val, alias) then
+      alias[name] = true
+    elseif isAst(val) and not expr_has_call(val) then
+      known[name] = val
+    end
+  end
+
+  local function rw_stmt(s, alias, known)
+    local k = s[1]
+    if k == "let" or k == "setvar" then
+      local name = s[2]
+      local val = rw_expr(s[3], alias, known)
+      return {k, name, val}, name, val
+    elseif k == "assign" then
+      local lhs = {}
+      for _, x in ipairs(s[2]) do lhs[#lhs+1] = rw_expr(x, alias, known) end
+      local rhs = {}
+      for _, x in ipairs(s[3]) do rhs[#rhs+1] = rw_expr(x, alias, known) end
+      local name = nil
+      if #lhs == 1 and isAst(lhs[1]) and lhs[1][1] == "var" then name = lhs[1][2] end
+      return {"assign", lhs, rhs}, name, rhs[1]
+    elseif k == "local" then
+      local rhs = {}
+      for _, x in ipairs(s[3]) do rhs[#rhs+1] = rw_expr(x, alias, known) end
+      return {"local", s[2], rhs}, nil, nil
+    elseif k == "callstmt" then
+      return {"callstmt", rw_expr(s[2], alias, known)}, nil, nil
+    elseif k == "return" then
+      local rhs = {}
+      for _, x in ipairs(s[2]) do rhs[#rhs+1] = rw_expr(x, alias, known) end
+      return {"return", rhs}, nil, nil
+    else
+      return rw_expr(s, alias, known), nil, nil
+    end
+  end
+
+  for _, b in pairs(blocks) do
+    local alias = {}
+    local known = {}
+    local out = {}
+    for _, s in ipairs(b.body) do
+      local ns, name, val = rw_stmt(s, alias, known)
+      out[#out+1] = ns
+      if name ~= nil and val ~= nil then
+        update_known(name, val, alias, known)
+      end
+    end
+    b.body = out
+  end
+end
+
+M.strtable_alias_pass = strtable_alias_pass
+
+-- ============================================================
 -- Upvalue 机制还原
 -- ============================================================
 
@@ -4930,6 +5089,12 @@ local function UpvalueRestorer_new(cont, curmap)
     if k == "index" then
       local base = self:rw_expr(e[2])
       local key = self:rw_expr(e[3])
+      if isAst(base) and base[1] == "var" and base[2] == "math" then
+        if isAst(key) and key[1] == "str" and key[2] == "Parent" then
+          print("DEBUG UpvalueRestorer: 发现math.Parent!")
+          print("  self.ut=", self.ut, "self.cu=", self.cu)
+        end
+      end
       if isAst(base) and base[1] == "var" and base[2] == self.ut then
         return key
       end
@@ -6028,6 +6193,11 @@ local function eliminate_runtime_code(body, R)
   local function expr_subst(e, subst)
     if type(e) ~= "table" then return e end
     if e[1]=="var" and subst[e[2]] then return dc(subst[e[2]]) end
+    if e[1]=="index" then
+      -- 索引表达式：只替换base，不替换key（key通常是字符串字面量，不应被变量替换）
+      local base = type(e[2])=="table" and expr_subst(e[2], subst) or e[2]
+      return {"index", base, e[3]}
+    end
     local r = {e[1]}
     for i = 2, #e do r[i] = type(e[i])=="table" and expr_subst(e[i], subst) or e[i] end
     return r
@@ -6206,7 +6376,16 @@ local function CodeGen_new(decompiler, param_names, indent)
     if e[1] == "alloc" then return "nil" end
     if e[1] == "drop" then return "nil" end
     if e[1] == "free" then return self:expr(e[2]) end
-    return expr_lua(e)
+    local result = expr_lua(e)
+    if type(result) == "string" and string.find(result, "math%.Parent", 1, true) then
+      print("DEBUG CodeGen.expr: 生成math.Parent! e[1]=" .. e[1])
+      if e[1] == "index" then
+        print("  base类型=" .. (type(e[2]) == "table" and e[2][1] or type(e[2])))
+        print("  key类型=" .. (type(e[3]) == "table" and e[3][1] or type(e[3])))
+        print("  key值=" .. (type(e[3]) == "table" and tostring(e[3][2]) or ""))
+      end
+    end
+    return result
   end
   function self:_stmts(stmts, depth)
     local out = {}
@@ -6471,6 +6650,8 @@ local function deobfuscate(code, verbose)
     decryptor = function(enc, seed) return d:decrypt(enc, seed) end
   end
   local blocks, unreach, id2stats = build_cfg(vm, pv, cont.returnvar, decryptor, inliner)
+  -- 字符串表别名传播: 追踪 C/l[C] 的变量别名, 还原 alias["str"] -> "str"
+  strtable_alias_pass(blocks, cont)
   -- 语义层重写
   local rw = make_sema(cont)
   for bid, b in pairs(blocks) do
@@ -9654,6 +9835,7 @@ local function buildUI()
 end
 
 buildUI()
+
 ]===]
 
 local pageDef = {

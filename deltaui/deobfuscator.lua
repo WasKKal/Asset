@@ -6497,18 +6497,18 @@ M.deobfuscate = deobfuscate
 function M.deobfWeAreDevFull(code)
   local R = deobfuscate(code)
   
-  -- 使用VM解释器v2消除运行时代码
-  if R.blocks and M.analyze_runtime_vars_v2 and M.interpret_block_v2 then
-    local runtime_vars = M.analyze_runtime_vars_v2(R.blocks)
-    for block_id, block in pairs(R.blocks) do
-      if block.body and #block.body > 0 then
-        local user_stmts = M.interpret_block_v2(block, runtime_vars)
-        if user_stmts and #user_stmts > 0 then
-          block.body = user_stmts
-        end
-      end
-    end
-  end
+  -- VM解释器v2消除有bug，会误删用户代码（如rbxassetid），暂时禁用
+  -- if R.blocks and M.analyze_runtime_vars_v2 and M.interpret_block_v2 then
+  --   local runtime_vars = M.analyze_runtime_vars_v2(R.blocks)
+  --   for block_id, block in pairs(R.blocks) do
+  --     if block.body and #block.body > 0 then
+  --       local user_stmts = M.interpret_block_v2(block, runtime_vars)
+  --       if user_stmts and #user_stmts > 0 then
+  --         block.body = user_stmts
+  --       end
+  --     end
+  --   end
+  -- end
   
   local dc = Decompiler_new(R)
   local cg = CodeGen_new(dc)

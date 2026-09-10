@@ -6367,36 +6367,92 @@ local function vm_restore_user_code(decomp_result)
   end
 
   local result = {}
-  local known = {}
-  local block_ids = {}
-  for bid, _ in pairs(blocks) do table.insert(block_ids, bid) end
-  table.sort(block_ids)
 
-  for _, bid in ipairs(block_ids) do
+  local function parse_cond(cond)
+    if type(cond) ~= "table" then return "?" end
+    if cond[1] == "var" then return cond[2] end
+    if cond[1] == "un" and cond[2] == "not" then
+      if type(cond[3]) == "table" then
+        if cond[3][1] == "var" then return "not " .. cond[3][2] end
+      end
+      return "not ..."
+    end
+    if cond[1] == "bin" then
+      local op = cond[2]
+      local left = type(cond[3]) == "table" and (cond[3][1] == "var" and cond[3][2] or cond[3][1]) or "?"
+      local right = type(cond[4]) == "table" and (cond[4][1] == "num" and cond[4][2] or cond[4][1]) or "?"
+      return left .. " " .. op .. " " .. right
+    end
+    return cond[1]
+  end
+
+  local cfg = {}
+  for bid, block in pairs(blocks) do
+    cfg[bid] = {successors={}, predecessors={}, term=block.term}
+    if block.term then
+      local t = block.term
+      if t[1] == "jmp" and type(t[2]) == "number" then
+        table.insert(cfg[bid].successors, t[2])
+      elseif t[1] == "branch" then
+        if type(t[3]) == "number" then table.insert(cfg[bid].successors, t[3]) end
+        if type(t[4]) == "number" then table.insert(cfg[bid].successors, t[4]) end
+      end
+    end
+  end
+  for bid, info in pairs(cfg) do
+    for _, succ in ipairs(info.successors) do
+      if cfg[succ] then table.insert(cfg[succ].predecessors, bid) end
+    end
+  end
+
+  local back_edges = {}
+  local loop_headers = {}
+  local dfs_visited = {}
+  local dfs_stack = {}
+  local function dfs_detect(bid)
+    if dfs_visited[bid] then return end
+    dfs_visited[bid] = true
+    dfs_stack[bid] = true
+    local info = cfg[bid]
+    if info then
+      for _, succ in ipairs(info.successors) do
+        if dfs_stack[succ] then
+          table.insert(back_edges, {from=bid, to=succ})
+          loop_headers[succ] = true
+        end
+        dfs_detect(succ)
+      end
+    end
+    dfs_stack[bid] = nil
+  end
+  for bid, _ in pairs(cfg) do dfs_detect(bid) end
+
+  local function restore_block_stmts(bid, known)
     local block = blocks[bid]
-    if block and block.body then
-      for i, stmt in ipairs(block.body) do
+    if not block or not block.body then return {} end
+    local res = {}
+    for _, stmt in ipairs(block.body) do
+      if has_user_feature(stmt) then
         local k = stmt[1] or stmt.tag
-        if has_user_feature(stmt) then
-          local line = nil
-          if k == "let" or k == "setvar" then
-            local varname = stmt[2]
-            local val = stmt[3]
-            if type(val) == "table" then
-              local val_str = restore_expr(val, known)
-              line = varname .. " = " .. val_str
-              if val[1] == "str" or val[1] == "num" then known[varname] = val_str end
-            end
-          elseif k == "assign" then
-            local lhs = stmt[2]
-            local rhs = stmt[3]
-            if type(lhs) == "table" and type(rhs) == "table" then
-              local lhs_strs = {}
-              local rhs_strs = {}
-              for j = 1, #lhs do table.insert(lhs_strs, restore_expr(lhs[j], known)) end
-              for j = 1, #rhs do table.insert(rhs_strs, restore_expr(rhs[j], known)) end
-              line = table.concat(lhs_strs, ", ") .. " = " .. table.concat(rhs_strs, ", ")
-            end
+        local line = nil
+        if k == "let" or k == "setvar" then
+          local varname = stmt[2]
+          local val = stmt[3]
+          if type(val) == "table" then
+            local val_str = restore_expr(val, known)
+            line = varname .. " = " .. val_str
+            if val[1] == "str" or val[1] == "num" then known[varname] = val_str end
+          end
+        elseif k == "assign" then
+          local lhs = stmt[2]
+          local rhs = stmt[3]
+          if type(lhs) == "table" and type(rhs) == "table" then
+            local lhs_strs = {}
+            local rhs_strs = {}
+            for j = 1, #lhs do table.insert(lhs_strs, restore_expr(lhs[j], known)) end
+            for j = 1, #rhs do table.insert(rhs_strs, restore_expr(rhs[j], known)) end
+            line = table.concat(lhs_strs, ", ") .. " = " .. table.concat(rhs_strs, ", ")
+          end
           elseif k == "callstmt" then
             line = restore_expr(stmt[2], known)
           elseif k == "local" then
@@ -6413,15 +6469,113 @@ local function vm_restore_user_code(decomp_result)
             end
           end
           if line and #line > 3 then
-            local is_runtime = false
-            for _, pat in ipairs(runtime_patterns) do
-              if line:find(pat) then is_runtime = true; break end
-            end
-            if not is_runtime then table.insert(result, line) end
+        elseif k == "callstmt" then
+          line = restore_expr(stmt[2], known)
+        elseif k == "local" then
+          local vars = stmt[2]
+          local vals = stmt[3]
+          local var_strs = {}
+          local val_strs = {}
+          if type(vars) == "table" then for j = 1, #vars do table.insert(var_strs, tostring(vars[j])) end end
+          if type(vals) == "table" then for j = 1, #vals do table.insert(val_strs, restore_expr(vals[j], known)) end end
+          if #val_strs > 0 then
+            line = "local " .. table.concat(var_strs, ", ") .. " = " .. table.concat(val_strs, ", ")
+          else
+            line = "local " .. table.concat(var_strs, ", ")
           end
+        end
+        if line and #line > 3 then
+          local is_runtime = false
+          for _, pat in ipairs(runtime_patterns) do
+            if line:find(pat) then is_runtime = true; break end
+          end
+          if not is_runtime then table.insert(res, line) end
         end
       end
     end
+    return res
+  end
+
+  local struct_visited = {}
+  local function struct_block(bid, indent, known)
+    if struct_visited[bid] then return end
+    struct_visited[bid] = true
+
+    local info = cfg[bid]
+    if not info then return end
+
+    local term = info.term
+    local prefix = string.rep("  ", indent)
+
+    local stmts = restore_block_stmts(bid, known)
+    for _, line in ipairs(stmts) do
+      table.insert(result, prefix .. line)
+    end
+
+    if not term then return end
+
+    if term[1] == "jmp" then
+      local target = term[2]
+      if type(target) == "number" then
+        if loop_headers[target] and struct_visited[target] then
+        else
+          struct_block(target, indent, known)
+        end
+      end
+    elseif term[1] == "branch" then
+      local cond = parse_cond(term[2])
+      local true_target = term[3]
+      local false_target = term[4]
+
+      local is_while = false
+      local while_cond = cond
+      local while_body_target = nil
+
+      for _, edge in ipairs(back_edges) do
+        if edge.to == bid then
+          if edge.from == true_target then
+            is_while = true
+            while_body_target = false_target
+          elseif edge.from == false_target then
+            is_while = true
+            while_body_target = true_target
+            while_cond = "not (" .. cond .. ")"
+          end
+        end
+      end
+
+      if is_while then
+        table.insert(result, prefix .. "while " .. while_cond .. " do")
+        if while_body_target and type(while_body_target) == "number" and not struct_visited[while_body_target] then
+          struct_block(while_body_target, indent + 1, known)
+        end
+        table.insert(result, prefix .. "end")
+      else
+        table.insert(result, prefix .. "if " .. cond .. " then")
+        if true_target and type(true_target) == "number" and not struct_visited[true_target] then
+          struct_block(true_target, indent + 1, known)
+        end
+        table.insert(result, prefix .. "else")
+        if false_target and type(false_target) == "number" and not struct_visited[false_target] then
+          struct_block(false_target, indent + 1, known)
+        end
+        table.insert(result, prefix .. "end")
+      end
+    elseif term[1] == "exit" then
+    end
+  end
+
+  local entry_blocks = {}
+  for bid, info in pairs(cfg) do
+    if #info.predecessors == 0 and #info.successors > 0 then
+      table.insert(entry_blocks, bid)
+    end
+  end
+  table.sort(entry_blocks)
+
+  local known = {}
+  for _, bid in ipairs(entry_blocks) do
+    struct_block(bid, 0, known)
   end
 
   local func_map = {}
@@ -6553,6 +6707,8 @@ local function vm_restore_user_code(decomp_result)
     table.insert(organized, line)
   end
 
+  local cat_en_names = {["自动挖矿"]="AutoMine", ["自动收集"]="AutoCollect", ["传送到矿井"]="TeleportToMine", ["挖矿速度"]="MineSpeed", ["矿石类型"]="OreType", ["重置角色"]="ResetCharacter", ["无限跳跃"]="InfiniteJump"}
+
   for _, cat in ipairs(callback_order) do
     local body = {}
     if callback_bodies[cat] then
@@ -6566,9 +6722,10 @@ local function vm_restore_user_code(decomp_result)
       end
     end
     if #body > 0 then
+      local en_name = cat_en_names[cat] or cat:gsub("%s", "_")
       table.insert(organized, "")
       table.insert(organized, "-- " .. cat .. " Callback")
-      table.insert(organized, "local function " .. cat:gsub("%s", "_") .. "Callback(...)")
+      table.insert(organized, "local function " .. en_name .. "Callback(...)")
       for _, line in ipairs(body) do
         table.insert(organized, "  " .. line)
       end

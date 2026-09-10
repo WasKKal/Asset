@@ -6273,6 +6273,19 @@ local function vm_restore_user_code(decomp_result)
         if type(key) == "table" and key[1] == "str" then return "_G." .. key[2] end
         return "_G[" .. restore_expr(key, known, depth+1) .. "]"
       end
+      local base_expr = e[2]
+      local key_expr = e[3]
+      if type(base_expr) == "table" and base_expr[1] == "index" then
+        local base2 = base_expr[2]
+        local key2 = base_expr[3]
+        if type(base2) == "table" and base2[1] == "var" and base2[2] == "p" then
+          if type(key2) == "table" and key2[1] == "var" and key2[2] == "z" then
+            if type(key_expr) == "table" and key_expr[1] == "str" then
+              return string.format("%q", key_expr[2])
+            end
+          end
+        end
+      end
       local is_const, const_name = is_const_table_index(e)
       if is_const then return string.format("%q", const_name) end
       local base = restore_expr(e[2], known, depth+1)
@@ -6349,6 +6362,18 @@ local function vm_restore_user_code(decomp_result)
     if k == "str" and e[2] and user_apis[e[2]] then return true end
     if k == "var" and user_apis[e[2]] then return true end
     if is_global_access(e) then return true end
+    if k == "index" then
+      local base = e[2]
+      if type(base) == "table" and base[1] == "index" then
+        local base2 = base[2]
+        local key2 = base[3]
+        if type(base2) == "table" and base2[1] == "var" and base2[2] == "p" then
+          if type(key2) == "table" and key2[1] == "var" and key2[2] == "z" then
+            return true
+          end
+        end
+      end
+    end
     if k == "call" then
       local func = e[2]
       if type(func) == "table" then

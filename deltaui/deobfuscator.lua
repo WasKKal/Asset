@@ -6527,9 +6527,7 @@ local function vm_restore_user_code(decomp_result)
   local organized = {}
   local main_lines = {}
   for _, line in ipairs(result) do
-    if line ~= "-- 还原的用户功能逻辑:" then
-      table.insert(main_lines, line)
-    end
+    table.insert(main_lines, line)
   end
 
   local callback_flat = {["自动挖矿"]={}, ["自动收集"]={}, ["传送到矿井"]={}}
@@ -6550,17 +6548,9 @@ local function vm_restore_user_code(decomp_result)
     end
   end
 
-  local has_title = false
+  table.insert(organized, "-- 还原的用户功能逻辑:")
   for _, line in ipairs(other_lines) do
-    if line == "-- 还原的用户功能逻辑:" then has_title = true end
-  end
-  if not has_title then
-    table.insert(organized, "-- 还原的用户功能逻辑:")
-  end
-  for _, line in ipairs(other_lines) do
-    if line ~= "-- 还原的用户功能逻辑:" then
-      table.insert(organized, line)
-    end
+    table.insert(organized, line)
   end
 
   for _, cat in ipairs(callback_order) do
@@ -6648,7 +6638,7 @@ function vm_generate_code(interpret_result, decomp_result)
   if decomp_result then
     local user_code = vm_restore_user_code(decomp_result)
     if #user_code > 0 then
-      return "-- 还原的用户功能逻辑:\n" .. table.concat(user_code, "\n")
+      return table.concat(user_code, "\n")
     end
   end
 

@@ -2772,6 +2772,81 @@ local function b64_decode(s, char2val)
   return table.concat(out)
 end
 
+local function find_b85_table(code, toks)
+  if not toks then toks = lex(code) end
+  local best = nil
+  local function checkTable(i)
+    if toks[i].k ~= "OP" or toks[i].v ~= "{" then return end
+    local subtoks = {}
+    for j = i, #toks do subtoks[#subtoks+1] = toks[j] end
+    local p = Parser.new(subtoks)
+    local ok, node = pcall(function() return p:parse_table() end)
+    if not ok or not isAst(node) or node[1] ~= "table" then return end
+    local mp = {}
+    local cnt = 0
+    local ok2 = true
+    for _, kv in ipairs(node[2]) do
+      if kv[1] == nil or not isAst(kv[1]) or kv[1][1] ~= "str" or #kv[1][2] ~= 1 then
+        ok2 = false; break
+      end
+      local c = eval_const(kv[2])
+      if not c or c[1] ~= "num" then ok2 = false; break end
+      mp[kv[1][2]] = math.floor(c[2])
+      cnt = cnt + 1
+    end
+    if ok2 and cnt >= 80 then
+      local vals = {}
+      for _, v in pairs(mp) do vals[v] = true end
+      local all85 = true
+      for v = 0, 84 do if not vals[v] then all85 = false; break end end
+      if all85 then best = mp end
+    end
+  end
+  for i = 1, #toks do checkTable(i) end
+  return best
+end
+
+local function b85_decode(s, char2val)
+  s = s:sub(2)
+  local out = {}
+  local i = 1
+  local len = #s
+  while i <= len do
+    local remaining = len - i + 1
+    local chunk = remaining >= 5 and 5 or remaining
+    local M = 0
+    local ok = true
+    for j = 0, 4 do
+      local v
+      if j < chunk then
+        local ch = s:sub(i + j, i + j)
+        v = char2val[ch]
+        if not v then ok = false; break end
+      else
+        v = 84
+      end
+      M = M * 85 + v
+    end
+    if ok then
+      local b1 = math.floor(M / 16777216) % 256
+      local b2 = math.floor(M / 65536) % 256
+      local b3 = math.floor(M / 256) % 256
+      local b4 = M % 256
+      if chunk == 5 then
+        out[#out+1] = string.char(b1, b2, b3, b4)
+      elseif chunk == 4 then
+        out[#out+1] = string.char(b1, b2, b3)
+      elseif chunk == 3 then
+        out[#out+1] = string.char(b1, b2)
+      elseif chunk == 2 then
+        out[#out+1] = string.char(b1)
+      end
+    end
+    i = i + chunk
+  end
+  return table.concat(out)
+end
+
 local function recover_constants(code)
   local toks = lex(code)
   local arrvar, raw = find_const_array(code, toks)
@@ -2780,11 +2855,23 @@ local function recover_constants(code)
   local ranges = find_reverse_ranges(code, toks)
   local rev = apply_reverse(raw, ranges)
   local lookup = find_lookup_table(code, toks)
-  if not lookup then error("未找到base64字母表") end
+  local b85lookup = find_b85_table(code, toks)
+  if not lookup and not b85lookup then error("未找到base64字母表") end
   local final = {}
   for i, elem in ipairs(rev) do
-    local ok, decoded = pcall(b64_decode, elem, lookup)
-    if ok then final[i] = decoded else final[i] = elem end
+    local prefix = elem:sub(1, 1)
+    if prefix == "g" and b85lookup then
+      local ok, decoded = pcall(b85_decode, elem, b85lookup)
+      if ok then final[i] = decoded else final[i] = elem end
+    elseif prefix == "4" and lookup then
+      local ok, decoded = pcall(b64_decode, elem:sub(2), lookup)
+      if ok then final[i] = decoded else final[i] = elem end
+    elseif lookup then
+      local ok, decoded = pcall(b64_decode, elem, lookup)
+      if ok then final[i] = decoded else final[i] = elem end
+    else
+      final[i] = elem
+    end
   end
   return {arrvar=arrvar, wrapper=wname, offset=off, final=final, raw_count=#raw}
 end
@@ -2936,6 +3023,7 @@ local function brute_key8(mul45, add45, mul8, pairs)
     end
     if sc > bestscore then bestscore = sc; best = k end
   end
+  if best == nil then return nil, nil end
   return best, LcgDecryptor_new(mul45, add45, mul8, best)
 end
 
@@ -3472,13 +3560,30 @@ local function locate_block_id(tree, target)
   local node = tree
   while node[1] == "node" do
     local kind, bound, branches, right = node[2], node[3], node[4], node[5]
-    local go_left = (kind == "lt") and (target < bound) or (target <= bound)
-    if go_left then
+    local cond_true
+    if kind == "lt" then
+      cond_true = (target < bound)
+    else
+      cond_true = (target > bound)
+    end
+    if cond_true then
       node = branches[1][2]
     else
-      if right ~= nil then node = right
-      elseif #branches > 1 then node = branches[2][2]
-      else node = branches[1][2] end
+      local found = false
+      for bi = 2, #branches do
+        local c = branches[bi][1]
+        if c and type(c) == "table" then
+          local ck, cb = c[1], c[2]
+          local ct
+          if ck == "lt" then ct = (target < cb)
+          else ct = (target > cb) end
+          if ct then node = branches[bi][2]; found = true; break end
+        end
+      end
+      if not found then
+        if right ~= nil then node = right
+        else node = branches[1][2] end
+      end
     end
   end
   return node
@@ -3490,7 +3595,16 @@ local function extract_vm(code)
   if not info then error("未找到VM主函数") end
   local pv, av, uv, gv, regnames, while_idx, paren_idx, func_idx =
     info[1], info[2], info[3], info[4], info[5], info[6], info[7], info[8]
-  local dp = DispatchParser_new(toks, pv, while_idx + 3)
+  local do_idx = while_idx + 1
+  local depth = 0
+  while do_idx <= #toks do
+    local k = toks[do_idx].k
+    if k == "OP" and (toks[do_idx].v == "(" or toks[do_idx].v == "[") then depth = depth + 1
+    elseif k == "OP" and (toks[do_idx].v == ")" or toks[do_idx].v == "]") then depth = depth - 1
+    elseif k == "do" and depth == 0 then break end
+    do_idx = do_idx + 1
+  end
+  local dp = DispatchParser_new(toks, pv, do_idx + 1)
   local tree = dp:parse_node()
   local leaves = collect_leaves(tree)
 
@@ -3947,35 +4061,44 @@ local function build_cfg(vm, posvar, retvar, decrypt, inliner)
     local body, term = simplify_leaf(leaf, posvar, retvar, decrypt, inliner)
     simplified[#simplified+1] = {leaf, body, term}
   end
-  local ids = {}
-  if vm.entry ~= nil then ids[vm.entry] = true end
+  local pos_ids = {}
+  local closure_ids = {}
+  if vm.entry ~= nil then pos_ids[vm.entry] = true end
   for _, s in ipairs(simplified) do
     local leaf, body, term = s[1], s[2], s[3]
     local bid = block_body_ids(body)
-    for k in pairs(bid) do ids[k] = true end
+    for k in pairs(bid) do closure_ids[k] = true end
     if term then
-      if term[1] == "jmp" then ids[term[2]] = true
-      elseif term[1] == "branch" then ids[term[3]] = true; ids[term[4]] = true end
+      if term[1] == "jmp" then pos_ids[term[2]] = true
+      elseif term[1] == "branch" then pos_ids[term[3]] = true; pos_ids[term[4]] = true end
     end
   end
   local id2stats = {}
-  for bid in pairs(ids) do
+  for bid in pairs(pos_ids) do
     local node = locate_block_id(vm.tree, bid)
     if node and node[1] == "leaf" then id2stats[bid] = node[2] end
   end
+  local found_stats = {}
+  for bid, st in pairs(id2stats) do found_stats[st] = true end
+  for bid in pairs(closure_ids) do
+    local node = locate_block_id(vm.tree, bid)
+    if node and node[1] == "leaf" and not found_stats[node[2]] then
+      id2stats[bid] = node[2]
+      found_stats[node[2]] = true
+    end
+  end
   local stats2id = {}
   for bid, st in pairs(id2stats) do
-    stats2id[tostring(st)] = bid
+    stats2id[st] = bid
   end
   local blocks = {}
   local unreachable = {}
-  local used_ids = {}
   for _, s in ipairs(simplified) do
     local leaf, body, term = s[1], s[2], s[3]
-    local bid = stats2id[tostring(leaf.stats)]
+    local bid = stats2id[leaf.stats]
     if bid == nil then
       for id, st in pairs(id2stats) do
-        if not used_ids[id] and deep_equal(leaf.stats, st) then
+        if deep_equal(leaf.stats, st) then
           bid = id
           break
         end
@@ -3984,7 +4107,6 @@ local function build_cfg(vm, posvar, retvar, decrypt, inliner)
     if bid == nil then
       unreachable[#unreachable+1] = {leaf, body, term}
     else
-      used_ids[bid] = true
       blocks[bid] = {body=body, term=term}
     end
   end
@@ -5639,7 +5761,9 @@ local function deobfuscate(code, verbose)
     local enc_pairs = collect_enc_pairs(blocks0)
     local d
     key8, d = brute_key8(mul45, add45, mul8, enc_pairs)
-    decryptor = function(enc, seed) return d:decrypt(enc, seed) end
+    if d ~= nil then
+      decryptor = function(enc, seed) return d:decrypt(enc, seed) end
+    end
   end
   local blocks, unreach, id2stats = build_cfg(vm, pv, cont.returnvar, decryptor, inliner)
 
@@ -6321,6 +6445,18 @@ local function vm_restore_user_code(decomp_result)
           return base_str .. "[" .. string.format("%q", mname) .. "](" .. table.concat(args, ", ") .. ")"
         end
       end
+      if type(func) == "table" and func[1] == "str" then
+        local mname = func[2]
+        local args = {}
+        if type(e[3]) == "table" then
+          for i = 1, #e[3] do table.insert(args, restore_expr(e[3][i], known, depth+1)) end
+        end
+        if #args > 0 and mname:match("^[%a_][%w_]*$") then
+          local base_str = args[1]
+          table.remove(args, 1)
+          return base_str .. ":" .. mname .. "(" .. table.concat(args, ", ") .. ")"
+        end
+      end
       local func_str = restore_expr(func, known, depth+1)
       local args = {}
       if type(e[3]) == "table" then
@@ -6335,7 +6471,23 @@ local function vm_restore_user_code(decomp_result)
     if k == "or" then return restore_expr(e[2], known, depth+1) .. " or " .. restore_expr(e[3], known, depth+1) end
     if k == "table" then
       local entries = {}
-      if type(e[2]) == "table" then
+      if type(e[2]) == "table" and e[2][1] == "table" then
+        for _, entry in ipairs(e[2]) do
+          if type(entry) == "table" and #entry >= 2 then
+            local key_expr = entry[1]
+            local val_expr = entry[2]
+            local key_str = restore_expr(key_expr, known, depth+1)
+            local val_str = restore_expr(val_expr, known, depth+1)
+            if key_expr == nil or (type(key_expr) == "table" and key_expr[1] == "nil") then
+              table.insert(entries, val_str)
+            elseif type(key_expr) == "table" and key_expr[1] == "str" and type(key_expr[2]) == "string" and key_expr[2]:match("^[%a_][%w_]*$") then
+              table.insert(entries, key_expr[2] .. " = " .. val_str)
+            else
+              table.insert(entries, "[" .. key_str .. "] = " .. val_str)
+            end
+          end
+        end
+      elseif type(e[2]) == "table" then
         for _, entry in pairs(e[2]) do
           if type(entry) == "table" and #entry >= 2 then
             local key = entry[1]
@@ -6346,6 +6498,10 @@ local function vm_restore_user_code(decomp_result)
               table.insert(entries, "[" .. restore_expr(key, known, depth+1) .. "] = " .. val)
             end
           end
+        end
+      else
+        for i = 2, #e do
+          table.insert(entries, restore_expr(e[i], known, depth+1))
         end
       end
       return "{" .. table.concat(entries, ", ") .. "}"
@@ -7000,6 +7156,17 @@ function M.deobfWeAreDevFull(code)
       result = vm_generate_code(vm_result, R) or ""
     else
       result = ""
+    end
+  end
+  -- If output is too small (likely runtime-only), try vm_restore_user_code which processes all blocks including closures
+  if not result or #result < 1000 then
+    local ru_ok, ru_result = pcall(function()
+      local uc = vm_restore_user_code(R)
+      if uc and #uc > 0 then return table.concat(uc, "\n") end
+      return nil
+    end)
+    if ru_ok and ru_result and #ru_result > #result then
+      result = ru_result
     end
   end
   result = result:gsub("[^\n]*Tamper Detected[^\n]*\n?", "")

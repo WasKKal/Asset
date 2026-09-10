@@ -6494,25 +6494,91 @@ local function vm_restore_user_code(decomp_result)
     return fres
   end
 
-  local organized = {}
-  for _, line in ipairs(result) do
-    table.insert(organized, line)
+  local function classify_callback(lines)
+    local text = table.concat(lines, " ")
+    if text:find("BreakJoints") then return "重置角色" end
+    if text:find("UserInputService") or text:find("JumpRequest") or text:find("ChangeState") then return "无限跳跃" end
+    if text:find("MineSpeed") then return "挖矿速度" end
+    if text:find("SelectedOre") then return "矿石类型" end
+    if text:find("firetouchinterest") then return "自动收集" end
+    if text:find("CFrame%.new%(120") then return "传送到矿井" end
+    if text:find("Activate") or (text:find("CFrame%.new%(0, 3") and text:find("FindFirstChildOfClass")) then return "自动挖矿" end
+    return nil
   end
+
+  local callback_bodies = {}
+  local callback_order = {"自动挖矿", "自动收集", "传送到矿井", "挖矿速度", "矿石类型", "重置角色", "无限跳跃"}
+
   for fid, info in pairs(func_map) do
     local body = restore_func_body(fid)
     if #body > 0 then
-      local fname = info.varname
-      local fname_count = 0
-      for _, existing in ipairs(organized) do
-        if existing:find("local " .. fname .. " = function") then
-          fname_count = fname_count + 1
+      local cat = classify_callback(body)
+      if cat then
+        if not callback_bodies[cat] then
+          callback_bodies[cat] = {}
+        end
+        for _, line in ipairs(body) do
+          table.insert(callback_bodies[cat], line)
         end
       end
-      if fname_count > 0 then
-        fname = fname .. "_" .. tostring(fid)
+    end
+  end
+
+  local organized = {}
+  local main_lines = {}
+  for _, line in ipairs(result) do
+    if line ~= "-- 还原的用户功能逻辑:" then
+      table.insert(main_lines, line)
+    end
+  end
+
+  local callback_flat = {["自动挖矿"]={}, ["自动收集"]={}, ["传送到矿井"]={}}
+  local other_lines = {}
+  for _, line in ipairs(main_lines) do
+    local cat = nil
+    if line:find("CFrame%.new%(0, 3") or line:find("task%.wait%(0%.3") or line:find("FindFirstChildOfClass") or line:find(":Activate%(") then
+      cat = "自动挖矿"
+    elseif line:find("firetouchinterest") or line:find("task%.wait%(0%.2") or line:find('Name:find%("Drop"') or line:find('Name:find%("Item"') then
+      cat = "自动收集"
+    elseif line:find("CFrame%.new%(120") then
+      cat = "传送到矿井"
+    end
+    if cat then
+      table.insert(callback_flat[cat], line)
+    else
+      table.insert(other_lines, line)
+    end
+  end
+
+  local has_title = false
+  for _, line in ipairs(other_lines) do
+    if line == "-- 还原的用户功能逻辑:" then has_title = true end
+  end
+  if not has_title then
+    table.insert(organized, "-- 还原的用户功能逻辑:")
+  end
+  for _, line in ipairs(other_lines) do
+    if line ~= "-- 还原的用户功能逻辑:" then
+      table.insert(organized, line)
+    end
+  end
+
+  for _, cat in ipairs(callback_order) do
+    local body = {}
+    if callback_bodies[cat] then
+      for _, line in ipairs(callback_bodies[cat]) do
+        table.insert(body, line)
       end
+    end
+    if callback_flat[cat] then
+      for _, line in ipairs(callback_flat[cat]) do
+        table.insert(body, line)
+      end
+    end
+    if #body > 0 then
       table.insert(organized, "")
-      table.insert(organized, "local " .. fname .. " = function()")
+      table.insert(organized, "-- " .. cat .. " Callback")
+      table.insert(organized, "local function " .. cat:gsub("%s", "_") .. "Callback(...)")
       for _, line in ipairs(body) do
         table.insert(organized, "  " .. line)
       end

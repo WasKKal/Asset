@@ -3,7 +3,7 @@ DeltaPageInfo = {
     title = "积木编程",
     icon = "blocks",
     dataFolder = "coding_blocks",
-    version = "1.0.0",
+    version = "1.0.1",
 }
 local pageInfo = DeltaPageInfo
 
@@ -4558,6 +4558,218 @@ local function ensureDependencies()
     if not currentPage then currentPage = "" end
 end
 
+local RB_STATE_KEY = "__DeltaUIRemoteBlock"
+local RB_ITEM_H = 36
+local RB_PANEL_W = 180
+local RB_CLASSES = {RemoteEvent = true, RemoteFunction = true, UnreliableRemoteEvent = true}
+local RB_FIRE = "Fire" .. "Server"
+local RB_INVOKE = "Invoke" .. "Server"
+
+local function rbGlobal(name)
+    local ok, ref = pcall(function() return _G[name] end)
+    if ok and ref ~= nil then return ref end
+    if getfenv then
+        ok, ref = pcall(function() return getfenv()[name] end)
+        if ok and ref ~= nil then return ref end
+    end
+    return nil
+end
+
+local function rbApi(name)
+    local ref = rbGlobal(name)
+    if type(ref) == "function" then return ref end
+    return nil
+end
+
+local function rbTheme()
+    local t = rbGlobal("theme")
+    if type(t) ~= "table" then t = theme end
+    if type(t) ~= "table" then
+        t = {
+            surfaceLight = Color3.fromRGB(30, 36, 52),
+            text = Color3.fromRGB(242, 245, 252),
+            red = Color3.fromRGB(255, 82, 104),
+            green = Color3.fromRGB(57, 214, 146),
+        }
+    end
+    return t
+end
+
+local function rbNotify(msg, dur)
+    local fn = rbApi("ShowNotification")
+    if fn then pcall(fn, msg, dur or 2) end
+end
+
+local function rbTween(obj, props)
+    local svcRef = rbGlobal("svc") or svc
+    local ts = svcRef and svcRef.TweenService
+    if not ts then
+        local ok, got = pcall(function() return game:GetService("TweenService") end)
+        if ok then ts = got end
+    end
+    if not ts then return end
+    pcall(function() ts:Create(obj, TweenInfo.new(0.12), props):Play() end)
+end
+
+function rbIsRemoteClass(class)
+    return type(class) == "string" and RB_CLASSES[class] == true
+end
+
+function rbEnsureHook(state, remote)
+    if state.hooked[remote] then return true end
+    local hookmetamethodRef = rbApi("hookmetamethod")
+    local getnamecallmethodRef = rbApi("getnamecallmethod")
+    if not hookmetamethodRef or not getnamecallmethodRef then return false end
+
+    local old
+    local ok, prev = pcall(function()
+        return hookmetamethodRef(remote, "__namecall", function(self, ...)
+            if state.blocked[self] then
+                local okm, method = pcall(getnamecallmethodRef)
+                if okm and (method == RB_FIRE or method == RB_INVOKE) then
+                    return nil
+                end
+            end
+            return old(self, ...)
+        end)
+    end)
+    if not ok or type(prev) ~= "function" then return false end
+    old = prev
+    state.hooked[remote] = true
+    return true
+end
+
+function rbAppendRow(state, node, panel, rowIndex)
+    local themeRef = rbTheme()
+    local blocked = state.blocked[node] == true
+    local color = blocked and themeRef.green or themeRef.red
+    local createRef = rbApi("create")
+    if not createRef then return end
+    panel.Size = UDim2.new(0, RB_PANEL_W, 0, panel.Size.Y.Offset + RB_ITEM_H)
+
+    local row = createRef("TextButton", {
+        Name = "OBRemoteBlockRow",
+        Position = UDim2.new(0, 6, 0, 4 + (rowIndex - 1) * RB_ITEM_H),
+        Size = UDim2.new(1, -12, 0, RB_ITEM_H - 2),
+        BackgroundColor3 = themeRef.surfaceLight,
+        BackgroundTransparency = 1,
+        BorderSizePixel = 0,
+        Text = "",
+        AutoButtonColor = false,
+        ZIndex = 982,
+    })
+    local cornerRef = rbApi("corner")
+    if cornerRef then pcall(cornerRef, 8, row) end
+
+    local iconRef = rbApi("GetIcon")
+    local ic = iconRef and iconRef(blocked and "circle-check" or "ban", UDim2.new(0, 15, 0, 15), color)
+    if ic then
+        ic.Position = UDim2.new(0, 12, 0.5, -7)
+        ic.ZIndex = 983
+        ic.Parent = row
+    end
+    createRef("TextLabel", {
+        Position = UDim2.new(0, (ic and 36 or 14), 0, 0),
+        Size = UDim2.new(1, -(ic and 44 or 22), 1, 0),
+        BackgroundTransparency = 1,
+        Text = blocked and "解除阻止" or "阻止触发",
+        TextColor3 = color,
+        TextSize = 13,
+        Font = Enum.Font.SourceSans,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        ZIndex = 983,
+        Parent = row,
+    })
+
+    row.MouseEnter:Connect(function() rbTween(row, {BackgroundTransparency = 0.6}) end)
+    row.MouseLeave:Connect(function() rbTween(row, {BackgroundTransparency = 1}) end)
+    row.MouseButton1Click:Connect(function()
+        local closePanel = rbApi("obCloseContextPanel")
+        if closePanel then pcall(closePanel) end
+        local alive = (node and node.Parent ~= nil)
+        if not alive then
+            rbNotify("该对象已不存在", 2)
+            return
+        end
+        if blocked then
+            state.blocked[node] = nil
+            rbNotify("已解除阻止：" .. tostring(node.Name), 2)
+            return
+        end
+        if rbEnsureHook(state, node) then
+            state.blocked[node] = true
+            rbNotify("已阻止：" .. tostring(node.Name), 2)
+        else
+            rbNotify("阻止失败，当前执行器不支持 hookmetamethod", 3)
+        end
+    end)
+    row.Parent = panel
+end
+
+function rbCountRows(panel)
+    local n = 0
+    for _, c in ipairs(panel:GetChildren()) do
+        if c:IsA("TextButton") and c.ZIndex == 982 then n = n + 1 end
+    end
+    return n
+end
+
+function installRemoteBlockPatch()
+    local obOpenContextPanelRef = rbGlobal("obOpenContextPanel")
+    local obResolveRef = rbGlobal("obResolve")
+    if type(obOpenContextPanelRef) ~= "function" then return false end
+    if type(obResolveRef) ~= "function" then return false end
+
+    local state = rbGlobal(RB_STATE_KEY)
+    if type(state) ~= "table" then
+        state = {
+            blocked = setmetatable({}, {__mode = "k"}),
+            hooked = setmetatable({}, {__mode = "k"}),
+        }
+        pcall(function() _G[RB_STATE_KEY] = state end)
+    end
+    if state.wrapper == obOpenContextPanelRef then return true end
+
+    local original = obOpenContextPanelRef
+    local wrapper = function(data, screenX, screenY)
+        pcall(original, data, screenX, screenY)
+
+        local okP, panel = pcall(function() return rbGlobal("obContextPanel") end)
+        if not (okP and panel and panel.Parent) then return end
+        if type(data) ~= "table" or type(data.path) ~= "table" then return end
+
+        local node = obResolveRef(data.path)
+        if not node then return end
+        local class = data.class
+        if not rbIsRemoteClass(class) then
+            local okC, cls = pcall(function() return node.ClassName end)
+            if okC then class = cls end
+            if not rbIsRemoteClass(class) then return end
+        end
+
+        local okDup, exists = pcall(function() return panel:FindFirstChild("OBRemoteBlockRow") end)
+        if not (okDup and exists) then
+            rbAppendRow(state, node, panel, rbCountRows(panel) + 1)
+        end
+        local okW, obWin = pcall(function() return rbGlobal("obWindow") end)
+        if okW and obWin and obWin.Parent then
+            local okCl, clamp = pcall(function() return math.clamp end)
+            if okCl and clamp then
+                local absPos, absSize = obWin.AbsolutePosition, obWin.AbsoluteSize
+                local panelH = panel.Size.Y.Offset
+                local x = clamp(screenX - absPos.X + 12, 8, math.max(8, absSize.X - RB_PANEL_W - 8))
+                local y = clamp(screenY - absPos.Y - 4, 8, math.max(8, absSize.Y - panelH - 8))
+                panel.Position = UDim2.new(0, x, 0, y)
+            end
+        end
+    end
+
+    state.original = original
+    state.wrapper = wrapper
+    pcall(function() _G.obOpenContextPanel = wrapper end)
+    return true
+end
+
 local pageDef = {
     name = pageInfo.name,
     title = pageInfo.title,
@@ -4568,6 +4780,7 @@ local pageDef = {
 
 function pageDef.build(frame, helpers)
     ensureDependencies()
+    pcall(installRemoteBlockPatch)
     codingPage = frame
     frame.Name = pageInfo.name
 

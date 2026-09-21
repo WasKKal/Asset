@@ -1720,7 +1720,7 @@ function toggleSpyMethod()
                 return
             end
             -- use hookfunction approach
-            hookfunction(remoteEventHook, newcclosure(function()
+            hookfunction(remoteEventHook, newcclosure(function(...)
                 if not toggle then return originalEvent and originalEvent(unpack({...})) end
                 local args = {...}
                 if not args or #args == 0 then

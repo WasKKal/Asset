@@ -91,7 +91,7 @@ local hookmetamethod = hookmetamethod or (makewriteable and makereadonly and get
         return hookfunction(old[metamethod],func)
     else
         local oldmetamethod = old[metamethod]
-        makewriteable(old)
+        makewritable(old)
         old[metamethod] = func
         makereadonly(old)
         return oldmetamethod
@@ -252,7 +252,7 @@ do -- 默认位置：水平居中、贴底部，避开 DeltaUI 建造空间的�
 		Background.Position = UDim2.new(0, bx, 0, by)
 	end)
 end
-local Simple = Create("TextButton",{Parent = TopBar,BackgroundColor3 = Color3.new(1, 1, 1),AutoButtonColor = false,BackgroundTransparency = 1,Position = UDim2.new(0, 5, 0, 0),Size = UDim2.new(0, 150, 0, 18),Font = Enum.Font.SourceSansBold,Text =  "远程监控【已关闭】",TextColor3 = Color3.new(1, 1, 1),TextSize = 14,TextXAlignment = Enum.TextXAlignment.Left})
+local Simple = Create("TextButton",{Parent = TopBar,BackgroundColor3 = Color3.new(1, 1, 1),AutoButtonColor = false,BackgroundTransparency = 1,Position = UDim2.new(0, 5, 0, 0),Size = UDim2.new(0, 150, 0, 18),Font = Enum.Font.SourceSansBold,Text =  "SimpleSpy - DeltaUI【已关闭】",TextColor3 = Color3.new(1, 1, 1),TextSize = 14,TextXAlignment = Enum.TextXAlignment.Left})
 local CloseButton = Create("TextButton",{Parent = TopBar,BackgroundColor3 = Color3.new(0.145098, 0.141176, 0.14902),BorderSizePixel = 0,Position = UDim2.new(1, -19, 0, 0),Size = UDim2.new(0, 19, 0, 19),Font = Enum.Font.SourceSans,Text = "",TextColor3 = Color3.new(0, 0, 0),TextSize = 14})
 local ImageLabel = Create("ImageLabel",{Parent = CloseButton,BackgroundColor3 = Color3.new(1, 1, 1),BackgroundTransparency = 1,Position = UDim2.new(0, 5, 0, 5),Size = UDim2.new(0, 9, 0, 9),Image = "http://www.roblox.com/asset/?id=5597086202"})
 
@@ -447,7 +447,7 @@ end
 
 --- Toggles the remote spy method (when button clicked)
 local function updateToggleTitle()
-    Simple.Text = toggle and "远程监控【已开启】" or "远程监控【已关闭】"
+    Simple.Text = toggle and "SimpleSpy - DeltaUI【已开启】" or "SimpleSpy - DeltaUI【已关闭】"
 end
 
 function onToggleButtonClick()
@@ -1577,7 +1577,6 @@ function handlespecials(s, indentation)
                 i += 1
             elseif byte(char) > 126 or byte(char) < 32 then
                 resume(c, i, "\\" .. byte(char))
-                -- s = s:sub(0, i - 1) .. "\\" .. byte(char) .. s:sub(i + 1, -1)
                 i += #rawtostring(byte(char))
             end
             if i >= n * 100 then
@@ -1961,15 +1960,6 @@ end)
     )]]
 
 newButton(
-    "函数信息开关",
-    function() return string.format("[%s] 切换函数信息记录（部分游戏中可能引起卡顿）", configs.funcEnabled and "已启用" or "已停用") end,
-    function()
-        configs.funcEnabled = not configs.funcEnabled
-        TextLabel.Text = string.format("[%s] 切换函数信息记录（部分游戏中可能引起卡顿）", configs.funcEnabled and "已启用" or "已停用")
-    end
-)
-
-newButton(
     "自动屏蔽",
     function() return string.format("[%s] [Beta] 智能识别并在日志中排除刷屏的远程调用", configs.autoblock and "已启用" or "已停用") end,
     function()
@@ -2033,7 +2023,7 @@ if table.find({
     QuickCapture.Position = UDim2.new(0.529, 0, 0, 0)
     QuickCapture.Size = UDim2.new(0, 32, 0, 33)
     QuickCapture.Font = Enum.Font.SourceSansBold
-    QuickCapture.Text = "监控"
+    QuickCapture.Text = "Spy"
     QuickCapture.TextColor3 = Background.Visible and Color3.fromRGB(255, 255, 255) or Color3.fromRGB(252, 51, 51)
     QuickCapture.TextSize = 16
     QuickCapture.TextWrapped = true

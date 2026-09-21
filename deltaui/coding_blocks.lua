@@ -4238,6 +4238,26 @@ if codingEnterBtn then
         enterBuildSpace()
     end)
 
+    task.spawn(function()
+        local wasInSpace = false
+        while codingPage and codingPage.Parent do
+            task.wait(0.1)
+            local inSpace = rbGlobal("buildSpaceActive") == true
+            if wasInSpace and not inSpace then
+                if codingActionSmall and codingActionSmall.Parent then
+                    codingActionSmall.Visible = true
+                    codingFadeGroup(codingActionSmall, true, 0.34)
+                end
+                if codingRightPanel and codingRightPanel.Parent and not codingSettingsMode then
+                    codingRightPanel.Visible = true
+                    codingFadeGroup(codingRightPanel, true, 0.34)
+                end
+                codingEnterBtnFading = false
+            end
+            wasInSpace = inSpace
+        end
+    end)
+
     codingRegHoverTint(codingEnterBtn, { BackgroundColor3 = theme.accent })
     do
         codingEnterBtn.MouseEnter:Connect(function()

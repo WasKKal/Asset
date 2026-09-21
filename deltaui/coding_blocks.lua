@@ -4547,7 +4547,7 @@ create("TextLabel", {
     Position = UDim2.new(0, 16, 0, 28),
     Size = UDim2.new(0.62, -10, 0, 18),
     BackgroundTransparency = 1,
-    Text = "加载汉化版远程事件监控，仅在建造空间内显示，窗口默认停在底部中间",
+    Text = "加载汉化版远程事件监控，进入建造空间时渐显，窗口默认停在底部中间",
     TextColor3 = theme.textDim,
     TextSize = 10,
     Font = Enum.Font.SourceSans,
@@ -5097,7 +5097,7 @@ local RB_RS_URLS = {
     "https://testingcf.jsdelivr.net/gh/WasKKal/Asset@master/remotespy/main.lua",
     "https://fastly.jsdelivr.net/gh/WasKKal/Asset@master/remotespy/main.lua",
 }
-local RB_RS_BUILD = "rs-cn.4"
+local RB_RS_BUILD = "rs-cn.5"
 local RB_RS_CACHE = "Cache/RemoteSpy_main_" .. RB_RS_BUILD .. ".lua"
 local RB_RS_GUI_NAME = "KariRemoteSpyGui"
 local RB_RS_MIN_LEN = 40000
@@ -5155,10 +5155,6 @@ function rbRemoteSpyShutdown()
     end
 end
 
-local function rbBuildSpaceActive()
-    return rbGlobal("buildSpaceActive") == true
-end
-
 local function rbSpySetToggleOff()
     local setter = rbGlobal("__deltaCodingSpySetState")
     if type(setter) == "function" then pcall(setter, false) end
@@ -5176,7 +5172,7 @@ local function rbDefer(fn)
     return false
 end
 
--- 离开建造空间（或窗口被自行关闭）后同步开关状态：仅在窗口运行期间轮询，退出后线程自行结束
+-- 窗口被自行关闭后同步开关状态：仅在窗口运行期间轮询，窗口消失后线程自行结束
 function rbRemoteSpyWatchdog()
     local state = rbRemoteSpyState()
     local gen = (state.rsWatchdogGen or 0) + 1
@@ -5191,13 +5187,6 @@ function rbRemoteSpyWatchdog()
             if not shown then
                 state.rsOn = false
                 rbSpySetToggleOff()
-                break
-            end
-            if not rbBuildSpaceActive() then
-                rbRemoteSpyShutdown()
-                state.rsOn = false
-                rbSpySetToggleOff()
-                rbNotify("已退出建造空间，远程监控窗口已关闭", 2.5)
                 break
             end
             alive = rbSleep(0.5)
@@ -5285,13 +5274,7 @@ function rbSetRemoteSpyVisible(on)
         state.rsOn = false
         return false
     end
-    -- 需求：仅在进入建造空间后才显示远程监控窗口
-    if not rbBuildSpaceActive() then
-        rbNotify("请先进入建造空间，再开启远程监控", 3)
-        local setter = rbGlobal("__deltaCodingSpySetState")
-        if type(setter) == "function" then pcall(setter, false) end
-        return false
-    end
+    -- 显隐交给 RemoteSpy 自身：它在建造空间内才渐显，所以这里随时允许开启
     if state.rsBusy then return false end
     state.rsBusy = true
 

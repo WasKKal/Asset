@@ -3,7 +3,7 @@ DeltaPageInfo = {
     title = "积木编程",
     icon = "blocks",
     dataFolder = "coding_blocks",
-    version = "1.0.1",
+    version = "1.0.2",
 }
 local pageInfo = DeltaPageInfo
 
@@ -4562,8 +4562,16 @@ local RB_STATE_KEY = "__DeltaUIRemoteBlock"
 local RB_ITEM_H = 36
 local RB_PANEL_W = 180
 local RB_CLASSES = {RemoteEvent = true, RemoteFunction = true, UnreliableRemoteEvent = true}
+local RB_SCRIPT_CLASSES = {LocalScript = true, ModuleScript = true}
 local RB_FIRE = "Fire" .. "Server"
 local RB_INVOKE = "Invoke" .. "Server"
+local RB_KARI_URLS = {
+    "https://cdn.jsdelivr.net/gh/lIllIIlII/OpenSource@main/Kari&Ccat.lua",
+    "https://cdn.jsdelivr.net/gh/lIllIIlII/OpenSource/main/Kari%26Ccat.lua",
+    "https://github.com/lIllIIlII/OpenSource/raw/main/Kari&Ccat.lua",
+}
+local RB_KARI_CACHE = "Cache/KariCcat.lua"
+local RB_DATA_ROOT = "DeltaUI/PageData"
 
 local function rbGlobal(name)
     local ok, ref = pcall(function() return _G[name] end)
@@ -4588,6 +4596,8 @@ local function rbTheme()
         t = {
             surfaceLight = Color3.fromRGB(30, 36, 52),
             text = Color3.fromRGB(242, 245, 252),
+            accent = Color3.fromRGB(56, 189, 248),
+            accent2 = Color3.fromRGB(139, 92, 246),
             red = Color3.fromRGB(255, 82, 104),
             green = Color3.fromRGB(57, 214, 146),
         }
@@ -4639,16 +4649,18 @@ function rbEnsureHook(state, remote)
     return true
 end
 
-function rbAppendRow(state, node, panel, rowIndex)
+function rbAppendRow(state, node, panel, rowIndex, spec)
     local themeRef = rbTheme()
+    local isBlock = not (spec and spec.action)
+    spec = spec or {}
     local blocked = state.blocked[node] == true
-    local color = blocked and themeRef.green or themeRef.red
+    local color = spec.color or (blocked and themeRef.green or themeRef.red)
     local createRef = rbApi("create")
     if not createRef then return end
     panel.Size = UDim2.new(0, RB_PANEL_W, 0, panel.Size.Y.Offset + RB_ITEM_H)
 
     local row = createRef("TextButton", {
-        Name = "OBRemoteBlockRow",
+        Name = spec.rowName or "OBRemoteBlockRow",
         Position = UDim2.new(0, 6, 0, 4 + (rowIndex - 1) * RB_ITEM_H),
         Size = UDim2.new(1, -12, 0, RB_ITEM_H - 2),
         BackgroundColor3 = themeRef.surfaceLight,
@@ -4661,8 +4673,17 @@ function rbAppendRow(state, node, panel, rowIndex)
     local cornerRef = rbApi("corner")
     if cornerRef then pcall(cornerRef, 8, row) end
 
+    local labelText
+    if isBlock then
+        labelText = blocked and "解除阻止" or "阻止触发"
+    else
+        labelText = spec.label
+    end
+
     local iconRef = rbApi("GetIcon")
-    local ic = iconRef and iconRef(blocked and "circle-check" or "ban", UDim2.new(0, 15, 0, 15), color)
+    local iconName = spec.icon
+    if isBlock then iconName = blocked and "circle-check" or "ban" end
+    local ic = iconRef and iconName and iconRef(iconName, UDim2.new(0, 15, 0, 15), color)
     if ic then
         ic.Position = UDim2.new(0, 12, 0.5, -7)
         ic.ZIndex = 983
@@ -4672,7 +4693,7 @@ function rbAppendRow(state, node, panel, rowIndex)
         Position = UDim2.new(0, (ic and 36 or 14), 0, 0),
         Size = UDim2.new(1, -(ic and 44 or 22), 1, 0),
         BackgroundTransparency = 1,
-        Text = blocked and "解除阻止" or "阻止触发",
+        Text = labelText,
         TextColor3 = color,
         TextSize = 13,
         Font = Enum.Font.SourceSans,
@@ -4689,6 +4710,10 @@ function rbAppendRow(state, node, panel, rowIndex)
         local alive = (node and node.Parent ~= nil)
         if not alive then
             rbNotify("该对象已不存在", 2)
+            return
+        end
+        if not isBlock then
+            if spec.cb then pcall(spec.cb, node) end
             return
         end
         if blocked then
@@ -4714,7 +4739,154 @@ function rbCountRows(panel)
     return n
 end
 
-function installRemoteBlockPatch()
+function rbIsScriptClass(class)
+    return type(class) == "string" and RB_SCRIPT_CLASSES[class] == true
+end
+
+function rbSafeName(name)
+    local s = tostring(name or "script"):gsub("[^%w_%-%.]", "_")
+    if s == "" then s = "script" end
+    if #s > 40 then s = s:sub(1, 40) end
+    return s
+end
+
+function rbFolderName(state)
+    local api = state.dataApi
+    if api and api.getFolderName then
+        local ok, f = pcall(api.getFolderName)
+        if ok and type(f) == "string" and f ~= "" then return f end
+    end
+    return "coding_blocks"
+end
+
+function rbSaveRel(state, rel, content)
+    local api = state.dataApi
+    if api and api.writeFile then
+        local ok = api.writeFile(rel, content)
+        if ok then return true end
+    end
+    local full = RB_DATA_ROOT .. "/" .. rbFolderName(state) .. "/" .. rel
+    local dir = full:match("^(.*[/\\])[^/\\]*$")
+    if dir then
+        local acc = ""
+        for part in dir:gmatch("[^/\\]+") do
+            acc = acc .. "/" .. part
+            pcall(function()
+                if acc ~= "/" and not isfolder(acc) then makefolder(acc) end
+            end)
+        end
+    end
+    local ok = pcall(function() writefile(full, content) end)
+    return ok
+end
+
+function rbLoadKari(state)
+    if state.kari then return state.kari end
+    local api = state.dataApi
+    local code
+    if api and api.readFile then
+        code = api.readFile(RB_KARI_CACHE)
+    end
+    if type(code) ~= "string" or #code < 5000 then
+        for _, url in ipairs(RB_KARI_URLS) do
+            local ok, res = pcall(function() return game:HttpGet(url, true) end)
+            if ok and type(res) == "string" and #res > 5000 then
+                code = res
+                break
+            end
+            task.wait(0.3)
+        end
+        if type(code) == "string" and #code > 5000 and api and api.writeFile then
+            pcall(function() api.writeFile(RB_KARI_CACHE, code) end)
+        end
+    end
+    if type(code) ~= "string" or #code < 5000 then return nil, "反编译模块下载失败，请检查网络" end
+    local fn = loadstring(code, "KariCcat")
+    if not fn then return nil, "反编译模块加载失败" end
+    local ok, mod = pcall(fn)
+    if not ok or type(mod) ~= "table" or type(mod.decompile) ~= "function" then
+        return nil, "反编译模块初始化失败"
+    end
+    state.kari = mod
+    return mod
+end
+
+function rbDecompile(state, node, mode)
+    local gsbc = rbApi("getscriptbytecode")
+    if not gsbc then return nil, "当前执行器不支持 getscriptbytecode" end
+    local ok, bc = pcall(gsbc, node)
+    if not ok or type(bc) ~= "string" or #bc == 0 then return nil, "读取字节码失败" end
+    local mod, err = rbLoadKari(state)
+    if not mod then return nil, err end
+    local ok2, src = pcall(mod.decompile, bc, { mode = mode })
+    if not ok2 or type(src) ~= "string" or src == "" then return nil, "反编译失败" end
+    return src
+end
+
+function rbScriptSpecs(state)
+    local themeRef = rbTheme()
+
+    local function startJob(node, mode, suffix, wantClipboard)
+        if state.busy then return false end
+        state.busy = true
+        task.spawn(function()
+            local okAll, src, err = pcall(rbDecompile, state, node, mode)
+            if not okAll then
+                src, err = nil, "反编译过程出错"
+            end
+            if type(src) ~= "string" or src == "" then
+                state.busy = nil
+                rbNotify(err or "反编译失败", 3)
+                return
+            end
+            if wantClipboard then
+                local clipOk = false
+                local copyFn = rbApi("codingCopyToClipboard")
+                if copyFn then
+                    local okC, res = pcall(copyFn, src)
+                    clipOk = okC and res == true
+                end
+                state.busy = nil
+                if clipOk then
+                    rbNotify("已复制 " .. tostring(node.Name) .. " 的反编译源码", 2.5)
+                else
+                    rbNotify("剪贴板不可用，复制失败", 3)
+                end
+                return
+            end
+            local rel = "Decompiled/" .. rbSafeName(node.Name) .. "_" .. suffix .. "_"
+                .. os.date("%Y%m%d_%H%M%S") .. ".lua"
+            local okSave, saved = pcall(rbSaveRel, state, rel, src)
+            state.busy = nil
+            if okSave and saved then
+                rbNotify("已保存至 " .. RB_DATA_ROOT .. "/" .. rbFolderName(state) .. "/" .. rel, 4)
+            else
+                rbNotify("保存失败，无法写入文件", 3)
+            end
+        end)
+        return true
+    end
+
+    return {
+        {
+            label = "反编译源码并储存", icon = "file-down", color = themeRef.green,
+            rowName = "OBScriptDecSrcSave", action = "srcSave",
+            cb = function(node) startJob(node, "source", "src", false) end,
+        },
+        {
+            label = "反编译源码并复制", icon = "copy", color = themeRef.accent,
+            rowName = "OBScriptDecSrcCopy", action = "srcCopy",
+            cb = function(node) startJob(node, "source", "src", true) end,
+        },
+        {
+            label = "反编译字节并储存", icon = "binary", color = themeRef.accent2,
+            rowName = "OBScriptDecAsmSave", action = "asmSave",
+            cb = function(node) startJob(node, "asm", "asm", false) end,
+        },
+    }
+end
+
+function installRemoteBlockPatch(dataApi)
     local obOpenContextPanelRef = rbGlobal("obOpenContextPanel")
     local obResolveRef = rbGlobal("obResolve")
     if type(obOpenContextPanelRef) ~= "function" then return false end
@@ -4728,6 +4900,7 @@ function installRemoteBlockPatch()
         }
         pcall(function() _G[RB_STATE_KEY] = state end)
     end
+    if type(dataApi) == "table" then state.dataApi = dataApi end
     if state.wrapper == obOpenContextPanelRef then return true end
 
     local original = obOpenContextPanelRef
@@ -4741,16 +4914,30 @@ function installRemoteBlockPatch()
         local node = obResolveRef(data.path)
         if not node then return end
         local class = data.class
-        if not rbIsRemoteClass(class) then
+        if not (rbIsRemoteClass(class) or rbIsScriptClass(class)) then
             local okC, cls = pcall(function() return node.ClassName end)
             if okC then class = cls end
-            if not rbIsRemoteClass(class) then return end
+        end
+        local isRemote = rbIsRemoteClass(class)
+        local isScript = rbIsScriptClass(class)
+        if not (isRemote or isScript) then return end
+
+        if isRemote then
+            local okDup, exists = pcall(function() return panel:FindFirstChild("OBRemoteBlockRow") end)
+            if not (okDup and exists) then
+                rbAppendRow(state, node, panel, rbCountRows(panel) + 1)
+            end
+        else
+            local specs = rbScriptSpecs(state)
+            local firstRow = specs[1]
+            local okDup, exists = pcall(function() return panel:FindFirstChild(firstRow.rowName) end)
+            if not (okDup and exists) then
+                for _, specDef in ipairs(specs) do
+                    rbAppendRow(state, node, panel, rbCountRows(panel) + 1, specDef)
+                end
+            end
         end
 
-        local okDup, exists = pcall(function() return panel:FindFirstChild("OBRemoteBlockRow") end)
-        if not (okDup and exists) then
-            rbAppendRow(state, node, panel, rbCountRows(panel) + 1)
-        end
         local okW, obWin = pcall(function() return rbGlobal("obWindow") end)
         if okW and obWin and obWin.Parent then
             local okCl, clamp = pcall(function() return math.clamp end)
@@ -4780,7 +4967,7 @@ local pageDef = {
 
 function pageDef.build(frame, helpers)
     ensureDependencies()
-    pcall(installRemoteBlockPatch)
+    pcall(installRemoteBlockPatch, helpers and helpers.data)
     codingPage = frame
     frame.Name = pageInfo.name
 

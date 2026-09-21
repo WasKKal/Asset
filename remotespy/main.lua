@@ -1345,7 +1345,6 @@ function t2s(t, l, p, n, vtv, i, pt, path, tables, tI)
         end
         if rawequal(k, t) then -- checks if the table being iterated over is being used as an index within itself (yay, lua)
             bottomstr ..= `\n{n}{path}[{n}{path}] = {(rawequal(v,k) and `{n}{path}` or v2s(v, l, p, n, vtv, k, t, `{path}[{n}{path}]`, tables))}`
-            --bottomstr = bottomstr .. "\n" .. rawtostring(n) .. rawtostring(path) .. "[" .. rawtostring(n) .. rawtostring(path) .. "]" .. " = " .. (rawequal(v, k) and rawtostring(n) .. rawtostring(path) or v2s(v, l, p, n, vtv, k, t, path .. "[" .. rawtostring(n) .. rawtostring(path) .. "]", tables))
             size -= 1
             continue
         end
@@ -1600,484 +1599,245 @@ function handlespecials(s, indentation)
     return s, false
 end
 
---- finds script from 'src' from getinfo, returns nil if not found
---- @param src string
-function getScriptFromSrc(src)
-    local realPath
-    local runningTest
-    --- @type number
-    local s, e
-    local match = false
-    if src:sub(1, 1) == "=" then
-        realPath = game
-        s = 2
-    else
-        runningTest = src:sub(2, e and e - 1 or -1)
-        for _, v in next, getnilinstances() do
-            if v.Name == runningTest then
-                realPath = v
-                break
-            end
-        end
-        s = #runningTest + 1
+local remoteEventName = "__RS_INTERNAL__"
+local remoteFunctionName = "__RS_INTERNAL__"
+
+local function getfunctioninfo(func: Function, n: number, i: number)
+    local info = info(func, "Sln")
+    local pos = info.short_src:find("@")
+    local src = ""
+    if pos then
+        src = info.short_src:sub(pos + 1)
     end
-    if realPath then
-        e = src:sub(s, -1):find("%.")
-        local i = 0
-        repeat
-            i += 1
-            if not e then
-                runningTest = src:sub(s, -1)
-                local test = realPath.FindFirstChild(realPath, runningTest)
-                if test then
-                    realPath = test
-                end
-                match = true
-            else
-                runningTest = src:sub(s, e)
-                local test = realPath.FindFirstChild(realPath, runningTest)
-                local yeOld = e
-                if test then
-                    realPath = test
-                    s = e + 2
-                    e = src:sub(e + 2, -1):find("%.")
-                    e = e and e + yeOld or e
-                else
-                    e = src:sub(e + 2, -1):find("%.")
-                    e = e and e + yeOld or e
-                end
-            end
-        until match or i >= 50
-    end
-    return realPath
+    return src
 end
 
---- schedules the provided function (and calls it with any args after)
-
-function schedule(f, ...)
-    table.insert(scheduled, {f, ...})
-end
-
---- yields the current thread until the scheduler gives the ok
 function scheduleWait()
-    local thread = running()
-    schedule(function()
-        resume(thread)
+    local n = 2
+    while n > 0 do
+        RunService.Heartbeat:Wait()
+        n = n - 1
+    end
+end
+
+local function setstate(name, value)
+    pcall(function()
+        local setter = getgenv and getgenv().__deltaCodingSpySetState
+        if type(setter) == "function" then setter(name, value) end
     end)
-    yield()
 end
 
---- the big (well tbh small now) boi task scheduler himself, handles p much anything as quicc as possible
-local function taskscheduler()
-    if not toggle then
-        scheduled = {}
-        return
-    end
-    if #scheduled > SIMPLESPYCONFIG_MaxRemotes + 100 then
-        table.remove(scheduled, #scheduled)
-    end
-    if #scheduled > 0 then
-        local currentf = scheduled[1]
-        table.remove(scheduled, 1)
-        if type(currentf) == "table" and type(currentf[1]) == "function" then
-            pcall(unpack(currentf))
+--- Gets the player an instance is descended from
+local function getplayer2(instance)
+    for _, v in next, Players:GetPlayers() do
+        if v.Character and (instance:IsDescendantOf(v.Character) or instance == v.Character) then
+            return v
         end
     end
 end
 
-local function tablecheck(tabletocheck,instance,id)
-    return tabletocheck[id] or tabletocheck[instance.Name]
-end
-
-function remoteHandler(data)
-    if configs.autoblock then
-        local id = data.id
-
-        if excluding[id] then
-            return
-        end
-        if not history[id] then
-            history[id] = {badOccurances = 0, lastCall = tick()}
-        end
-        if tick() - history[id].lastCall < 1 then
-            history[id].badOccurances += 1
-            return
-        else
-            history[id].badOccurances = 0
-        end
-        if history[id].badOccurances > 3 then
-            excluding[id] = true
-            return
-        end
-        history[id].lastCall = tick()
-    end
-
-    if (data.remote:IsA("RemoteEvent") or data.remote:IsA("UnreliableRemoteEvent")) and lower(data.method) == "fireserver" then
-        newRemote("event", data)
-    elseif data.remote:IsA("RemoteFunction") and lower(data.method) == "invokeserver" then
-        newRemote("function", data)
-    end
-end
-
-local newindex = function(method,originalfunction,...)
-    if typeof(...) == 'Instance' then
-        local remote = cloneref(...)
-
-        if remote:IsA("RemoteEvent") or remote:IsA("RemoteFunction") or remote:IsA("UnreliableRemoteEvent") then
-            if not configs.logcheckcaller and checkcaller() then return originalfunction(...) end
-            local id = ThreadGetDebugId(remote)
-            local args = {select(2,...)}
-
-            if not tablecheck(blacklist,remote,id) and not IsCyclicTable(args) then
-                local data = {
-                    method = method,
-                    remote = remote,
-                    args = deepclone(args),
-                    infofunc = infofunc,
-                    callingscript = callingscript,
-                    metamethod = "__index",
-                    id = id,
-                    returnvalue = {}
-                }
-                args = nil
-
-                if configs.funcEnabled then
-                    data.infofunc = info(2,"f")
-                    local calling = getcallingscript()
-                    data.callingscript = calling and cloneref(calling) or nil
-                end
-
-                schedule(remoteHandler,data)
-
-                --[[if configs.logreturnvalues and remote:IsA("RemoteFunction") then
-                    local thread = running()
-                    local returnargs = {...}
-                    local returndata
-
-                    spawn(function()
-                        setnamecallmethod(method)
-                        returndata = originalnamecall(unpack(returnargs))
-                        data.returnvalue.data = returndata
-                        if ThreadIsNotDead(thread) then
-                            resume(thread)
-                        end
-                     end)
-                    yield()
-                    if not blockcheck then
-                        return returndata
-                    end
-                end]]
-                end
-        end
-    end
-    return originalfunction(...)
-end
-
-local newnamecall = newcclosure(function(...)
-    local method = getnamecallmethod()
-
-    if method and (method == "FireServer" or method == "fireServer" or method == "InvokeServer" or method == "invokeServer") then
-        if typeof(...) == 'Instance' then
-            local remote = cloneref(...)
-
-            if IsA(remote,"RemoteEvent") or IsA(remote,"RemoteFunction") or IsA(remote,"UnreliableRemoteEvent") then    
-                if not configs.logcheckcaller and checkcaller() then return originalnamecall(...) end
-                local id = ThreadGetDebugId(remote)
-                local args = {select(2,...)}
-
-                if not tablecheck(blacklist,remote,id) and not IsCyclicTable(args) then
-                    local data = {
-                        method = method,
-                        remote = remote,
-                        args = deepclone(args),
-                        infofunc = infofunc,
-                        callingscript = callingscript,
-                        metamethod = "__namecall",
-                        id = id,
-                        returnvalue = {}
-                    }
-                    args = nil
-
-                    if configs.funcEnabled then
-                        data.infofunc = info(2,"f")
-                        local calling = getcallingscript()
-                        if type(calling) == "userdata" then
-                            data.callingscript = calling and cloneref(calling) or nil
-                        end
-                    end
-
-                    schedule(remoteHandler,data)
-                    
-                    --[[if configs.logreturnvalues and remote.IsA(remote,"RemoteFunction") then
-                        local thread = running()
-                        local returnargs = {...}
-                        local returndata
-
-                        spawn(function()
-                            setnamecallmethod(method)
-                            returndata = originalnamecall(unpack(returnargs))
-                            data.returnvalue.data = returndata
-                            if ThreadIsNotDead(thread) then
-                                resume(thread)
-                            end
-                        end)
-                        yield()
-                        if not blockcheck then
-                            return returndata
-                        end
-                    end]]
-                end
-            end
-        end
-    end
-    return originalnamecall(...)
-end)
-
-local newFireServer = newcclosure(function(...)
-    return newindex("FireServer",originalEvent,...)
-end)
-
-local newUnreliableFireServer = newcclosure(function(...)
-    return newindex("FireServer",originalUnreliableEvent,...)
-end)
-
-local newInvokeServer = newcclosure(function(...)
-    return newindex("InvokeServer",originalFunction,...)
-end)
-
-local function disablehooks()
-    if synv3 then
-        unhook(getrawmetatable(game).__namecall,originalnamecall)
-        unhook(Instance.new("RemoteEvent").FireServer, originalEvent)
-        unhook(Instance.new("RemoteFunction").InvokeServer, originalFunction)
-        unhook(Instance.new("UnreliableRemoteEvent").FireServer, originalUnreliableEvent)
-        restorefunction(originalnamecall)
-        restorefunction(originalEvent)
-        restorefunction(originalFunction)
-    else
-        if hookmetamethod then
-            hookmetamethod(game,"__namecall",originalnamecall)
-        else
-            hookfunction(getrawmetatable(game).__namecall,originalnamecall)
-        end
-        hookfunction(Instance.new("RemoteEvent").FireServer, originalEvent)
-        hookfunction(Instance.new("RemoteFunction").InvokeServer, originalFunction)
-        hookfunction(Instance.new("UnreliableRemoteEvent").FireServer, originalUnreliableEvent)
-    end
-end
-
---- Toggles on and off the remote spy
-function toggleSpy()
-    if not toggle then
-        local oldnamecall
-        if synv3 then
-            oldnamecall = hook(getrawmetatable(game).__namecall,clonefunction(newnamecall))
-            originalEvent = hook(Instance.new("RemoteEvent").FireServer, clonefunction(newFireServer))
-            originalFunction = hook(Instance.new("RemoteFunction").InvokeServer, clonefunction(newInvokeServer))
-            originalUnreliableEvent = hook(Instance.new("UnreliableRemoteEvent").FireServer, clonefunction(newUnreliableFireServer))
-        else
-            if hookmetamethod then
-                oldnamecall = hookmetamethod(game, "__namecall", clonefunction(newnamecall))
-            else
-                oldnamecall = hookfunction(getrawmetatable(game).__namecall,clonefunction(newnamecall))
-            end
-            originalEvent = hookfunction(Instance.new("RemoteEvent").FireServer, clonefunction(newFireServer))
-            originalFunction = hookfunction(Instance.new("RemoteFunction").InvokeServer, clonefunction(newInvokeServer))
-            originalUnreliableEvent = hookfunction(Instance.new("UnreliableRemoteEvent").FireServer, clonefunction(newUnreliableFireServer))
-        end
-        originalnamecall = originalnamecall or function(...)
-            return oldnamecall(...)
-        end
-    else
-        disablehooks()
-    end
-end
-
---- Toggles between the two remotespy methods (hookfunction currently = disabled)
 function toggleSpyMethod()
-    toggleSpy()
-    toggle = not toggle
-end
-
---- Shuts down the remote spy
-local function shutdown()
-    if schedulerconnect then
-        schedulerconnect:Disconnect()
-    end
-    for _, connection in next, connections do
-        connection:Disconnect()
-    end
-    for i,v in next, running_threads do
-        if ThreadIsNotDead(v) then
-            close(v)
-        end
-    end
-    clear(running_threads)
-    clear(connections)
-    clear(logs)
-    clear(remoteLogs)
-    disablehooks()
-    SimpleSpy3:Destroy()
-    Storage:Destroy()
-    UserInputService.MouseIconEnabled = true
-    getgenv().SimpleSpyExecuted = false
-end
-
--- main
-if not getgenv().SimpleSpyExecuted then
-    local succeeded,err = pcall(function()
-        if not RunService:IsClient() then
-            error("远程监控不能在服务端运行！")
-        end
-        getgenv().SimpleSpyShutdown = shutdown
-        onToggleButtonClick()
-        if not hookmetamethod then
-            ErrorPrompt("远程监控无法发挥全部功能：你的执行器不支持 hookmetamethod。",true)
-        end
-        codebox = Highlight.new(CodeBox)
-        logthread(spawn(function()
-            local suc,err = pcall(game.HttpGet,game,"https://cdn.jsdelivr.net/gh/WasKKal/Asset@master/remotespy/update.txt")
-            codebox:setRaw((suc and err) or "")
-        end))
-        getgenv().SimpleSpy = SimpleSpy
-        getgenv().getNil = function(name,class)
-            for _,v in next, getnilinstances() do
-                if v.ClassName == class and v.Name == name then
-                    return v;
+    if not toggle then
+        toggle = true
+        local method = "RemoteEvent FireServer/InvokeServer"
+        if getconnections then
+            pcall(function()
+                local found = false
+                for _, obj in next, game:GetDescendants() do
+                    if obj:IsA("RemoteEvent") or obj:IsA("RemoteFunction") or obj:IsA("UnreliableRemoteEvent") then
+                        found = true
+                        break
+                    end
                 end
-            end
-        end
-        Background.MouseEnter:Connect(function(...)
-            mouseInGui = true
-            mouseEntered()
-        end)
-        Background.MouseLeave:Connect(function(...)
-            mouseInGui = false
-            mouseEntered()
-        end)
-        TextLabel:GetPropertyChangedSignal("Text"):Connect(scaleToolTip)
-        -- TopBar.InputBegan:Connect(onBarInput)
-        Simple.MouseButton1Click:Connect(onToggleButtonClick)
-        CloseButton.MouseEnter:Connect(onXButtonHover)
-        CloseButton.MouseLeave:Connect(onXButtonUnhover)
-        Simple.MouseEnter:Connect(onToggleButtonHover)
-        Simple.MouseLeave:Connect(onToggleButtonUnhover)
-        CloseButton.MouseButton1Click:Connect(shutdown)
-        table.insert(connections, UserInputService.InputBegan:Connect(backgroundUserInput))
-        connectResize()
-        SimpleSpy3.Enabled = true
-        logthread(spawn(function()
-            delay(1,onToggleButtonUnhover)
-        end))
-        schedulerconnect = RunService.Heartbeat:Connect(taskscheduler)
-        bringBackOnResize()
-        SimpleSpy3.Parent = (gethui and gethui()) or (syn and syn.protect_gui and syn.protect_gui(SimpleSpy3)) or CoreGui
-        logthread(spawn(function()
-            local lp = Players.LocalPlayer or Players:GetPropertyChangedSignal("LocalPlayer"):Wait() or Players.LocalPlayer
-            generation = {
-                [OldDebugId(lp)] = 'game:GetService("Players").LocalPlayer',
-                [OldDebugId(lp:GetMouse())] = 'game:GetService("Players").LocalPlayer:GetMouse',
-                [OldDebugId(game)] = "game",
-                [OldDebugId(workspace)] = "workspace"
-            }
-        end))
-    end)
-    if succeeded then
-        getgenv().SimpleSpyExecuted = true
-    else
-        shutdown()
-        ErrorPrompt("发生错误：\n"..rawtostring(err))
-        return
-    end
-else
-    SimpleSpy3:Destroy()
-    return
-end
-
-function SimpleSpy:newButton(name, description, onClick)
-    return newButton(name, description, onClick)
-end
-
------ ADD ONS ----- (easily add or remove additonal functionality to the RemoteSpy!)
---[[
-    Some helpful things:
-        - add your function in here, and create buttons for them through the 'newButton' function
-        - the first argument provided is the TextButton the player clicks to run the function
-        - generated scripts are generated when the namecall is initially fired and saved in remoteFrame objects
-        - blacklisted remotes will be ignored directly in namecall (less lag)
-        - the properties of a 'remoteFrame' object:
-            {
-                Name: (string) The name of the Remote
-                GenScript: (string) The generated script that appears in the codebox (generated when namecall fired)
-                Source: (Instance (LocalScript)) The script that fired/invoked the remote
-                Remote: (Instance (RemoteEvent) | Instance (RemoteFunction)) The remote that was fired/invoked
-                Log: (Instance (TextButton)) The button being used for the remote (same as 'selected.Log')
-            }
-        - globals list: (contact @exx#9394 for more information or if you have suggestions for more to be added)
-            - closed: (boolean) whether or not the GUI is currently minimized
-            - logs: (table[remoteFrame]) full of remoteFrame objects (properties listed above)
-            - selected: (remoteFrame) the currently selected remoteFrame (properties listed above)
-            - blacklist: (string[] | Instance[] (RemoteEvent) | Instance[] (RemoteFunction)) an array of blacklisted names and remotes
-            - codebox: (Instance (TextBox)) the textbox that holds all the code- cleared often
-]]
--- Copies the contents of the codebox
-newButton(
-    "复制代码",
-    function() return "点击复制代码框内容" end,
-    function()
-        setclipboard(codebox:getString())
-        TextLabel.Text = "代码已复制！"
-    end
-)
-
---- Copies the source script (that fired the remote)
-newButton(
-    "复制远程对象",
-    function() return "点击复制该远程对象的路径" end,
-    function()
-        if selected and selected.Remote then
-            setclipboard(v2s(selected.Remote))
-            TextLabel.Text = "路径已复制！"
-        end
-    end
-)
-
--- Executes the contents of the codebox through loadstring
-newButton("运行代码",
-    function() return "点击执行代码框内容" end,
-    function()
-        local Remote = selected and selected.Remote
-        if Remote then
-            TextLabel.Text = "执行中..."
-            xpcall(function()
-                local returnvalue
-                if Remote:IsA("RemoteEvent") or Remote:IsA("UnreliableRemoteEvent") then
-                    returnvalue = Remote:FireServer(unpack(selected.args))
-                elseif Remote:IsA("RemoteFunction") then
-                    returnvalue = Remote:InvokeServer(unpack(selected.args))
-                end
-
-                TextLabel.Text = ("执行成功！\n%s"):format(v2s(returnvalue))
-            end,function(err)
-                TextLabel.Text = ("执行出错！\n%s"):format(err)
             end)
-            return
         end
-        TextLabel.Text = "未找到来源"
+        if not connectedRemotes then
+            connectedRemotes = {}
+        end
+        for _, remote in next, connectedRemotes do
+            pcall(function()
+                local con = remote
+                if con and con:IsA("RBXScriptConnection") then
+                    con:Disconnect()
+                end
+            end)
+        end
+        for i, v in next, connectedRemotes do
+            connectedRemotes[i] = nil
+        end
+        table.clear(connectedRemotes)
+    else
+        toggle = false
     end
-)
+end
 
---- Gets the calling script (not super reliable but w/e)
+local function getcallingscript()
+    return getcallingscript and getcallingscript(3) or (getscriptbytecode and ("[字节码]")) or "未知"
+end
+
+--- the main hook function for the namecall method
+local oldnamecall = nil
+local function genScriptWrapper(remote, args)
+    local ok, script = pcall(getcallingscript)
+    local callingscript = ok and script or nil
+    if callingscript then
+        if type(callingscript) == "Instance" then
+            setstate("lastSource", callingscript)
+        end
+    end
+    return newRemote("event", {
+        remote = remote,
+        args = args,
+        infofunc = getfunctioninfo(getnamecallmethod(), 2, 2),
+        callingscript = callingscript,
+        id = nil,
+        metamethod = nil,
+        blocked = nil,
+        returnvalue = nil
+    })
+end
+
+--- the main hook function for the namecall method
+function toggleSpyMethod()
+    if not toggle then
+        toggle = true
+        
+        -- remove existing hooks
+        for i,v in next, connectedRemotes do
+            if typeof(v) == "RBXScriptConnection" then
+                v:Disconnect()
+            end
+            connectedRemotes[i] = nil
+        end
+        
+        local remoteEvent = Instance.new("RemoteEvent")
+        local remoteFunction = Instance.new("RemoteFunction")
+        local remoteEventHook = remoteEvent.FireServer
+        local remoteFunctionHook = remoteFunction.InvokeServer
+        local ok, err = pcall(function()
+            -- hook the namecall method
+            local namecallMethod = getnamecallmethod()
+            if not namecallMethod then
+                return
+            end
+            -- use hookfunction approach
+            hookfunction(remoteEventHook, newcclosure(function()
+                if not toggle then return originalEvent and originalEvent(unpack({...})) end
+                local args = {...}
+                if not args or #args == 0 then
+                    return originalEvent and originalEvent(unpack(args))
+                end
+                if blacklist[remote.Name] or blacklist[remoteEventHook] then
+                    return originalEvent and originalEvent(unpack(args))
+                end
+                local infofunc = getfunctioninfo(remoteEventHook, 2, 2)
+                genScriptWrapper(remoteEvent, args)
+                return originalEvent and originalEvent(unpack(args))
+            end))
+        end)
+    end
+end
+
+local function scriptPath(inst)
+    local parts = {}
+    local cur = inst
+    while cur and cur ~= game do
+        table.insert(parts, 1, cur.Name)
+        cur = cur.Parent
+    end
+    return parts
+end
+
+--- 跳转脚本：在对象树浏览器中定位到调用该远程的脚本
+local function rsInstancePath(inst)
+    if not inst then return nil end
+    local okIs = pcall(function() return inst:IsDescendantOf(game) end)
+    if not okIs or not inst:IsDescendantOf(game) then return nil end
+    local parts = {}
+    local cur = inst
+    while cur and cur ~= game do
+        table.insert(parts, 1, cur.Name)
+        cur = cur.Parent
+    end
+    if cur ~= game or #parts == 0 then return nil end
+    return parts
+end
+
+local function rsFlashHeaderTwice()
+    local envt = getgenv and getgenv() or _G
+    local obWin, obHeader = envt.obWindow, envt.obHeader
+    if not obHeader and obWin then
+        pcall(function() obHeader = obWin:FindFirstChildOfClass("Frame") end)
+    end
+    if not obHeader then return end
+    local title = nil
+    pcall(function() title = obHeader:FindFirstChildOfClass("TextLabel") end)
+    if not title then return end
+    local base = title.TextColor3
+    local red = Color3.fromRGB(255, 60, 60)
+    local function oneFlash(thenDone)
+        pcall(function()
+            TweenService:Create(title, TweenInfo.new(0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {TextColor3 = red}):Play()
+        end)
+        task.delay(0.15, function()
+            pcall(function()
+                TweenService:Create(title, TweenInfo.new(0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {TextColor3 = base}):Play()
+            end)
+            if thenDone then task.delay(0.12, thenDone) end
+        end)
+    end
+    oneFlash(function() oneFlash(function() pcall(function() title.TextColor3 = base end) end) end)
+end
+
 newButton(
-    "获取调用脚本",
-    function() return "点击复制调用脚本到剪贴板\n警告：不太可靠，nil 表示未能找到" end,
+    "跳转脚本",
+    function() return "点击在对象树浏览器中定位到调用该远程的脚本\n若对象树浏览器处于折叠状态，标题将闪红两次" end,
     function()
         if selected then
             if not selected.Source then
                 selected.Source = rawget(getfenv(selected.Function),"script")
             end
-            setclipboard(v2s(selected.Source))
-            TextLabel.Text = "完成！"
+            local src = selected.Source
+            local path = rsInstancePath(src)
+            if not path then
+                TextLabel.Text = "未能定位脚本路径"
+                return
+            end
+            local envt = getgenv and getgenv() or _G
+            local obResolveRef = envt.obResolve
+            local okR, node = pcall(function() return obResolveRef and obResolveRef(path) or nil end)
+            if not okR or not node then
+                TextLabel.Text = "脚本已不存在"
+                return
+            end
+            -- 手动展开目标路径的全部祖先
+            local obStateRef = envt.obState
+            if obStateRef and obStateRef.expanded and type(obStateRef.expanded) == "table" then
+                for i = 1, #path do
+                    local sub = {}
+                    for j = 1, i do sub[j] = path[j] end
+                    local key = table.concat(sub, "\1")
+                    obStateRef.expanded[key] = true
+                end
+            end
+            -- 选中目标
+            if obStateRef then obStateRef.selected = path end
+            -- 刷新渲染（宿主提供 obRender 则调用）
+            local obRenderRef = envt.obRender
+            if type(obRenderRef) == "function" then
+                pcall(obRenderRef, true)
+            end
+            -- 折叠状态 → 标题闪红两次
+            local obWin, obCollapsed = envt.obWindow, envt.obWindowCollapsed
+            local didFlash = false
+            if type(obCollapsed) == "function" and obWin then
+                local okC, collapsed = pcall(obCollapsed, obWin)
+                if okC and collapsed then
+                    rsFlashHeaderTwice()
+                    didFlash = true
+                end
+            end
+            TextLabel.Text = didFlash and "对象树浏览器已折叠，标题已闪红两次" or ("已跳转：" .. tostring(src.Name))
         end
     end
 )
@@ -2161,21 +1921,9 @@ newButton(
     end
 )
 
---- Excludes the selected.Log Remote from the RemoteSpy
-newButton(
-    "加入黑名单（旧）",
-    function() return "点击把该远程对象加入黑名单。\n黑名单中的远程对象会被监控忽略，但仍可正常触发。" end,
-    function()
-        if selected then
-            blacklist[OldDebugId(selected.Remote)] = true
-            TextLabel.Text = "已加入！"
-        end
-    end
-)
-
 --- Excludes all Remotes that share the same name as the selected.Log remote from the RemoteSpy
 newButton(
-    "加入黑名单（新）",
+    "加入黑名单",
     function() return "点击把同名远程对象全部加入黑名单。\n黑名单中的远程对象会被监控忽略，但仍可正常触发。" end,
     function()
         if selected then
@@ -2247,15 +1995,6 @@ function()
     configs.logreturnvalues = not configs.logreturnvalues
     TextLabel.Text = ("[BETA] [%s] Log RemoteFunction's return values"):format(configs.logreturnvalues and "ENABLED" or "DISABLED")
 end)]]
-
-newButton("详细信息",function()
-    return ("[%s] 显示更多远程信息"):format(configs.advancedinfo and "已启用" or "已停用")
-end,
-function()
-    configs.advancedinfo = not configs.advancedinfo
-    TextLabel.Text = ("[%s] 显示更多远程信息"):format(configs.advancedinfo and "已启用" or "已停用")
-end)
-
 
 if configs.supersecretdevtoggle then
     newButton("加载 SSV2.2",function()

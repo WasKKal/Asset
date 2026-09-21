@@ -4547,7 +4547,7 @@ create("TextLabel", {
     Position = UDim2.new(0, 16, 0, 28),
     Size = UDim2.new(0.62, -10, 0, 18),
     BackgroundTransparency = 1,
-    Text = "加载汉化版远程事件监控，进入建造空间时渐显，窗口默认停在底部中间",
+    Text = "开关会被记住；进入建造空间时才加载并渐显，窗口默认停在底部中间",
     TextColor3 = theme.textDim,
     TextSize = 10,
     Font = Enum.Font.SourceSans,
@@ -4564,16 +4564,24 @@ csSpyToggle, csSpyGetState, csSpySetState = makeToggle(csSpyRow, false, function
         end
     end)
     pcall(function()
-        if rbSetRemoteSpyVisible then
+        if rbRemoteSpyRequestLoad then
+            rbRemoteSpyRequestLoad(spyState and true or false)
+        elseif rbSetRemoteSpyVisible then
             rbSetRemoteSpyVisible(spyState and true or false)
         end
     end)
-end)
+end, "remoteSpy")
 __deltaCodingSpySetState = function(spyTarget)
     if csSpySetState then
         csSpySetState(spyTarget and true or false)
     end
 end
+pcall(function()
+    -- 该开关带配置持久化，重新进入页面时可能已经是开启态
+    if csSpyGetState and csSpyGetState() then
+        rbStyleToggle(csSpyToggle, true)
+    end
+end)
 csSpyRow.Parent = csCard
 
 function codingPreviewTypeGet()
@@ -5314,6 +5322,79 @@ function rbSetRemoteSpyVisible(on)
     return false
 end
 
+-- ===== 建造空间与远程监控加载策略 =====
+-- 开关状态由 DeltaUI 配置持久化（remoteSpy）；RemoteSpy 本体只在进入建造空间时才
+-- loadstring 加载，加载后由它自己渐显；离开建造空间时它自行隐藏，不需要在这里关停。
+local function rbBuildSpaceActive()
+    return rbGlobal("buildSpaceActive") == true
+end
+
+function rbRemoteSpyWanted()
+    local wanted = false
+    pcall(function()
+        local lc = rbGlobal("loadConfig")
+        if type(lc) == "function" then
+            local cfg = lc()
+            wanted = type(cfg) == "table" and cfg.remoteSpy == true
+        end
+    end)
+    return wanted == true
+end
+
+function rbRemoteSpyRunning()
+    local state = rbRemoteSpyState()
+    if state.rsOn then return true end
+    if rbRemoteSpyFindGui() then return true end
+    local envt = rbGenv()
+    return (envt and envt.SimpleSpyExecuted) and true or false
+end
+
+-- 开关拨动入口：在空间内立即加载，空间外只保留已保存的偏好
+function rbRemoteSpyRequestLoad(on)
+    if not on then
+        rbSetRemoteSpyVisible(false)
+        return false
+    end
+    if rbBuildSpaceActive() then
+        return rbSetRemoteSpyVisible(true)
+    end
+    if rbRemoteSpyRunning() then return true end
+    rbNotify("已保存设置：进入建造空间后再加载远程监控窗口", 2.5)
+    return true
+end
+
+-- 进入建造空间的那一刻补上加载（启动阶段绝不 loadstring RemoteSpy）
+function rbRemoteSpyAutoLoadWatch()
+    local state = rbRemoteSpyState()
+    if state.rsAutoWatching then return end
+    state.rsAutoWatching = true
+    rbDefer(function()
+        local inSpace = rbBuildSpaceActive()
+        if inSpace and rbRemoteSpyWanted() and not rbRemoteSpyRunning() then
+            rbSetRemoteSpyVisible(true)
+        end
+        local looping = true
+        while looping do
+            looping = rbSleep(0.25)
+            local alive = false
+            pcall(function()
+                local pg = rbGlobal("codingPage")
+                alive = (pg ~= nil and pg.Parent ~= nil)
+            end)
+            if not alive then
+                state.rsAutoWatching = nil
+                return
+            end
+            local now = rbBuildSpaceActive()
+            if now and not inSpace and rbRemoteSpyWanted() and not rbRemoteSpyRunning() then
+                rbSetRemoteSpyVisible(true)
+            end
+            inSpace = now
+        end
+        state.rsAutoWatching = nil
+    end)
+end
+
 local pageDef = {
     name = pageInfo.name,
     title = pageInfo.title,
@@ -5341,6 +5422,9 @@ function pageDef.build(frame, helpers)
     if not ok then
         return
     end
+
+    -- 开关可能已在上一次会话里保存为开启：这里只启动巡检线程，不加载 RemoteSpy 本体
+    rbRemoteSpyAutoLoadWatch()
 end
 
 local function register()

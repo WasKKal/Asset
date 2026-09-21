@@ -5138,10 +5138,10 @@ end
 
 local RB_RS_URLS = {
     "https://raw.githubusercontent.com/WasKKal/Asset/master/remotespy/main.lua",
-    "https://cdn.jsdelivr.net/gh/WasKKal/Asset@7a0dc5157f40f1a3616572787a57d92ae16c9e1d/remotespy/main.lua",
+    "https://cdn.jsdelivr.net/gh/WasKKal/Asset@7afd68ec9a661be37e796072e6e2f506f6e2be96/remotespy/main.lua",
     "https://raw.githack.com/WasKKal/Asset/master/remotespy/main.lua",
 }
-local RB_RS_BUILD = "rs-cn.9"
+local RB_RS_BUILD = "rs-cn.10"
 local RB_RS_CACHE = "Cache/RemoteSpy_main_" .. RB_RS_BUILD .. ".lua"
 local RB_RS_GUI_NAME = "KariRemoteSpyGui"
 local RB_RS_MIN_LEN = 40000

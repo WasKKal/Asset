@@ -5,7 +5,8 @@
 -- Highlight/DataToCode/update 子依赖改由 WasKKal/Asset 经 jsDelivr 拉取；
 -- ScreenGui/主框架固定命名，便于集成方查找与避让。
 -- 与 DeltaUI 对象树重复的功能已移除（屏蔽 / 清空屏蔽列表 / 反编译）。
--- 集成构建标记：rs-cn.3
+-- 顶部栏移除最小化按钮；隐藏切换按钮在首次隐藏前不显示；移除加入 Discord 按钮。
+-- 集成构建标记：rs-cn.4
 
 if getgenv().SimpleSpyExecuted and type(getgenv().SimpleSpyShutdown) == "function" then
     getgenv().SimpleSpyShutdown()
@@ -253,10 +254,8 @@ end
 local Simple = Create("TextButton",{Parent = TopBar,BackgroundColor3 = Color3.new(1, 1, 1),AutoButtonColor = false,BackgroundTransparency = 1,Position = UDim2.new(0, 5, 0, 0),Size = UDim2.new(0, 57, 0, 18),Font = Enum.Font.SourceSansBold,Text =  "远程监控",TextColor3 = Color3.new(1, 1, 1),TextSize = 14,TextXAlignment = Enum.TextXAlignment.Left})
 local CloseButton = Create("TextButton",{Parent = TopBar,BackgroundColor3 = Color3.new(0.145098, 0.141176, 0.14902),BorderSizePixel = 0,Position = UDim2.new(1, -19, 0, 0),Size = UDim2.new(0, 19, 0, 19),Font = Enum.Font.SourceSans,Text = "",TextColor3 = Color3.new(0, 0, 0),TextSize = 14})
 local ImageLabel = Create("ImageLabel",{Parent = CloseButton,BackgroundColor3 = Color3.new(1, 1, 1),BackgroundTransparency = 1,Position = UDim2.new(0, 5, 0, 5),Size = UDim2.new(0, 9, 0, 9),Image = "http://www.roblox.com/asset/?id=5597086202"})
-local MaximizeButton = Create("TextButton",{Parent = TopBar,BackgroundColor3 = Color3.new(0.145098, 0.141176, 0.14902),BorderSizePixel = 0,Position = UDim2.new(1, -38, 0, 0),Size = UDim2.new(0, 19, 0, 19),Font = Enum.Font.SourceSans,Text = "",TextColor3 = Color3.new(0, 0, 0),TextSize = 14})
+local MaximizeButton = Create("TextButton",{Visible = false,Parent = TopBar,BackgroundColor3 = Color3.new(0.145098, 0.141176, 0.14902),BorderSizePixel = 0,Position = UDim2.new(1, -38, 0, 0),Size = UDim2.new(0, 19, 0, 19),Font = Enum.Font.SourceSans,Text = "",TextColor3 = Color3.new(0, 0, 0),TextSize = 14})
 local ImageLabel_2 = Create("ImageLabel",{Parent = MaximizeButton,BackgroundColor3 = Color3.new(1, 1, 1),BackgroundTransparency = 1,Position = UDim2.new(0, 5, 0, 5),Size = UDim2.new(0, 9, 0, 9),Image = "http://www.roblox.com/asset/?id=5597108117"})
-local MinimizeButton = Create("TextButton",{Parent = TopBar,BackgroundColor3 = Color3.new(0.145098, 0.141176, 0.14902),BorderSizePixel = 0,Position = UDim2.new(1, -57, 0, 0),Size = UDim2.new(0, 19, 0, 19),Font = Enum.Font.SourceSans,Text = "",TextColor3 = Color3.new(0, 0, 0),TextSize = 14})
-local ImageLabel_3 = Create("ImageLabel",{Parent = MinimizeButton,BackgroundColor3 = Color3.new(1, 1, 1),BackgroundTransparency = 1,Position = UDim2.new(0, 5, 0, 5),Size = UDim2.new(0, 9, 0, 9),Image = "http://www.roblox.com/asset/?id=5597105827"})
 
 local ToolTip = Create("Frame",{Parent = SimpleSpy3,BackgroundColor3 = Color3.fromRGB(26, 26, 26),BackgroundTransparency = 0.1,BorderColor3 = Color3.new(1, 1, 1),Size = UDim2.new(0, 200, 0, 50),ZIndex = 3,Visible = false})
 local TextLabel = Create("TextLabel",{Parent = ToolTip,BackgroundColor3 = Color3.new(1, 1, 1),BackgroundTransparency = 1,Position = UDim2.new(0, 2, 0, 2),Size = UDim2.new(0, 196, 0, 46),ZIndex = 3,Font = Enum.Font.SourceSans,Text = "悬停按钮查看说明。",TextColor3 = Color3.new(1, 1, 1),TextSize = 14,TextWrapped = true,TextXAlignment = Enum.TextXAlignment.Left,TextYAlignment = Enum.TextYAlignment.Top})
@@ -634,6 +633,7 @@ function toggleSideTray(override)
     sideClosing = true
     sideClosed = not sideClosed
     if sideClosed then
+        MaximizeButton.Visible = true -- 首次隐藏后才显示切换按钮
         rightFadeIn = fadeOut(RightPanel:GetDescendants())
         wait(0.5)
         minimizeSize(0.5)
@@ -1954,7 +1954,6 @@ if not getgenv().SimpleSpyExecuted then
         end)
         TextLabel:GetPropertyChangedSignal("Text"):Connect(scaleToolTip)
         -- TopBar.InputBegan:Connect(onBarInput)
-        MinimizeButton.MouseButton1Click:Connect(toggleMinimize)
         MaximizeButton.MouseButton1Click:Connect(toggleSideTray)
         Simple.MouseButton1Click:Connect(onToggleButtonClick)
         CloseButton.MouseEnter:Connect(onXButtonHover)
@@ -2255,16 +2254,6 @@ function()
     TextLabel.Text = ("[%s] 显示更多远程信息"):format(configs.advancedinfo and "已启用" or "已停用")
 end)
 
-newButton("加入 Discord",function()
-    return "复制 Simple Spy 的 Discord 邀请链接"
-end,
-function()
-    setclipboard("https://discord.com/invite/AWS6ez9")
-    TextLabel.Text = "邀请链接已复制到剪贴板"
-    if request then
-        request({Url = 'http://127.0.0.1:6463/rpc?v=1',Method = 'POST',Headers = {['Content-Type'] = 'application/json', Origin = 'https://discord.com'},Body = http:JSONEncode({cmd = 'INVITE_BROWSER',nonce = http:GenerateGUID(false),args = {code = 'AWS6ez9'}})})
-    end
-end)
 
 if configs.supersecretdevtoggle then
     newButton("加载 SSV2.2",function()

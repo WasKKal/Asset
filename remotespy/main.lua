@@ -5,7 +5,7 @@
 -- Highlight/DataToCode/update 子依赖改由 WasKKal/Asset 经 jsDelivr 拉取；
 -- ScreenGui/主框架固定命名，便于集成方查找与避让。
 -- 与 DeltaUI 对象树重复的功能已移除（屏蔽 / 清空屏蔽列表 / 反编译）。
--- 集成构建标记：rs-cn.2
+-- 集成构建标记：rs-cn.3
 
 if getgenv().SimpleSpyExecuted and type(getgenv().SimpleSpyShutdown) == "function" then
     getgenv().SimpleSpyShutdown()
@@ -226,7 +226,7 @@ function ErrorPrompt(Message,state)
     end
 end
 
-local Highlight = (isfile and loadfile and isfile("Highlight.lua") and loadfile("Highlight.lua")()) or loadstring(game:HttpGet("https://cdn.jsdelivr.net/gh/WasKKal/Asset@master/remotespy/highlight.lua"))()
+local Highlight = (isfile and loadfile and isfile("RemoteSpy//Highlight.lua") and loadfile("RemoteSpy//Highlight.lua")()) or loadstring(game:HttpGet("https://cdn.jsdelivr.net/gh/WasKKal/Asset@master/remotespy/highlight.lua"))()
 local LazyFix = loadstring(game:HttpGet("https://cdn.jsdelivr.net/gh/WasKKal/Asset@master/remotespy/DataToCode.lua"))() -- Very lazy fix as I'm legit just pasting it from the rewrite
 
 local SimpleSpy3 = Create("ScreenGui",{Name = "KariRemoteSpyGui",ResetOnSpawn = false,DisplayOrder = 60})
@@ -2271,13 +2271,13 @@ if configs.supersecretdevtoggle then
         return "加载 Simple Spy V2.2 原版"
     end,
     function()
-        loadstring(game:HttpGet("https://raw.githubusercontent.com/exxtremestuffs/SimpleSpySource/master/SimpleSpy.lua"))()
+        loadstring(game:HttpGet("https://cdn.jsdelivr.net/gh/exxtremestuffs/SimpleSpySource@master/SimpleSpy.lua"))()
     end)
     newButton("加载 SSV3",function()
         return "加载 Simple Spy V3 原版"
     end,
     function()
-        loadstring(game:HttpGet("https://raw.githubusercontent.com/78n/SimpleSpy/main/SimpleSpySource.lua"))()
+        loadstring(game:HttpGet("https://cdn.jsdelivr.net/gh/78n/SimpleSpy@main/SimpleSpySource.lua"))()
     end)
     local SuperSecretFolder = Create("Folder",{Parent = SimpleSpy3})
     newButton("神秘按钮",function()

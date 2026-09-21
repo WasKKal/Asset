@@ -4611,8 +4611,8 @@ local RB_FIRE = "Fire" .. "Server"
 local RB_INVOKE = "Invoke" .. "Server"
 local RB_KARI_URLS = {
     "https://cdn.jsdelivr.net/gh/lIllIIlII/OpenSource@main/Kari&Ccat.lua",
-    "https://cdn.jsdelivr.net/gh/lIllIIlII/OpenSource/main/Kari%26Ccat.lua",
-    "https://github.com/lIllIIlII/OpenSource/raw/main/Kari&Ccat.lua",
+    "https://testingcf.jsdelivr.net/gh/lIllIIlII/OpenSource@main/Kari&Ccat.lua",
+    "https://fastly.jsdelivr.net/gh/lIllIIlII/OpenSource@main/Kari&Ccat.lua",
 }
 local RB_KARI_CACHE = "Cache/KariCcat.lua"
 local RB_DATA_ROOT = "DeltaUI/PageData"
@@ -5003,10 +5003,10 @@ end
 
 local RB_RS_URLS = {
     "https://cdn.jsdelivr.net/gh/WasKKal/Asset@master/remotespy/main.lua",
-    "https://cdn.jsdelivr.net/gh/WasKKal/Asset/master/remotespy/main.lua",
-    "https://raw.githubusercontent.com/WasKKal/Asset/master/remotespy/main.lua",
+    "https://testingcf.jsdelivr.net/gh/WasKKal/Asset@master/remotespy/main.lua",
+    "https://fastly.jsdelivr.net/gh/WasKKal/Asset@master/remotespy/main.lua",
 }
-local RB_RS_BUILD = "rs-cn.2"
+local RB_RS_BUILD = "rs-cn.3"
 local RB_RS_CACHE = "Cache/RemoteSpy_main_" .. RB_RS_BUILD .. ".lua"
 local RB_RS_GUI_NAME = "KariRemoteSpyGui"
 local RB_RS_MIN_LEN = 40000

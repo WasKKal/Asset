@@ -6,7 +6,7 @@
 -- ScreenGui/主框架固定命名，便于集成方查找与避让。
 -- 与 DeltaUI 对象树重复的功能已移除（屏蔽 / 清空屏蔽列表 / 反编译）。
 -- 顶部栏移除最小化按钮；隐藏切换按钮在首次隐藏前不显示；移除加入 Discord 按钮。
--- 集成构建标记：rs-cn.8（ScreenGui挂CoreGui + 初始渐显 + SimpleSpyExecuted/Shutdown标记）
+-- 集成构建标记：rs-cn.9（UI挂载改gethui()）
 -- 兼容标记：rs-cn.4
 
 if getgenv().SimpleSpyExecuted and type(getgenv().SimpleSpyShutdown) == "function" then
@@ -231,7 +231,7 @@ end
 local Highlight = (isfile and loadfile and isfile("RemoteSpy//Highlight.lua") and loadfile("RemoteSpy//Highlight.lua")()) or loadstring(game:HttpGet("https://cdn.jsdelivr.net/gh/WasKKal/Asset@master/remotespy/highlight.lua"))()
 local LazyFix = loadstring(game:HttpGet("https://cdn.jsdelivr.net/gh/WasKKal/Asset@master/remotespy/DataToCode.lua"))() -- Very lazy fix as I'm legit just pasting it from the rewrite
 
-local SimpleSpy3 = Create("ScreenGui",{Name = "KariRemoteSpyGui",ResetOnSpawn = false,DisplayOrder = 1000,Parent = CoreGui})
+local SimpleSpy3 = Create("ScreenGui",{Name = "KariRemoteSpyGui",ResetOnSpawn = false,DisplayOrder = 1000,Parent = (gethui and gethui()) or CoreGui})
 local Storage = Create("Folder",{})
 local Background = Create("Frame",{Name = "KariRemoteSpyBg",Parent = SimpleSpy3,BackgroundColor3 = Color3.new(1, 1, 1),BackgroundTransparency = 1,Position = UDim2.new(0, 500, 0, 200),Size = UDim2.new(0, 450, 0, 268)})
 local LeftPanel = Create("Frame",{Parent = Background,BackgroundColor3 = Color3.fromRGB(53, 52, 55),BorderSizePixel = 0,Position = UDim2.new(0, 0, 0, 19),Size = UDim2.new(0, 131, 0, 249)})

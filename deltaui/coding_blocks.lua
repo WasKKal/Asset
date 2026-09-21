@@ -4666,6 +4666,30 @@ end)
 codingSettingsExitBtn.MouseButton1Click:Connect(function()
     codingCloseSettings()
 end)
+
+-- 建造空间由主界面控制淡出；本模块加载较晚时，右侧面板可能未被主界面登记到淡入列表。
+-- 监听建造空间状态，在退出后显式恢复右侧面板和积木画布，避免面板保持透明。
+if not codingBuildSpaceRestoreWatching then
+    codingBuildSpaceRestoreWatching = true
+    local codingBuildSpaceWasActive = buildSpaceActive == true
+    task.spawn(function()
+        while codingPage and codingPage.Parent do
+            task.wait(0.25)
+            local active = buildSpaceActive == true
+            if codingBuildSpaceWasActive and not active then
+                if not codingSettingsMode then
+                    codingFadeGroup(codingGridArea, true, 0.22)
+                    codingFadeGroup(codingRightPanel, true, 0.22)
+                end
+                if codingToolRow and not codingPickerOpen and not codingSettingsMode then
+                    codingFadeGroup(codingToolRow, true, 0.22)
+                end
+            end
+            codingBuildSpaceWasActive = active
+        end
+        codingBuildSpaceRestoreWatching = nil
+    end)
+end
 ]===]
 
 local function ensureDependencies()

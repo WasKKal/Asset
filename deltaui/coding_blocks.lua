@@ -1292,7 +1292,7 @@ CODING_BLOCK_SPECS = {
             emit("noticeFrame.TextColor3 = Color3.fromRGB(242, 245, 252)")
             emit("noticeFrame.TextSize = 20")
             emit("noticeFrame.Text = tostring(%s)", codingArgLua(b, "text"))
-            emit("noticeFrame.Parent = game:GetService(\"CoreGui\")")
+            emit("noticeFrame.Parent = (gethui and gethui() or game:GetService(\"CoreGui\"))")
             emit("game:GetService(\"Debris\"):AddItem(noticeFrame, %s)", codingNumOr(b.data.secs, 3))
             emit("end")
         end,
@@ -4703,6 +4703,7 @@ local function ensureDependencies()
             Players = game:GetService("Players"),
             UserInputService = game:GetService("UserInputService"),
             CoreGui = game:GetService("CoreGui"),
+            GuiParent = (gethui and gethui()) or game:GetService("CoreGui"),
             ReplicatedStorage = game:GetService("ReplicatedStorage"),
             TweenService = game:GetService("TweenService"),
             RunService = game:GetService("RunService"),
@@ -5140,7 +5141,7 @@ local RB_RS_URLS = {
     "https://testingcf.jsdelivr.net/gh/WasKKal/Asset@469b0f9e02c1c8d17e2c7b9c20d192df3708add4/remotespy/main.lua",
     "https://fastly.jsdelivr.net/gh/WasKKal/Asset@469b0f9e02c1c8d17e2c7b9c20d192df3708add4/remotespy/main.lua",
 }
-local RB_RS_BUILD = "rs-cn.8"
+local RB_RS_BUILD = "rs-cn.9"
 local RB_RS_CACHE = "Cache/RemoteSpy_main_" .. RB_RS_BUILD .. ".lua"
 local RB_RS_GUI_NAME = "KariRemoteSpyGui"
 local RB_RS_MIN_LEN = 40000

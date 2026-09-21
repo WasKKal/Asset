@@ -7,7 +7,7 @@ DeltaPageInfo = {
 }
 local pageInfo = DeltaPageInfo
 
--- 版本门槛：积木编程依赖 DeltaUI 1.0.5 起的行为，UI 版本过低时拒绝安装
+
 local CB_MIN_UI_VERSION = "1.0.5"
 
 local function cbVersionParts(v)
@@ -62,8 +62,8 @@ local function cbNotifyUiTooOld()
     return msg
 end
 
--- registerExternalPage 在 build 之后才把页面写入 DeltaUI/Pages，
--- 所以卸载要推迟到注册流程结束，才能连本地缓存副本一起清掉
+
+
 local function cbRejectInstall(name)
     cbNotifyUiTooOld()
     if cbUiVersionOk then return end
@@ -4474,7 +4474,7 @@ csPropToggle, csPropGetState = makeToggle(csPropRow, false, function(state)
     propWindowSetVisible(state and buildSpaceActive == true)
 end, "propWindow")
 pcall(function()
-    -- 该开关带配置持久化，重新进入页面时可能已经是开启态
+
     if csPropGetState and csPropGetState() then
         rbStyleToggle(csPropToggle, true)
     end
@@ -4583,7 +4583,7 @@ __deltaCodingSpySetState = function(spyTarget)
     end
 end
 pcall(function()
-    -- 该开关带配置持久化，重新进入页面时可能已经是开启态
+
     if csSpyGetState and csSpyGetState() then
         rbStyleToggle(csSpyToggle, true)
     end
@@ -5186,7 +5186,7 @@ local function rbDefer(fn)
     return false
 end
 
--- 窗口被自行关闭后同步开关状态：仅在窗口运行期间轮询，窗口消失后线程自行结束
+
 function rbRemoteSpyWatchdog()
     local state = rbRemoteSpyState()
     local gen = (state.rsWatchdogGen or 0) + 1
@@ -5215,7 +5215,7 @@ function rbRemoteSpyWatchdog()
     end
 end
 
--- 开启态轨道改为绿色（界面自带 0.2 秒补间，这里用更长的补间并延迟落色确保最终效果）
+
 function rbStyleToggle(toggle, on)
     if toggle == nil then return end
     local t = rbTheme()
@@ -5241,7 +5241,7 @@ end
 
 local function rbRsValid(code)
     if type(code) ~= "string" or #code < RB_RS_MIN_LEN then return false end
-    -- 构建标记：确认是移除过重复功能的汉化版，避免缓存 jsDelivr 尚未刷新的旧文件
+
     if not code:find("-- 集成构建标记：", 1, true) then return false end
     return code:find(RB_RS_BUILD, 1, true) ~= nil
 end
@@ -5251,7 +5251,7 @@ function rbLoadRemoteSpy(state)
     local code
     if api and api.readFile then
         code = api.readFile(RB_RS_CACHE)
-        -- 旧版无构建标记的缓存不再使用（含已移除的屏蔽/反编译功能），顺手清掉
+
         if api.deleteFile then
             pcall(api.deleteFile, "Cache/RemoteSpy_main.lua")
         end
@@ -5288,7 +5288,7 @@ function rbSetRemoteSpyVisible(on)
         state.rsOn = false
         return false
     end
-    -- 显隐交给 RemoteSpy 自身：它在建造空间内才渐显，所以这里随时允许开启
+
     if state.rsBusy then return false end
     state.rsBusy = true
 
@@ -5328,9 +5328,9 @@ function rbSetRemoteSpyVisible(on)
     return false
 end
 
--- ===== 建造空间与远程监控加载策略 =====
--- 开关状态由 DeltaUI 配置持久化（remoteSpy）；RemoteSpy 本体只在进入建造空间时才
--- loadstring 加载，加载后由它自己渐显；离开建造空间时它自行隐藏，不需要在这里关停。
+
+
+
 local function rbBuildSpaceActive()
     return rbGlobal("buildSpaceActive") == true
 end
@@ -5355,7 +5355,7 @@ function rbRemoteSpyRunning()
     return (envt and envt.SimpleSpyExecuted) and true or false
 end
 
--- 开关拨动入口：在空间内立即加载，空间外只保留已保存的偏好
+
 function rbRemoteSpyRequestLoad(on)
     if not on then
         rbSetRemoteSpyVisible(false)
@@ -5369,7 +5369,7 @@ function rbRemoteSpyRequestLoad(on)
     return true
 end
 
--- 进入建造空间的那一刻补上加载（启动阶段绝不 loadstring RemoteSpy）
+
 function rbRemoteSpyAutoLoadWatch()
     local state = rbRemoteSpyState()
     if state.rsAutoWatching then return end
@@ -5417,7 +5417,7 @@ function pageDef.build(frame, helpers)
     ensureDependencies()
     pcall(installRemoteBlockPatch, helpers and helpers.data)
 
-    -- 自动预下载所有 HTTP 依赖到本地缓存，供后续调用直接读取
+
     pcall(function()
         local dataApi = helpers and helpers.data
         if type(dataApi) ~= "table" then return end
@@ -5470,7 +5470,7 @@ function pageDef.build(frame, helpers)
         return
     end
 
-    -- 开关可能已在上一次会话里保存为开启：这里只启动巡检线程，不加载 RemoteSpy 本体
+
     rbRemoteSpyAutoLoadWatch()
 end
 

@@ -4564,6 +4564,7 @@ create("TextLabel", {
 })
 local csSpyToggle, csSpyGetState, csSpySetState
 csSpyToggle, csSpyGetState, csSpySetState = makeToggle(csSpyRow, false, function(spyState)
+    __deltaCodingRemoteSpyWanted = spyState and true or false
     pcall(function()
         if rbStyleToggle then
             rbStyleToggle(csSpyToggle, spyState and true or false)
@@ -4585,7 +4586,10 @@ end
 pcall(function()
 
     if csSpyGetState and csSpyGetState() then
+        __deltaCodingRemoteSpyWanted = true
         rbStyleToggle(csSpyToggle, true)
+    else
+        __deltaCodingRemoteSpyWanted = false
     end
 end)
 csSpyRow.Parent = csCard
@@ -4680,6 +4684,7 @@ if not codingBuildSpaceRestoreWatching then
                 if not codingSettingsMode then
                     codingFadeGroup(codingGridArea, true, 0.22)
                     codingFadeGroup(codingRightPanel, true, 0.22)
+                    codingFadeGroup(codingActionSmall, true, 0.22)
                 end
                 if codingToolRow and not codingPickerOpen and not codingSettingsMode then
                     codingFadeGroup(codingToolRow, true, 0.22)
@@ -5360,6 +5365,10 @@ local function rbBuildSpaceActive()
 end
 
 function rbRemoteSpyWanted()
+    local liveWanted = rbGlobal("__deltaCodingRemoteSpyWanted")
+    if type(liveWanted) == "boolean" then
+        return liveWanted
+    end
     local wanted = false
     pcall(function()
         local lc = rbGlobal("loadConfig")

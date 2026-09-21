@@ -3,7 +3,7 @@ DeltaPageInfo = {
     title = "积木编程",
     icon = "blocks",
     dataFolder = "coding_blocks",
-    version = "1.0.3",
+    version = "1.0.1",
 }
 local pageInfo = DeltaPageInfo
 
@@ -5006,7 +5006,8 @@ local RB_RS_URLS = {
     "https://cdn.jsdelivr.net/gh/WasKKal/Asset/master/remotespy/main.lua",
     "https://raw.githubusercontent.com/WasKKal/Asset/master/remotespy/main.lua",
 }
-local RB_RS_CACHE = "Cache/RemoteSpy_main.lua"
+local RB_RS_BUILD = "rs-cn.2"
+local RB_RS_CACHE = "Cache/RemoteSpy_main_" .. RB_RS_BUILD .. ".lua"
 local RB_RS_GUI_NAME = "KariRemoteSpyGui"
 local RB_RS_MIN_LEN = 40000
 
@@ -5068,6 +5069,10 @@ function rbLoadRemoteSpy(state)
     local code
     if api and api.readFile then
         code = api.readFile(RB_RS_CACHE)
+        -- 旧版无构建标记的缓存不再使用（含已移除的屏蔽/反编译功能），顺手清掉
+        if api.deleteFile then
+            pcall(api.deleteFile, "Cache/RemoteSpy_main.lua")
+        end
     end
     if type(code) ~= "string" or #code < RB_RS_MIN_LEN then
         code = nil

@@ -4,6 +4,8 @@
 -- 基于 infyiff SimpleSpy V3。改动：界面汉化；默认窗口位置避开 DeltaUI 建造空间；
 -- Highlight/DataToCode/update 子依赖改由 WasKKal/Asset 经 jsDelivr 拉取；
 -- ScreenGui/主框架固定命名，便于集成方查找与避让。
+-- 与 DeltaUI 对象树重复的功能已移除（屏蔽 / 清空屏蔽列表 / 反编译）。
+-- 集成构建标记：rs-cn.2
 
 if getgenv().SimpleSpyExecuted and type(getgenv().SimpleSpyShutdown) == "function" then
     getgenv().SimpleSpyShutdown()
@@ -281,8 +283,6 @@ local logs = {}
 local selected = nil
 --- The blacklist (can be a string name or the Remote Instance)
 local blacklist = {}
---- The block list (can be a string name or the Remote Instance)
-local blocklist = {}
 --- Whether or not to add getNil function
 local getNil = false
 --- Array of remotes (and original functions) connected to
@@ -315,7 +315,6 @@ local excluding = {}
 local mouseInGui = false
 
 local connections = {}
-local DecompiledScripts = {}
 local generation = {}
 local running_threads = {}
 local originalnamecall
@@ -1724,7 +1723,6 @@ local newindex = function(method,originalfunction,...)
         if remote:IsA("RemoteEvent") or remote:IsA("RemoteFunction") or remote:IsA("UnreliableRemoteEvent") then
             if not configs.logcheckcaller and checkcaller() then return originalfunction(...) end
             local id = ThreadGetDebugId(remote)
-            local blockcheck = tablecheck(blocklist,remote,id)
             local args = {select(2,...)}
 
             if not tablecheck(blacklist,remote,id) and not IsCyclicTable(args) then
@@ -1735,7 +1733,6 @@ local newindex = function(method,originalfunction,...)
                     infofunc = infofunc,
                     callingscript = callingscript,
                     metamethod = "__index",
-                    blockcheck = blockcheck,
                     id = id,
                     returnvalue = {}
                 }
@@ -1768,7 +1765,6 @@ local newindex = function(method,originalfunction,...)
                     end
                 end]]
                 end
-            if blockcheck then return end
         end
     end
     return originalfunction(...)
@@ -1784,7 +1780,6 @@ local newnamecall = newcclosure(function(...)
             if IsA(remote,"RemoteEvent") or IsA(remote,"RemoteFunction") or IsA(remote,"UnreliableRemoteEvent") then    
                 if not configs.logcheckcaller and checkcaller() then return originalnamecall(...) end
                 local id = ThreadGetDebugId(remote)
-                local blockcheck = tablecheck(blocklist,remote,id)
                 local args = {select(2,...)}
 
                 if not tablecheck(blacklist,remote,id) and not IsCyclicTable(args) then
@@ -1795,7 +1790,6 @@ local newnamecall = newcclosure(function(...)
                         infofunc = infofunc,
                         callingscript = callingscript,
                         metamethod = "__namecall",
-                        blockcheck = blockcheck,
                         id = id,
                         returnvalue = {}
                     }
@@ -1830,7 +1824,6 @@ local newnamecall = newcclosure(function(...)
                         end
                     end]]
                 end
-                if blockcheck then return end
             end
         end
     end
@@ -2174,7 +2167,7 @@ newButton(
     function()
         if selected then
             blacklist[OldDebugId(selected.Remote)] = true
-            TextLabel.Text = "已添加！"
+            TextLabel.Text = "已加入！"
         end
     end
 )
@@ -2186,7 +2179,7 @@ newButton(
     function()
         if selected then
             blacklist[selected.Name] = true
-            TextLabel.Text = "已添加！"
+            TextLabel.Text = "已加入！"
         end
     end
 )
@@ -2199,70 +2192,6 @@ function()
     TextLabel.Text = "黑名单已清空！"
 end)
 
---- Prevents the selected.Log Remote from firing the server (still logged)
-newButton(
-    "屏蔽（旧）",
-    function() return "点击阻止该远程对象发往服务端。\n屏蔽后仍会记录日志，但不会再真正触发服务端。" end,
-    function()
-        if selected then
-            blocklist[OldDebugId(selected.Remote)] = true
-            TextLabel.Text = "已添加！"
-        end
-    end
-)
-
---- Prevents all remotes from firing that share the same name as the selected.Log remote from the RemoteSpy (still logged)
-newButton("屏蔽（新）",function()
-    return "点击阻止同名远程对象发往服务端。\n屏蔽后仍会记录日志，但不会再真正触发服务端。" end,
-    function()
-        if selected then
-            blocklist[selected.Name] = true
-            TextLabel.Text = "已添加！"
-        end
-    end
-)
-
---- clears blacklist
-newButton(
-    "清空屏蔽列表",
-    function() return "点击清空屏蔽列表，恢复这些远程对象。\n屏蔽后仍会记录日志，但不会再真正触发服务端。" end,
-    function()
-        blocklist = {}
-        TextLabel.Text = "屏蔽列表已清空！"
-    end
-)
-
---- Attempts to decompile the source script
-newButton("反编译",
-    function()
-        return "反编译来源脚本"
-    end,function()
-        if decompile then
-            if selected and selected.Source then
-                local Source = selected.Source
-                if not DecompiledScripts[Source] then
-                    codebox:setRaw("--[[Decompiling]]")
-
-                    xpcall(function()
-                        local decompiledsource = decompile(Source):gsub("-- Decompiled with the Synapse X Luau decompiler.","")
-                        local Sourcev2s = v2s(Source)
-                        if (decompiledsource):find("script") and Sourcev2s then
-                            DecompiledScripts[Source] = ("local script = %s\n%s"):format(Sourcev2s,decompiledsource)
-                        end
-                    end,function(err)
-                        return codebox:setRaw(("--[[\n反编译时发生错误\n%s\n]]"):format(err))
-                    end)
-                end
-                codebox:setRaw(DecompiledScripts[Source] or "--无源码")
-                TextLabel.Text = "完成！"
-            else
-                TextLabel.Text = "未找到源码！"
-            end
-        else
-            TextLabel.Text = "缺少函数（无法反编译）"
-        end
-    end
-)
 
     --[[newButton(
         "returnvalue",

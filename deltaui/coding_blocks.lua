@@ -5136,9 +5136,9 @@ function installRemoteBlockPatch(dataApi)
 end
 
 local RB_RS_URLS = {
-    "https://cdn.jsdelivr.net/gh/WasKKal/Asset@master/remotespy/main.lua",
-    "https://testingcf.jsdelivr.net/gh/WasKKal/Asset@master/remotespy/main.lua",
-    "https://fastly.jsdelivr.net/gh/WasKKal/Asset@master/remotespy/main.lua",
+    "https://cdn.jsdelivr.net/gh/WasKKal/Asset@469b0f9e02c1c8d17e2c7b9c20d192df3708add4/remotespy/main.lua",
+    "https://testingcf.jsdelivr.net/gh/WasKKal/Asset@469b0f9e02c1c8d17e2c7b9c20d192df3708add4/remotespy/main.lua",
+    "https://fastly.jsdelivr.net/gh/WasKKal/Asset@469b0f9e02c1c8d17e2c7b9c20d192df3708add4/remotespy/main.lua",
 }
 local RB_RS_BUILD = "rs-cn.8"
 local RB_RS_CACHE = "Cache/RemoteSpy_main_" .. RB_RS_BUILD .. ".lua"

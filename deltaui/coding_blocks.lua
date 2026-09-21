@@ -5064,6 +5064,13 @@ function rbRemoteSpyShutdown()
     end
 end
 
+local function rbRsValid(code)
+    if type(code) ~= "string" or #code < RB_RS_MIN_LEN then return false end
+    -- 构建标记：确认是移除过重复功能的汉化版，避免缓存 jsDelivr 尚未刷新的旧文件
+    if not code:find("-- 集成构建标记：", 1, true) then return false end
+    return code:find(RB_RS_BUILD, 1, true) ~= nil
+end
+
 function rbLoadRemoteSpy(state)
     local api = state and state.dataApi
     local code
@@ -5074,21 +5081,26 @@ function rbLoadRemoteSpy(state)
             pcall(api.deleteFile, "Cache/RemoteSpy_main.lua")
         end
     end
-    if type(code) ~= "string" or #code < RB_RS_MIN_LEN then
+    if not rbRsValid(code) then
         code = nil
+        local stale
         for _, url in ipairs(RB_RS_URLS) do
             local ok, res = pcall(function() return game:HttpGet(url, true) end)
-            if ok and type(res) == "string" and #res > RB_RS_MIN_LEN then
+            if ok and rbRsValid(res) then
                 code = res
                 break
             end
+            if ok and type(res) == "string" and #res > RB_RS_MIN_LEN then stale = true end
             pcall(task.wait, 0.3)
         end
         if code and api and api.writeFile then
             pcall(function() api.writeFile(RB_RS_CACHE, code) end)
         end
+        if not code then
+            if stale then return nil, "远程监控版本过旧，请等 CDN 刷新后重试" end
+            return nil, "远程监控下载失败，请检查网络"
+        end
     end
-    if type(code) ~= "string" or #code < RB_RS_MIN_LEN then return nil, "远程监控下载失败，请检查网络" end
     local fn = loadstring(code, "RemoteSpy")
     if not fn then return nil, "远程监控加载失败" end
     return fn

@@ -3,9 +3,78 @@ DeltaPageInfo = {
     title = "积木编程",
     icon = "blocks",
     dataFolder = "coding_blocks",
-    version = "1.0.2",
+    version = "1.0.3",
 }
 local pageInfo = DeltaPageInfo
+
+-- 版本门槛：积木编程依赖 DeltaUI 1.0.5 起的行为，UI 版本过低时拒绝安装
+local CB_MIN_UI_VERSION = "1.0.5"
+
+local function cbVersionParts(v)
+    local out = {}
+    for n in tostring(v or ""):gmatch("%d+") do out[#out + 1] = tonumber(n) or 0 end
+    return out
+end
+
+local function cbVersionAtLeast(cur, need)
+    local a, b = cbVersionParts(cur), cbVersionParts(need)
+    if #a == 0 then return false end
+    for i = 1, math.max(#a, #b) do
+        local x, y = a[i] or 0, b[i] or 0
+        if x > y then return true end
+        if x < y then return false end
+    end
+    return true
+end
+
+local function cbUiVersionNow()
+    local ver
+    pcall(function()
+        local h = _G.DeltaPage
+        if type(h) == "table" then
+            if type(h.getUIVersion) == "function" then ver = h.getUIVersion() end
+            if (not ver or ver == "") and type(h.uiVersion) == "string" then ver = h.uiVersion end
+        end
+    end)
+    if not ver or ver == "" then
+        pcall(function()
+            if type(getUIVersion) == "function" then ver = getUIVersion() end
+        end)
+    end
+    if type(ver) ~= "string" and type(ver) ~= "number" then return nil end
+    return tostring(ver)
+end
+
+local cbUiVersion = cbUiVersionNow()
+local cbUiVersionOk = cbVersionAtLeast(cbUiVersion, CB_MIN_UI_VERSION)
+local function cbUiVersionText()
+    if cbUiVersion and cbUiVersion ~= "" then return cbUiVersion end
+    return "未知"
+end
+
+local function cbNotifyUiTooOld()
+    local msg = ("积木编程需要 DeltaUI %s 或更高版本（当前 %s），请先更新 DeltaUI 再安装")
+        :format(CB_MIN_UI_VERSION, cbUiVersionText())
+    pcall(function() ShowNotification(msg, 6) end)
+    pcall(function()
+        if type(AddLog) == "function" then AddLog("[coding_blocks] 拒绝安装：" .. msg, "error") end
+    end)
+    return msg
+end
+
+-- registerExternalPage 在 build 之后才把页面写入 DeltaUI/Pages，
+-- 所以卸载要推迟到注册流程结束，才能连本地缓存副本一起清掉
+local function cbRejectInstall(name)
+    cbNotifyUiTooOld()
+    if cbUiVersionOk then return end
+    pcall(function()
+        task.delay(0.4, function()
+            if type(uninstallExternalPage) == "function" then
+                pcall(uninstallExternalPage, name or pageInfo.name)
+            end
+        end)
+    end)
+end
 
 local CODING_PAGE_SOURCE = [===[function codingObjPropOptions()
     local out, seen = {}, {}
@@ -5271,6 +5340,10 @@ local pageDef = {
 }
 
 function pageDef.build(frame, helpers)
+    if not cbUiVersionOk then
+        cbRejectInstall(pageDef.name)
+        return
+    end
     ensureDependencies()
     pcall(installRemoteBlockPatch, helpers and helpers.data)
     codingPage = frame

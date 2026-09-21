@@ -3,7 +3,7 @@ DeltaPageInfo = {
     title = "积木编程",
     icon = "blocks",
     dataFolder = "coding_blocks",
-    version = "1.0.1",
+    version = "1.0.2",
 }
 local pageInfo = DeltaPageInfo
 
@@ -4389,10 +4389,21 @@ create("TextLabel", {
     ZIndex = 15,
     Parent = csPropRow,
 })
-local csPropToggle, csPropGetState = makeToggle(csPropRow, false, function(state)
-
+local csPropToggle, csPropGetState
+csPropToggle, csPropGetState = makeToggle(csPropRow, false, function(state)
+    pcall(function()
+        if rbStyleToggle then
+            rbStyleToggle(csPropToggle, state and true or false)
+        end
+    end)
     propWindowSetVisible(state and buildSpaceActive == true)
 end, "propWindow")
+pcall(function()
+    -- 该开关带配置持久化，重新进入页面时可能已经是开启态
+    if csPropGetState and csPropGetState() then
+        rbStyleToggle(csPropToggle, true)
+    end
+end)
 csPropRow.Parent = csCard
 
 CODING_PREVIEW_TYPES = { "面板", "视图" }
@@ -4467,7 +4478,7 @@ create("TextLabel", {
     Position = UDim2.new(0, 16, 0, 28),
     Size = UDim2.new(0.62, -10, 0, 18),
     BackgroundTransparency = 1,
-    Text = "加载汉化版远程事件监控，窗口默认停在底部中间",
+    Text = "加载汉化版远程事件监控，仅在建造空间内显示，窗口默认停在底部中间",
     TextColor3 = theme.textDim,
     TextSize = 10,
     Font = Enum.Font.SourceSans,
@@ -4476,13 +4487,24 @@ create("TextLabel", {
     ZIndex = 15,
     Parent = csSpyRow,
 })
-makeToggle(csSpyRow, false, function(spyState)
+local csSpyToggle, csSpyGetState, csSpySetState
+csSpyToggle, csSpyGetState, csSpySetState = makeToggle(csSpyRow, false, function(spyState)
+    pcall(function()
+        if rbStyleToggle then
+            rbStyleToggle(csSpyToggle, spyState and true or false)
+        end
+    end)
     pcall(function()
         if rbSetRemoteSpyVisible then
             rbSetRemoteSpyVisible(spyState and true or false)
         end
     end)
 end)
+__deltaCodingSpySetState = function(spyTarget)
+    if csSpySetState then
+        csSpySetState(spyTarget and true or false)
+    end
+end
 csSpyRow.Parent = csCard
 
 function codingPreviewTypeGet()
@@ -5006,7 +5028,7 @@ local RB_RS_URLS = {
     "https://testingcf.jsdelivr.net/gh/WasKKal/Asset@master/remotespy/main.lua",
     "https://fastly.jsdelivr.net/gh/WasKKal/Asset@master/remotespy/main.lua",
 }
-local RB_RS_BUILD = "rs-cn.3"
+local RB_RS_BUILD = "rs-cn.4"
 local RB_RS_CACHE = "Cache/RemoteSpy_main_" .. RB_RS_BUILD .. ".lua"
 local RB_RS_GUI_NAME = "KariRemoteSpyGui"
 local RB_RS_MIN_LEN = 40000
@@ -5064,6 +5086,87 @@ function rbRemoteSpyShutdown()
     end
 end
 
+local function rbBuildSpaceActive()
+    return rbGlobal("buildSpaceActive") == true
+end
+
+local function rbSpySetToggleOff()
+    local setter = rbGlobal("__deltaCodingSpySetState")
+    if type(setter) == "function" then pcall(setter, false) end
+end
+
+local function rbSleep(sec)
+    if pcall(function() task.wait(sec) end) then return true end
+    if pcall(function() wait(sec) end) then return true end
+    return false
+end
+
+local function rbDefer(fn)
+    if pcall(function() task.spawn(fn) end) then return true end
+    if pcall(function() spawn(fn) end) then return true end
+    return false
+end
+
+-- 离开建造空间（或窗口被自行关闭）后同步开关状态：仅在窗口运行期间轮询，退出后线程自行结束
+function rbRemoteSpyWatchdog()
+    local state = rbRemoteSpyState()
+    local gen = (state.rsWatchdogGen or 0) + 1
+    state.rsWatchdogGen = gen
+    state.rsWatchdog = true
+    local started = rbDefer(function()
+        local alive = true
+        while alive and state.rsWatchdogGen == gen do
+            local envt = rbGenv()
+            local shown = rbRemoteSpyFindGui() ~= nil
+            if not shown and envt and envt.SimpleSpyExecuted then shown = true end
+            if not shown then
+                state.rsOn = false
+                rbSpySetToggleOff()
+                break
+            end
+            if not rbBuildSpaceActive() then
+                rbRemoteSpyShutdown()
+                state.rsOn = false
+                rbSpySetToggleOff()
+                rbNotify("已退出建造空间，远程监控窗口已关闭", 2.5)
+                break
+            end
+            alive = rbSleep(0.5)
+        end
+        if state.rsWatchdogGen == gen then
+            state.rsWatchdogGen = nil
+            state.rsWatchdog = nil
+        end
+    end)
+    if not started then
+        if state.rsWatchdogGen == gen then state.rsWatchdog = nil end
+    end
+end
+
+-- 开启态轨道改为绿色（界面自带 0.2 秒补间，这里用更长的补间并延迟落色确保最终效果）
+function rbStyleToggle(toggle, on)
+    if toggle == nil then return end
+    local t = rbTheme()
+    local col = (on and t.green) or t.surfaceLight
+    local svcRef = rbGlobal("svc") or svc
+    local ts = svcRef and svcRef.TweenService
+    if not ts then
+        local okG, got = pcall(function() return game:GetService("TweenService") end)
+        if okG then ts = got end
+    end
+    if not ts then return end
+    pcall(function()
+        ts:Create(toggle, TweenInfo.new(0.26, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {BackgroundColor3 = col}):Play()
+    end)
+    rbDefer(function()
+        rbSleep(0.34)
+        local okA, alive = pcall(function() return toggle ~= nil and toggle.Parent ~= nil end)
+        if okA and alive then
+            pcall(function() toggle.BackgroundColor3 = col end)
+        end
+    end)
+end
+
 local function rbRsValid(code)
     if type(code) ~= "string" or #code < RB_RS_MIN_LEN then return false end
     -- 构建标记：确认是移除过重复功能的汉化版，避免缓存 jsDelivr 尚未刷新的旧文件
@@ -5113,6 +5216,13 @@ function rbSetRemoteSpyVisible(on)
         state.rsOn = false
         return false
     end
+    -- 需求：仅在进入建造空间后才显示远程监控窗口
+    if not rbBuildSpaceActive() then
+        rbNotify("请先进入建造空间，再开启远程监控", 3)
+        local setter = rbGlobal("__deltaCodingSpySetState")
+        if type(setter) == "function" then pcall(setter, false) end
+        return false
+    end
     if state.rsBusy then return false end
     state.rsBusy = true
 
@@ -5143,6 +5253,7 @@ function rbSetRemoteSpyVisible(on)
 
     if okExec and running then
         state.rsOn = true
+        rbRemoteSpyWatchdog()
         rbNotify(already and "远程监控已在显示中" or "远程监控已开启（汉化版）", 2)
         return true
     end

@@ -4227,7 +4227,6 @@ if codingEnterBtn then
         }):Play()
     end
     codingEnterBtn.MouseButton1Click:Connect(function()
-
         resetToBase()
         enterBuildSpace()
     end)

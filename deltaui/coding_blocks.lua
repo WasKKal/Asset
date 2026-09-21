@@ -5229,7 +5229,9 @@ function rbRemoteSpyWatchdog()
             if not shown and envt and envt.SimpleSpyExecuted then shown = true end
             if not shown then
                 state.rsOn = false
-                rbSpySetToggleOff()
+                if not state.rsSuppressToggleOff then
+                    rbSpySetToggleOff()
+                end
                 break
             end
             alive = rbSleep(0.5)
@@ -5320,6 +5322,7 @@ function rbSetRemoteSpyVisible(on)
 
     if state.rsBusy then return false end
     state.rsBusy = true
+    state.rsSuppressToggleOff = nil
 
     local envt = rbGenv()
     local already = false
@@ -5391,6 +5394,8 @@ end
 
 function rbRemoteSpyRequestLoad(on)
     if not on then
+        local state = rbRemoteSpyState()
+        state.rsSuppressToggleOff = nil
         rbSetRemoteSpyVisible(false)
         return false
     end
@@ -5428,6 +5433,8 @@ function rbRemoteSpyAutoLoadWatch()
             if now and not inSpace and rbRemoteSpyWanted() and not rbRemoteSpyRunning() then
                 rbSetRemoteSpyVisible(true)
             elseif not now and inSpace then
+                state.rsSuppressToggleOff = true
+                state.rsWatchdogGen = (state.rsWatchdogGen or 0) + 1
                 rbSetRemoteSpyVisible(false)
             end
             inSpace = now

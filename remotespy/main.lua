@@ -231,7 +231,7 @@ end
 local Highlight = (isfile and loadfile and isfile("RemoteSpy//Highlight.lua") and loadfile("RemoteSpy//Highlight.lua")()) or loadstring(game:HttpGet("https://cdn.jsdelivr.net/gh/WasKKal/Asset@master/remotespy/highlight.lua"))()
 local LazyFix = loadstring(game:HttpGet("https://cdn.jsdelivr.net/gh/WasKKal/Asset@master/remotespy/DataToCode.lua"))() -- Very lazy fix as I'm legit just pasting it from the rewrite
 
-local SimpleSpy3 = Create("ScreenGui",{Name = "KariRemoteSpyGui",ResetOnSpawn = false,DisplayOrder = 60})
+local SimpleSpy3 = Create("ScreenGui",{Name = "KariRemoteSpyGui",ResetOnSpawn = false,DisplayOrder = 1000})
 local Storage = Create("Folder",{})
 local Background = Create("Frame",{Name = "KariRemoteSpyBg",Parent = SimpleSpy3,BackgroundColor3 = Color3.new(1, 1, 1),BackgroundTransparency = 1,Position = UDim2.new(0, 500, 0, 200),Size = UDim2.new(0, 450, 0, 268)})
 local LeftPanel = Create("Frame",{Parent = Background,BackgroundColor3 = Color3.fromRGB(53, 52, 55),BorderSizePixel = 0,Position = UDim2.new(0, 0, 0, 19),Size = UDim2.new(0, 131, 0, 249)})
@@ -255,8 +255,6 @@ end
 local Simple = Create("TextButton",{Parent = TopBar,BackgroundColor3 = Color3.new(1, 1, 1),AutoButtonColor = false,BackgroundTransparency = 1,Position = UDim2.new(0, 5, 0, 0),Size = UDim2.new(0, 57, 0, 18),Font = Enum.Font.SourceSansBold,Text =  "远程监控",TextColor3 = Color3.new(1, 1, 1),TextSize = 14,TextXAlignment = Enum.TextXAlignment.Left})
 local CloseButton = Create("TextButton",{Parent = TopBar,BackgroundColor3 = Color3.new(0.145098, 0.141176, 0.14902),BorderSizePixel = 0,Position = UDim2.new(1, -19, 0, 0),Size = UDim2.new(0, 19, 0, 19),Font = Enum.Font.SourceSans,Text = "",TextColor3 = Color3.new(0, 0, 0),TextSize = 14})
 local ImageLabel = Create("ImageLabel",{Parent = CloseButton,BackgroundColor3 = Color3.new(1, 1, 1),BackgroundTransparency = 1,Position = UDim2.new(0, 5, 0, 5),Size = UDim2.new(0, 9, 0, 9),Image = "http://www.roblox.com/asset/?id=5597086202"})
-local MaximizeButton = Create("TextButton",{Visible = false,Parent = TopBar,BackgroundColor3 = Color3.new(0.145098, 0.141176, 0.14902),BorderSizePixel = 0,Position = UDim2.new(1, -38, 0, 0),Size = UDim2.new(0, 19, 0, 19),Font = Enum.Font.SourceSans,Text = "",TextColor3 = Color3.new(0, 0, 0),TextSize = 14})
-local ImageLabel_2 = Create("ImageLabel",{Parent = MaximizeButton,BackgroundColor3 = Color3.new(1, 1, 1),BackgroundTransparency = 1,Position = UDim2.new(0, 5, 0, 5),Size = UDim2.new(0, 9, 0, 9),Image = "http://www.roblox.com/asset/?id=5597108117"})
 
 local ToolTip = Create("Frame",{Parent = SimpleSpy3,BackgroundColor3 = Color3.fromRGB(26, 26, 26),BackgroundTransparency = 0.1,BorderColor3 = Color3.new(1, 1, 1),Size = UDim2.new(0, 200, 0, 50),ZIndex = 3,Visible = false})
 local TextLabel = Create("TextLabel",{Parent = ToolTip,BackgroundColor3 = Color3.new(1, 1, 1),BackgroundTransparency = 1,Position = UDim2.new(0, 2, 0, 2),Size = UDim2.new(0, 196, 0, 46),ZIndex = 3,Font = Enum.Font.SourceSans,Text = "悬停按钮查看说明。",TextColor3 = Color3.new(1, 1, 1),TextSize = 14,TextWrapped = true,TextXAlignment = Enum.TextXAlignment.Left,TextYAlignment = Enum.TextYAlignment.Top})
@@ -634,7 +632,6 @@ function toggleSideTray(override)
     sideClosing = true
     sideClosed = not sideClosed
     if sideClosed then
-        MaximizeButton.Visible = true -- 首次隐藏后才显示切换按钮
         rightFadeIn = fadeOut(RightPanel:GetDescendants())
         wait(0.5)
         minimizeSize(0.5)
@@ -1955,7 +1952,6 @@ if not getgenv().SimpleSpyExecuted then
         end)
         TextLabel:GetPropertyChangedSignal("Text"):Connect(scaleToolTip)
         -- TopBar.InputBegan:Connect(onBarInput)
-        MaximizeButton.MouseButton1Click:Connect(toggleSideTray)
         Simple.MouseButton1Click:Connect(onToggleButtonClick)
         CloseButton.MouseEnter:Connect(onXButtonHover)
         CloseButton.MouseLeave:Connect(onXButtonUnhover)

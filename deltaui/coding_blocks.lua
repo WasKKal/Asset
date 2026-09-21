@@ -3,7 +3,7 @@ DeltaPageInfo = {
     title = "积木编程",
     icon = "blocks",
     dataFolder = "coding_blocks",
-    version = "1.0.2",
+    version = "1.0.3",
 }
 local pageInfo = DeltaPageInfo
 
@@ -4441,6 +4441,50 @@ pcall(function()
 end)
 csPreviewRow.Parent = csCard
 
+local csSpyRow = create("Frame", {
+    Size = UDim2.new(1, 0, 0, 54),
+    BackgroundColor3 = theme.surface,
+    BackgroundTransparency = 0.3,
+    BorderSizePixel = 0,
+    LayoutOrder = 4,
+    ZIndex = 14,
+})
+corner(12, csSpyRow)
+create("TextLabel", {
+    Position = UDim2.new(0, 16, 0, 8),
+    Size = UDim2.new(0.5, -10, 0, 20),
+    BackgroundTransparency = 1,
+    Text = "显示 RemoteSpy 窗口",
+    TextColor3 = theme.text,
+    TextSize = 13,
+    Font = Enum.Font.SourceSansBold,
+    TextXAlignment = Enum.TextXAlignment.Left,
+    TextTruncate = Enum.TextTruncate.AtEnd,
+    ZIndex = 15,
+    Parent = csSpyRow,
+})
+create("TextLabel", {
+    Position = UDim2.new(0, 16, 0, 28),
+    Size = UDim2.new(0.62, -10, 0, 18),
+    BackgroundTransparency = 1,
+    Text = "加载汉化版远程事件监控，窗口默认停在底部中间",
+    TextColor3 = theme.textDim,
+    TextSize = 10,
+    Font = Enum.Font.SourceSans,
+    TextXAlignment = Enum.TextXAlignment.Left,
+    TextTruncate = Enum.TextTruncate.AtEnd,
+    ZIndex = 15,
+    Parent = csSpyRow,
+})
+makeToggle(csSpyRow, false, function(spyState)
+    pcall(function()
+        if rbSetRemoteSpyVisible then
+            rbSetRemoteSpyVisible(spyState and true or false)
+        end
+    end)
+end)
+csSpyRow.Parent = csCard
+
 function codingPreviewTypeGet()
     if csPreviewGet then
         local ok, v = pcall(csPreviewGet)
@@ -4955,6 +4999,139 @@ function installRemoteBlockPatch(dataApi)
     state.wrapper = wrapper
     pcall(function() _G.obOpenContextPanel = wrapper end)
     return true
+end
+
+local RB_RS_URLS = {
+    "https://cdn.jsdelivr.net/gh/WasKKal/Asset@master/remotespy/main.lua",
+    "https://cdn.jsdelivr.net/gh/WasKKal/Asset/master/remotespy/main.lua",
+    "https://raw.githubusercontent.com/WasKKal/Asset/master/remotespy/main.lua",
+}
+local RB_RS_CACHE = "Cache/RemoteSpy_main.lua"
+local RB_RS_GUI_NAME = "KariRemoteSpyGui"
+local RB_RS_MIN_LEN = 40000
+
+local function rbGenv()
+    local gg = rbApi("getgenv")
+    if gg then
+        local ok, ref = pcall(gg)
+        if ok and type(ref) == "table" then return ref end
+    end
+    return _G
+end
+
+function rbRemoteSpyState()
+    local state = rbGlobal(RB_STATE_KEY)
+    if type(state) ~= "table" then
+        state = {
+            blocked = setmetatable({}, {__mode = "k"}),
+            hooked = setmetatable({}, {__mode = "k"}),
+        }
+        pcall(function() _G[RB_STATE_KEY] = state end)
+    end
+    return state
+end
+
+function rbRemoteSpyFindGui()
+    local holders = {}
+    local gethui = rbApi("gethui")
+    if gethui then
+        local ok, ref = pcall(gethui)
+        if ok and ref then holders[#holders + 1] = ref end
+    end
+    local ok, svcRef = pcall(function() return game:GetService("CoreGui") end)
+    if ok and svcRef then holders[#holders + 1] = svcRef end
+    local ok2, pg = pcall(function() return game:GetService("PlayerGui") end)
+    if ok2 and pg then holders[#holders + 1] = pg end
+    for _, h in ipairs(holders) do
+        local okF, found = pcall(function() return h:FindFirstChild(RB_RS_GUI_NAME) end)
+        if okF and found then return found end
+    end
+    return nil
+end
+
+function rbRemoteSpyShutdown()
+    local envt = rbGenv()
+    local fn = envt and envt.SimpleSpyShutdown
+    if type(fn) == "function" then pcall(fn) end
+    local leftover = rbRemoteSpyFindGui()
+    if leftover then pcall(function() leftover:Destroy() end) end
+    if envt then
+        pcall(function()
+            envt.SimpleSpyExecuted = false
+            envt.SimpleSpyShutdown = nil
+        end)
+    end
+end
+
+function rbLoadRemoteSpy(state)
+    local api = state and state.dataApi
+    local code
+    if api and api.readFile then
+        code = api.readFile(RB_RS_CACHE)
+    end
+    if type(code) ~= "string" or #code < RB_RS_MIN_LEN then
+        code = nil
+        for _, url in ipairs(RB_RS_URLS) do
+            local ok, res = pcall(function() return game:HttpGet(url, true) end)
+            if ok and type(res) == "string" and #res > RB_RS_MIN_LEN then
+                code = res
+                break
+            end
+            pcall(task.wait, 0.3)
+        end
+        if code and api and api.writeFile then
+            pcall(function() api.writeFile(RB_RS_CACHE, code) end)
+        end
+    end
+    if type(code) ~= "string" or #code < RB_RS_MIN_LEN then return nil, "远程监控下载失败，请检查网络" end
+    local fn = loadstring(code, "RemoteSpy")
+    if not fn then return nil, "远程监控加载失败" end
+    return fn
+end
+
+function rbSetRemoteSpyVisible(on)
+    local state = rbRemoteSpyState()
+    if not on then
+        rbRemoteSpyShutdown()
+        state.rsOn = false
+        return false
+    end
+    if state.rsBusy then return false end
+    state.rsBusy = true
+
+    local envt = rbGenv()
+    local already = false
+    if envt and envt.SimpleSpyExecuted and rbRemoteSpyFindGui() then
+        already = true
+    end
+
+    local okExec, errText = true, nil
+    if not already then
+        rbRemoteSpyShutdown()
+        local fn, loadErr = rbLoadRemoteSpy(state)
+        if not fn then
+            okExec, errText = false, loadErr or "远程监控加载失败"
+        else
+            local okRun, runErr = pcall(fn)
+            if not okRun then
+                okExec, errText = false, ("远程监控启动失败：%s"):format(tostring(runErr))
+            end
+        end
+    end
+    state.rsBusy = nil
+
+    local running = false
+    if rbRemoteSpyFindGui() then running = true end
+    if not running and envt and envt.SimpleSpyExecuted then running = true end
+
+    if okExec and running then
+        state.rsOn = true
+        rbNotify(already and "远程监控已在显示中" or "远程监控已开启（汉化版）", 2)
+        return true
+    end
+    state.rsOn = false
+    rbNotify(errText or "远程监控未能启动", 3)
+    return false
 end
 
 local pageDef = {

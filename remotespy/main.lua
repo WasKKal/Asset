@@ -6,7 +6,8 @@
 -- ScreenGui/主框架固定命名，便于集成方查找与避让。
 -- 与 DeltaUI 对象树重复的功能已移除（屏蔽 / 清空屏蔽列表 / 反编译）。
 -- 顶部栏移除最小化按钮；隐藏切换按钮在首次隐藏前不显示；移除加入 Discord 按钮。
--- 集成构建标记：rs-cn.4
+-- 集成构建标记：rs-cn.5（窗口自行跟随建造空间渐显/隐藏）
+-- 兼容标记：rs-cn.4
 
 if getgenv().SimpleSpyExecuted and type(getgenv().SimpleSpyShutdown) == "function" then
     getgenv().SimpleSpyShutdown()
@@ -2305,3 +2306,144 @@ if table.find({
         QuickCapture.TextColor3 = Background.Visible and Color3.fromRGB(255, 255, 255) or Color3.fromRGB(252, 51, 51)
     end)
 end
+
+-- ================= DeltaUI 建造空间联动 =================
+-- 窗口自身跟随宿主的建造空间状态：进入建造空间时整窗渐显，离开时整窗隐藏；
+-- 积木编程的「显示 RemoteSpy 窗口」开关因此可以随时开启，不再要求先进入空间。
+-- 仅当宿主存在 buildSpaceActive 全局时才接管显隐，单独运行本脚本仍是立即显示。
+local RS_SPACE_KEY = "buildSpaceActive"
+local RS_FADE_SEC = 0.28
+local RS_DESIGN = setmetatable({}, {__mode = "k"})
+local rsFadeGen = 0
+local rsInSpace = nil
+
+local function rsSpaceState()
+    local ok, value = pcall(function()
+        local envt = getgenv and getgenv() or _G
+        return envt[RS_SPACE_KEY]
+    end)
+    if not ok then return nil end
+    if value == true then return true end
+    if value == false then return false end
+    return nil
+end
+
+local function rsIsTextNode(node)
+    local yes = false
+    pcall(function()
+        yes = node:IsA("TextLabel") or node:IsA("TextButton") or node:IsA("TextBox")
+    end)
+    return yes
+end
+
+local function rsIsImageNode(node)
+    local yes = false
+    pcall(function()
+        yes = node:IsA("ImageLabel") or node:IsA("ImageButton")
+    end)
+    return yes
+end
+
+local function rsGuiNodes()
+    local nodes = {}
+    if not SimpleSpy3 then return nodes end
+    pcall(function()
+        for _, d in ipairs(SimpleSpy3:GetDescendants()) do
+            if d:IsA("GuiObject") then nodes[#nodes + 1] = d end
+        end
+    end)
+    return nodes
+end
+
+-- 只登记"此刻真的看得见"的元素，避免把最小化/收起侧栏过程中的中间态当成设计值
+local function rsDesignOf(node)
+    local rec = RS_DESIGN[node]
+    if rec ~= nil then return rec end
+    local painted = false
+    pcall(function()
+        if node.Visible ~= false and node.BackgroundTransparency < 1 then painted = true end
+    end)
+    if not painted and rsIsTextNode(node) then
+        pcall(function() painted = node.TextTransparency < 1 end)
+    end
+    if not painted and rsIsImageNode(node) then
+        pcall(function() painted = node.ImageTransparency < 1 end)
+    end
+    if not painted then return nil end
+    rec = {}
+    pcall(function() rec.bg = node.BackgroundTransparency end)
+    if rsIsTextNode(node) then pcall(function() rec.tx = node.TextTransparency end) end
+    if rsIsImageNode(node) then pcall(function() rec.im = node.ImageTransparency end) end
+    RS_DESIGN[node] = rec
+    return rec
+end
+
+local function rsRevealWindow()
+    if not (SimpleSpy3 and SimpleSpy3.Parent) then return end
+    local plan = {}
+    for _, node in ipairs(rsGuiNodes()) do
+        local rec = rsDesignOf(node)
+        if rec then plan[#plan + 1] = {node = node, rec = rec} end
+    end
+    pcall(function() SimpleSpy3.Enabled = true end)
+    rsFadeGen = rsFadeGen + 1
+    local gen = rsFadeGen
+    for _, item in ipairs(plan) do
+        local node = item.node
+        pcall(function()
+            node.BackgroundTransparency = 1
+            if rsIsTextNode(node) then node.TextTransparency = 1 end
+            if rsIsImageNode(node) then node.ImageTransparency = 1 end
+        end)
+    end
+    pcall(function() RunService.Stepped:Wait() end)
+    if gen ~= rsFadeGen then return end
+    for _, item in ipairs(plan) do
+        local node, rec = item.node, item.rec
+        if node and node.Parent then
+            local props = {}
+            if type(rec.bg) == "number" then props.BackgroundTransparency = rec.bg end
+            if type(rec.tx) == "number" then props.TextTransparency = rec.tx end
+            if type(rec.im) == "number" then props.ImageTransparency = rec.im end
+            if next(props) ~= nil then
+                pcall(function()
+                    TweenService:Create(node, TweenInfo.new(RS_FADE_SEC, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), props):Play()
+                end)
+            end
+        end
+    end
+end
+
+local function rsHideWindow()
+    rsFadeGen = rsFadeGen + 1
+    pcall(function()
+        if SimpleSpy3 and SimpleSpy3.Parent then SimpleSpy3.Enabled = false end
+    end)
+end
+
+rsInSpace = rsSpaceState()
+if rsInSpace == false then
+    rsHideWindow()
+elseif rsInSpace == nil then
+    rsInSpace = true
+end
+
+spawn(function()
+    while SimpleSpy3 and SimpleSpy3.Parent do
+        local state = rsSpaceState()
+        if state == nil then
+            if not rsInSpace then
+                rsInSpace = true
+                pcall(function() SimpleSpy3.Enabled = true end)
+            end
+        elseif state ~= rsInSpace then
+            rsInSpace = state
+            if state then
+                rsRevealWindow()
+            else
+                rsHideWindow()
+            end
+        end
+        wait(0.2)
+    end
+end)

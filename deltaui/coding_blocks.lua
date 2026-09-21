@@ -5394,6 +5394,8 @@ function rbRemoteSpyAutoLoadWatch()
             local now = rbBuildSpaceActive()
             if now and not inSpace and rbRemoteSpyWanted() and not rbRemoteSpyRunning() then
                 rbSetRemoteSpyVisible(true)
+            elseif not now and inSpace then
+                rbSetRemoteSpyVisible(false)
             end
             inSpace = now
         end

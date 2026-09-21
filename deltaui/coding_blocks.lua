@@ -5140,7 +5140,7 @@ local RB_RS_URLS = {
     "https://testingcf.jsdelivr.net/gh/WasKKal/Asset@master/remotespy/main.lua",
     "https://fastly.jsdelivr.net/gh/WasKKal/Asset@master/remotespy/main.lua",
 }
-local RB_RS_BUILD = "rs-cn.6"
+local RB_RS_BUILD = "rs-cn.7"
 local RB_RS_CACHE = "Cache/RemoteSpy_main_" .. RB_RS_BUILD .. ".lua"
 local RB_RS_GUI_NAME = "KariRemoteSpyGui"
 local RB_RS_MIN_LEN = 40000

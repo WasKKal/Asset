@@ -4227,6 +4227,13 @@ if codingEnterBtn then
         }):Play()
     end
     codingEnterBtn.MouseButton1Click:Connect(function()
+        codingFadeGroup(codingActionSmall, false, 0.28)
+        if codingRightPanel and not codingSettingsMode then
+            codingFadeGroup(codingRightPanel, false, 0.28)
+        elseif codingSettingsBtn then
+            codingFadeGroup(codingSettingsBtn, false, 0.28)
+        end
+        codingEnterBtnFading = true
         resetToBase()
         enterBuildSpace()
     end)
@@ -5409,6 +5416,47 @@ function pageDef.build(frame, helpers)
     end
     ensureDependencies()
     pcall(installRemoteBlockPatch, helpers and helpers.data)
+
+    -- 自动预下载所有 HTTP 依赖到本地缓存，供后续调用直接读取
+    pcall(function()
+        local dataApi = helpers and helpers.data
+        if type(dataApi) ~= "table" then return end
+        if not dataApi.readFile or not dataApi.writeFile then return end
+
+        local function ensureCached(urls, cachePath, minSize, validator)
+            local code = dataApi.readFile(cachePath)
+            local valid = false
+            if type(code) == "string" and #code > 0 then
+                if validator then
+                    valid = validator(code)
+                elseif #code >= (minSize or 1) then
+                    valid = true
+                end
+            end
+            if valid then return end
+
+            for _, url in ipairs(urls) do
+                local ok, res = pcall(function() return game:HttpGet(url, true) end)
+                if ok and type(res) == "string" and #res > 0 then
+                    local canCache = false
+                    if validator then
+                        canCache = validator(res)
+                    elseif #res >= (minSize or 1) then
+                        canCache = true
+                    end
+                    if canCache then
+                        pcall(function() dataApi.writeFile(cachePath, res) end)
+                        return
+                    end
+                end
+                task.wait(0.3)
+            end
+        end
+
+        ensureCached(RB_KARI_URLS, RB_KARI_CACHE, 5000)
+        ensureCached(RB_RS_URLS, RB_RS_CACHE, RB_RS_MIN_LEN, rbRsValid)
+    end)
+
     codingPage = frame
     frame.Name = pageInfo.name
 

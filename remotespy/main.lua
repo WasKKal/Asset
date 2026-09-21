@@ -6,7 +6,7 @@
 -- ScreenGui/主框架固定命名，便于集成方查找与避让。
 -- 与 DeltaUI 对象树重复的功能已移除（屏蔽 / 清空屏蔽列表 / 反编译）。
 -- 顶部栏移除最小化按钮；隐藏切换按钮在首次隐藏前不显示；移除加入 Discord 按钮。
--- 集成构建标记：rs-cn.7（修复 toggleSpyMethod hookfunction 回调非 vararg 导致 '...' 报错）
+-- 集成构建标记：rs-cn.8（ScreenGui挂CoreGui + 初始渐显 + SimpleSpyExecuted/Shutdown标记）
 -- 兼容标记：rs-cn.4
 
 if getgenv().SimpleSpyExecuted and type(getgenv().SimpleSpyShutdown) == "function" then

@@ -3049,6 +3049,7 @@ end
 
 local function extract_lcg_params(blocks)
   local mul45, add45, mul8 = nil, nil, nil
+  if type(blocks) ~= "table" then blocks = {} end
   for bid, b in pairs(blocks) do
     for _, s in ipairs(b.body) do
       local roots
@@ -3089,6 +3090,7 @@ end
 
 local function collect_enc_pairs(blocks)
   local enc_pairs = {}
+  if type(blocks) ~= "table" then blocks = {} end
   for bid, b in pairs(blocks) do
     for _, s in ipairs(b.body) do
       local roots
@@ -5754,6 +5756,7 @@ local function deobfuscate(code, verbose)
   local ci = recover_constants(code)
   local inliner = make_inliner(ci)
   local blocks0, unreach0, _ = build_cfg(vm, pv, cont.returnvar, nil, inliner)
+  if type(blocks0) ~= "table" then blocks0 = {} end
   local mul45, add45, mul8 = extract_lcg_params(blocks0)
   local decryptor = nil
   local key8 = nil
@@ -5766,6 +5769,7 @@ local function deobfuscate(code, verbose)
     end
   end
   local blocks, unreach, id2stats = build_cfg(vm, pv, cont.returnvar, decryptor, inliner)
+  if type(blocks) ~= "table" then blocks = {} end
 
   local rw = make_sema(cont)
   for bid, b in pairs(blocks) do

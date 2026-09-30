@@ -4905,7 +4905,345 @@ if wasaiSettingsIcon then
     wasaiSettingsIcon.Position = UDim2.new(0.5, 0, 0.5, 0)
     wasaiSettingsIcon.Parent = wasaiSettingsButton
 end
--- 设置按钮：暂不绑定任何事件
+
+local wasaiSettingsOpen = false
+local wasaiSettingsUi = nil
+
+local function wasaiTween(obj, props, dur)
+    local ts = svc and svc.TweenService
+    if not ts then
+        pcall(function() for k, v in pairs(props) do obj[k] = v end end)
+        return
+    end
+    local ok, t = pcall(function()
+        return ts:Create(obj, TweenInfo.new(dur or 0.28, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), props)
+    end)
+    if ok and t then pcall(function() t:Play() end) end
+end
+
+local function wasaiMakeCard(parent, title)
+    local card = create("Frame", {
+        Name = "Card_" .. tostring(title),
+        Size = UDim2.new(1, 0, 0, 0),
+        AutomaticSize = Enum.AutomaticSize.Y,
+        BackgroundColor3 = theme.surface,
+        BackgroundTransparency = 0.12,
+        BorderSizePixel = 0,
+        ClipsDescendants = true,
+        Parent = parent,
+    })
+    corner(theme.radius or 14, card)
+    stroke(theme.border or Color3.fromRGB(52, 62, 88), 1, card)
+    create("UIPadding", {
+        PaddingLeft = UDim.new(0, 12), PaddingRight = UDim.new(0, 12),
+        PaddingTop = UDim.new(0, 10), PaddingBottom = UDim.new(0, 10),
+        Parent = card,
+    })
+    create("UIListLayout", {
+        FillDirection = Enum.FillDirection.Vertical,
+        Padding = UDim.new(0, 8),
+        Parent = card,
+    })
+    if title then
+        create("TextLabel", {
+            Size = UDim2.new(1, 0, 0, 18),
+            BackgroundTransparency = 1,
+            Text = title,
+            TextColor3 = theme.accent or Color3.fromRGB(56, 189, 248),
+            Font = Enum.Font.SourceSansBold,
+            TextSize = 15,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            Parent = card,
+        })
+    end
+    return card
+end
+
+local function wasaiMakeToggleRow(parent, label, getVal, setVal)
+    local row = create("Frame", {
+        Size = UDim2.new(1, 0, 0, 32),
+        BackgroundTransparency = 1,
+        Parent = parent,
+    })
+    create("TextLabel", {
+        Size = UDim2.new(1, -60, 1, 0),
+        BackgroundTransparency = 1,
+        Text = label,
+        TextColor3 = theme.text or Color3.fromRGB(242, 245, 252),
+        Font = Enum.Font.SourceSans,
+        TextSize = 13,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        Parent = row,
+    })
+    local track = create("Frame", {
+        Size = UDim2.new(0, 44, 0, 22),
+        Position = UDim2.new(1, -44, 0.5, -11),
+        BackgroundColor3 = theme.surfaceLight or Color3.fromRGB(30, 36, 52),
+        BorderSizePixel = 0,
+        Parent = row,
+    })
+    corner(11, track)
+    local knob = create("Frame", {
+        Size = UDim2.new(0, 18, 0, 18),
+        Position = UDim2.new(0, 2, 0.5, -9),
+        BackgroundColor3 = theme.text or Color3.fromRGB(242, 245, 252),
+        BorderSizePixel = 0,
+        Parent = track,
+    })
+    corner(9, knob)
+    local on = false
+    local function paint()
+        on = not not getVal()
+        track.BackgroundColor3 = on and (theme.accent or Color3.fromRGB(56, 189, 248)) or (theme.surfaceLight or Color3.fromRGB(30, 36, 52))
+        wasaiTween(knob, { Position = on and UDim2.new(0, 24, 0.5, -9) or UDim2.new(0, 2, 0.5, -9) }, 0.2)
+    end
+    paint()
+    local btn = create("TextButton", {
+        Size = UDim2.new(1, 0, 1, 0),
+        BackgroundTransparency = 1,
+        Text = "",
+        Parent = track,
+    })
+    btn.MouseButton1Click:Connect(function()
+        pcall(function()
+            setVal(not on)
+            paint()
+        end)
+    end)
+    return row
+end
+
+local function wasaiReadCfg()
+    local ok, c = pcall(loadConfig)
+    if ok and type(c) == "table" then return c end
+    return {}
+end
+local function wasaiWriteCfg(k, v)
+    local c = wasaiReadCfg()
+    c[k] = v
+    pcall(saveConfig, c)
+end
+
+local function wasaiBuildProviderSection(panel)
+    local card = wasaiMakeCard(panel, "AI 服务商管理")
+    local cur = (wasaiLocalAIConfig and wasaiLocalAIConfig.activeModel) or "flash"
+    local info = create("TextLabel", {
+        Size = UDim2.new(1, 0, 0, 18),
+        BackgroundTransparency = 1,
+        Text = "当前服务商：" .. ((WASAAI_MODELS[cur] and WASAAI_MODELS[cur].label) or tostring(cur)),
+        TextColor3 = theme.textDim or Color3.fromRGB(150, 160, 184),
+        Font = Enum.Font.SourceSans,
+        TextSize = 12,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        Parent = card,
+    })
+    local grid = create("Frame", {
+        Size = UDim2.new(1, 0, 0, 34),
+        BackgroundTransparency = 1,
+        Parent = card,
+    })
+    create("UIListLayout", {
+        FillDirection = Enum.FillDirection.Horizontal,
+        Padding = UDim.new(0, 6),
+        Parent = grid,
+    })
+    local modelIds = { "flash", "pro", "claude", "aiagent" }
+    for _, id in ipairs(modelIds) do
+        local m = WASAAI_MODELS[id]
+        local b = create("TextButton", {
+            Size = UDim2.new(0.25, -5, 0, 30),
+            BackgroundColor3 = (cur == id) and (theme.accent or Color3.fromRGB(56, 189, 248)) or (theme.surfaceLight or Color3.fromRGB(30, 36, 52)),
+            BackgroundTransparency = (cur == id) and 0 or 0.3,
+            BorderSizePixel = 0,
+            Text = (m and m.label) or id,
+            TextColor3 = (cur == id) and Color3.fromRGB(255, 255, 255) or (theme.text or Color3.fromRGB(242, 245, 252)),
+            Font = Enum.Font.SourceSans,
+            TextSize = 11,
+            Parent = grid,
+        })
+        corner(8, b)
+        b.MouseButton1Click:Connect(function()
+            pcall(function()
+                wasaiApplyModel(id)
+                for _, child in ipairs(grid:GetChildren()) do
+                    if child:IsA("TextButton") then
+                        child.BackgroundColor3 = theme.surfaceLight or Color3.fromRGB(30, 36, 52)
+                        child.BackgroundTransparency = 0.3
+                        child.TextColor3 = theme.text or Color3.fromRGB(242, 245, 252)
+                    end
+                end
+                b.BackgroundColor3 = theme.accent or Color3.fromRGB(56, 189, 248)
+                b.BackgroundTransparency = 0
+                b.TextColor3 = Color3.fromRGB(255, 255, 255)
+                info.Text = "当前服务商：" .. ((m and m.label) or id)
+            end)
+        end)
+    end
+    wasaiMakeToggleRow(card, "启用外部 API", function() return wasaiReadCfg().useExternalApi == true end,
+        function(v) wasaiWriteCfg("useExternalApi", v); pcall(updateExternalApiUI, v) end)
+    return card
+end
+
+local function wasaiBuildMemorySection(panel)
+    local card = wasaiMakeCard(panel, "全局记忆管理")
+    local okDb, db = pcall(wasaiLoadMemoryDB)
+    db = (okDb and type(db) == "table") and db or {}
+    local count = #db
+    local cats = {}
+    for _, m in ipairs(db) do if m and m.category then cats[m.category] = true end end
+    local catCount = 0
+    for _ in pairs(cats) do catCount = catCount + 1 end
+    local stat = create("TextLabel", {
+        Size = UDim2.new(1, 0, 0, 36),
+        BackgroundTransparency = 1,
+        Text = "已存储记忆：" .. count .. " 条    分类：" .. catCount .. " 类\n全局记忆用于让 AI 记住你的偏好与上下文",
+        TextColor3 = theme.textDim or Color3.fromRGB(150, 160, 184),
+        Font = Enum.Font.SourceSans,
+        TextSize = 12,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        Parent = card,
+    })
+    local clearBtn = create("TextButton", {
+        Size = UDim2.new(1, 0, 0, 30),
+        BackgroundColor3 = theme.red or Color3.fromRGB(255, 82, 104),
+        BackgroundTransparency = 0.15,
+        BorderSizePixel = 0,
+        Text = "清空全部全局记忆",
+        TextColor3 = theme.red or Color3.fromRGB(255, 82, 104),
+        Font = Enum.Font.SourceSansBold,
+        TextSize = 13,
+        Parent = card,
+    })
+    corner(8, clearBtn)
+    local confirming = false
+    clearBtn.MouseButton1Click:Connect(function()
+        pcall(function()
+            if not confirming then
+                confirming = true
+                clearBtn.Text = "再次点击确认清空（不可恢复）"
+                task.delay(3, function()
+                    confirming = false
+                    pcall(function() clearBtn.Text = "清空全部全局记忆" end)
+                end)
+                return
+            end
+            confirming = false
+            wasaiMemoryCache = {}
+            wasaiMemoryDirty = true
+            pcall(wasaiSaveMemoryDB)
+            clearBtn.Text = "已清空"
+            stat.Text = "已存储记忆：0 条    分类：0 类\n全局记忆用于让 AI 记住你的偏好与上下文"
+            pcall(ShowNotification, "已清空全局记忆", 2)
+            task.delay(1.5, function() pcall(function() clearBtn.Text = "清空全部全局记忆" end) end)
+        end)
+    end)
+    return card
+end
+
+local function wasaiBuildGeneralSection(panel)
+    local card = wasaiMakeCard(panel, "通用")
+    wasaiMakeToggleRow(card, "思考模式", function() return wasaiReadCfg().thinking_mode == true end,
+        function(v) wasaiWriteCfg("thinking_mode", v) end)
+    wasaiMakeToggleRow(card, "训练数据上传", function() return wasaiReadCfg().training_upload == true end,
+        function(v) wasaiWriteCfg("training_upload", v) end)
+    create("TextLabel", {
+        Size = UDim2.new(1, 0, 0, 28),
+        BackgroundTransparency = 1,
+        Text = "AgentLess 官方页面 · 版本 1.0.0",
+        TextColor3 = theme.textDim or Color3.fromRGB(150, 160, 184),
+        Font = Enum.Font.SourceSans,
+        TextSize = 12,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        Parent = card,
+    })
+    return card
+end
+
+local function wasaiEnsureSettingsUI()
+    if wasaiSettingsUi then return end
+    local scrim = create("Frame", {
+        Name = "SettingsScrim",
+        Size = UDim2.new(1, 0, 1, -52),
+        Position = UDim2.new(0, 0, 0, 52),
+        BackgroundColor3 = theme.bg or Color3.fromRGB(7, 9, 15),
+        BackgroundTransparency = 1,
+        BorderSizePixel = 0,
+        Parent = wasaiMainFrame,
+        ZIndex = 8,
+        Visible = false,
+    })
+    local panel = create("ScrollingFrame", {
+        Name = "SettingsPanel",
+        Size = UDim2.new(1, -24, 1, -52 - 16),
+        Position = UDim2.new(0, 12, 0, 52 + 8),
+        BackgroundColor3 = theme.surface or Color3.fromRGB(18, 22, 34),
+        BackgroundTransparency = 1,
+        BorderSizePixel = 0,
+        ScrollBarThickness = 4,
+        ScrollBarImageColor3 = theme.textDim or Color3.fromRGB(150, 160, 184),
+        AutomaticCanvasSize = Enum.AutomaticSize.Y,
+        CanvasSize = UDim2.new(0, 0, 0, 0),
+        Parent = wasaiMainFrame,
+        ZIndex = 9,
+        Visible = false,
+    })
+    corner(theme.radius or 14, panel)
+    stroke(theme.border or Color3.fromRGB(52, 62, 88), 1, panel)
+    create("UIListLayout", {
+        FillDirection = Enum.FillDirection.Vertical,
+        Padding = UDim.new(0, 10),
+        Parent = panel,
+    })
+    create("UIPadding", {
+        PaddingLeft = UDim.new(0, 12), PaddingRight = UDim.new(0, 12),
+        PaddingTop = UDim.new(0, 12), PaddingBottom = UDim.new(0, 12),
+        Parent = panel,
+    })
+    pcall(wasaiBuildProviderSection, panel)
+    pcall(wasaiBuildMemorySection, panel)
+    pcall(wasaiBuildGeneralSection, panel)
+    wasaiSettingsUi = { scrim = scrim, panel = panel }
+end
+
+local function wasaiOpenSettings()
+    if wasaiSettingsOpen then wasaiCloseSettings(); return end
+    wasaiEnsureSettingsUI()
+    wasaiSettingsOpen = true
+    pcall(function() wasaiTitleLabel.Text = "设置" end)
+    pcall(function() wasaiSettingsUi.scrim.Visible = true end)
+    pcall(function() wasaiSettingsUi.panel.Visible = true end)
+    wasaiTween(wasaiSettingsUi.scrim, { BackgroundTransparency = 0.6 }, 0.3)
+    wasaiTween(wasaiSettingsUi.panel, { BackgroundTransparency = 0 }, 0.3)
+    pcall(function() wasaiMessageFrame.Visible = false end)
+    pcall(function() wasaiInputFrame.Visible = false end)
+    pcall(function() wasaiDivider.Visible = false end)
+end
+
+local function wasaiCloseSettings()
+    wasaiSettingsOpen = false
+    pcall(function() wasaiTitleLabel.Text = "AgentLess" end)
+    if wasaiSettingsUi then
+        wasaiTween(wasaiSettingsUi.scrim, { BackgroundTransparency = 1 }, 0.25)
+        wasaiTween(wasaiSettingsUi.panel, { BackgroundTransparency = 1 }, 0.25)
+    end
+    pcall(function() wasaiMessageFrame.Visible = true end)
+    pcall(function() wasaiInputFrame.Visible = true end)
+    pcall(function() wasaiDivider.Visible = true end)
+    task.delay(0.3, function()
+        pcall(function()
+            if (not wasaiSettingsOpen) and wasaiSettingsUi then
+                wasaiSettingsUi.scrim.Visible = false
+                wasaiSettingsUi.panel.Visible = false
+            end
+        end)
+    end)
+end
+
+pcall(function()
+    wasaiSettingsButton.MouseButton1Click:Connect(function()
+        pcall(wasaiOpenSettings)
+    end)
+end)
 
 
 local wasaiPointsLabel

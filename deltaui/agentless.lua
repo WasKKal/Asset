@@ -4450,9 +4450,9 @@ if type(updateExternalApiUI) == "function" then
 end
 
 
-local wasaiManageMode = false
-local wasaiManageButton = create("TextButton", {
-    Name = "ManageButton",
+local wasaiManageMode = false   -- 对话管理面板保留，暂时不开放入口
+local wasaiSettingsButton = create("TextButton", {
+    Name = "SettingsButton",
     Size = UDim2.new(0, 24, 0, 24),
     Position = UDim2.new(1, -30, 0.5, -12),
     BackgroundColor3 = theme.surfaceLight,
@@ -4462,13 +4462,14 @@ local wasaiManageButton = create("TextButton", {
     Parent = wasaiTitleBar,
     ZIndex = 6
 })
-corner(6, wasaiManageButton)
-local wasaiManageIcon = GetIcon("message-circle-reply", UDim2.new(0, 16, 0, 16))
-if wasaiManageIcon then
-    wasaiManageIcon.AnchorPoint = Vector2.new(0.5, 0.5)
-    wasaiManageIcon.Position = UDim2.new(0.5, 0, 0.5, 0)
-    wasaiManageIcon.Parent = wasaiManageButton
+corner(6, wasaiSettingsButton)
+local wasaiSettingsIcon = GetIcon("settings", UDim2.new(0, 15, 0, 15), theme.textDim)
+if wasaiSettingsIcon then
+    wasaiSettingsIcon.AnchorPoint = Vector2.new(0.5, 0.5)
+    wasaiSettingsIcon.Position = UDim2.new(0.5, 0, 0.5, 0)
+    wasaiSettingsIcon.Parent = wasaiSettingsButton
 end
+-- 设置按钮：暂不绑定任何事件
 
 
 local wasaiPointsLabel
@@ -5247,6 +5248,89 @@ applyGradient(wasaiSendButton, theme.accent, theme.accent2, 120)
 corner(16, wasaiSendButton)
 
 
+-- ===== 深度思考开关（胶囊按钮，位于输入框栏上方最左侧）=====
+wasaiDeepThinkingEnabled = not wasaiLocalAIConfig.thinkingDisabled
+
+local wasaiThinkPill = create("TextButton", {
+    Name = "DeepThinkingPill",
+    Size = UDim2.new(0, 106, 0, 26),
+    Position = UDim2.new(0, 10, 1, -86),
+    BackgroundColor3 = theme.surfaceLight,
+    BackgroundTransparency = 0.45,
+    BorderSizePixel = 0,
+    Text = "",
+    AutoButtonColor = false,
+    Parent = wasaiMainFrame,
+    ZIndex = 6
+})
+corner(13, wasaiThinkPill)   -- 13 = 高度一半，胶囊形
+
+local wasaiThinkStroke = stroke(theme.border, 1, wasaiThinkPill)
+local wasaiThinkGradient = applyGradient(wasaiThinkPill, theme.accent, theme.accent2, 120)
+if wasaiThinkGradient then wasaiThinkGradient.Enabled = false end
+
+local wasaiThinkIcon = GetIcon("atom", UDim2.new(0, 14, 0, 14), theme.textDim)
+if wasaiThinkIcon then
+    wasaiThinkIcon.Position = UDim2.new(0, 10, 0.5, -7)
+    wasaiThinkIcon.Parent = wasaiThinkPill
+end
+
+local wasaiThinkText = create("TextLabel", {
+    Position = UDim2.new(0, 29, 0, 0),
+    Size = UDim2.new(1, -34, 1, 0),
+    BackgroundTransparency = 1,
+    Text = "深度思考",
+    TextColor3 = theme.textDim,
+    Font = Enum.Font.SourceSansBold,
+    TextSize = 12,
+    TextXAlignment = Enum.TextXAlignment.Left,
+    TextYAlignment = Enum.TextYAlignment.Center,
+    Parent = wasaiThinkPill,
+    ZIndex = 7
+})
+
+wasaiApplyThinkPill = function(state)
+    wasaiDeepThinkingEnabled = state and true or false
+    if wasaiThinkGradient then wasaiThinkGradient.Enabled = wasaiDeepThinkingEnabled end
+    wasaiThinkPill.BackgroundColor3 = wasaiDeepThinkingEnabled and Color3.fromRGB(255, 255, 255) or theme.surfaceLight
+    wasaiThinkPill.BackgroundTransparency = wasaiDeepThinkingEnabled and 0 or 0.45
+    if wasaiThinkStroke then
+        wasaiThinkStroke.Color = wasaiDeepThinkingEnabled and theme.accent or theme.border
+        wasaiThinkStroke.Transparency = wasaiDeepThinkingEnabled and 0.1 or 0.4
+    end
+    if wasaiThinkIcon then
+        wasaiThinkIcon.ImageColor3 = wasaiDeepThinkingEnabled and Color3.fromRGB(255, 255, 255) or theme.textDim
+    end
+    wasaiThinkText.TextColor3 = wasaiDeepThinkingEnabled and Color3.fromRGB(255, 255, 255) or theme.textDim
+    return wasaiDeepThinkingEnabled
+end
+
+wasaiApplyThinkPill(wasaiDeepThinkingEnabled)
+
+-- 供设置卡等外部开关同步胶囊状态
+_G.__DeltaAI_updateThinkPill = wasaiApplyThinkPill
+
+wasaiThinkPill.MouseButton1Click:Connect(function()
+    local nextState = not wasaiDeepThinkingEnabled
+    wasaiApplyThinkPill(nextState)
+
+    local setter = _G.__DeltaAI_setThinkingMode
+    if type(setter) == "function" then pcall(setter, nextState) end
+
+    if type(loadConfig) == "function" and type(saveConfig) == "function" then
+        pcall(function()
+            local cfg = loadConfig()
+            cfg.thinkingMode = nextState
+            saveConfig(cfg)
+        end)
+    end
+
+    if type(ShowNotification) == "function" then
+        ShowNotification(nextState and "已开启深度思考" or "已关闭深度思考", 1.2)
+    end
+end)
+
+
 local wasaiManageFrame = create("ScrollingFrame", {
     Name = "ManageFrame",
     Size = UDim2.new(1, -20, 1, -44),
@@ -5427,19 +5511,21 @@ wasaiSetManageMode = function(on)
     wasaiManageFrame.Visible = on
     wasaiMessageFrame.Visible = not on
     wasaiInputFrame.Visible = not on
-    wasaiManageButton.BackgroundColor3 = on and theme.accent or theme.surfaceLight
+    if wasaiThinkPill then wasaiThinkPill.Visible = not on end
+    if wasaiSettingsButton then
+        wasaiSettingsButton.BackgroundColor3 = on and theme.accent or theme.surfaceLight
+    end
     wasaiTitleLabel.Text = on and "对话管理" or "AgentLess"
     if on then wasaiRefreshConversationList() end
 end
 
-wasaiManageButton.MouseButton1Click:Connect(function()
-    wasaiSetManageMode(not wasaiManageMode)
-end)
+-- 对话管理入口已移除（右上角改为设置按钮，暂不绑定事件）
 
 wasaiFinalizeMessage = function(container, isUser)
     local avatar = container:FindFirstChild("Avatar")
     local bubble = container:FindFirstChild("Bubble")
-    if not avatar or not bubble then return end
+    if not bubble then return end
+    local noAvatar = (avatar == nil)
     task.defer(function()
         local frameW = wasaiMessageFrame.AbsoluteSize.X
         local maxWidth = math.min(400, math.max(160, frameW * 0.7))
@@ -5450,7 +5536,9 @@ wasaiFinalizeMessage = function(container, isUser)
                 label.AutomaticSize = Enum.AutomaticSize.Y
             end
         end
-        if isUser then
+        if noAvatar then
+            -- 续接气泡：位置在创建时已定好，这里不再重设
+        elseif isUser then
             avatar.AnchorPoint = Vector2.new(1, 0)
             avatar.Position = UDim2.new(1, -8, 0, 0)
             bubble.AnchorPoint = Vector2.new(1, 0)
@@ -6815,6 +6903,9 @@ local function buildAgentLessSettings(env, G)
             writeCfg("thinkingMode", state)
             local setter = G.__DeltaAI_setThinkingMode
             if type(setter) == "function" then pcall(setter, state) end
+            -- 同步输入框上方的「深度思考」胶囊按钮
+            local pill = G.__DeltaAI_updateThinkPill
+            if type(pill) == "function" then pcall(pill, state) end
         end, "thinkingMode")
     end
 

@@ -2608,20 +2608,24 @@ local function wasaiBuildSystemPrompt()
         "你是 DeltaUI 的 Roblox 智能助手，运行在 Luau 环境。",
         "",
         "## 工具",
-        "list_children / decompile / get_property / find_objects / execute_lua / GotRemote / go_to / click_gui。",
+        "- 实例：list_children / list_properties / get_property / find_objects / search_objects",
+        "- 脚本与文件：decompile / decompile_smart / decompile_all / decompile_modules / read_file / edit_file / del_file",
+        "- 执行与交互：execute_lua / GotRemote / go_to / click_gui / noclip / anti_fling / report_progress",
         "",
         "## 规则",
         "1. 用户指令优先，直接给结果，简洁、不啰嗦、不编造；不确定就直说。",
         "2. 需要动 Roblox 时才调工具：先定位(list_children/find_objects/decompile)，再操作(execute_lua/go_to/click_gui)，能一次多调就多调；关键信息缺失只追问一次。",
         "3. 普通问答直接回答，不要为聊天调工具。",
-        "4. 回复用标准 Markdown，与 DeepSeek 一致：",
+        "4. 文件操作统一走 read_file / edit_file / del_file：改文件前先 read_file 看清行号，再用 edit_file 按行改（start_line/count）；只改一处文本可用 edit_file 的 replace_text。",
+        "5. read_file 不会一次吐完整大文件时会提示截断，继续用 start_line/count 分段读；del_file 默认进回收站，删文件夹要 recursive=true。",
+        "6. 回复用标准 Markdown，与 DeepSeek 一致：",
         "   - 代码必须用围栏并标注语言，例如",
         "     ```lua",
         "     local part = workspace.Part",
         "     print(part.Name)",
         "     ```",
         "   - 行内代码用单反引号，如 `print`；标题用 #/##；列表用 -；强调用 **加粗**。",
-        "5. 禁止用 ##代码## 这类自定义包裹，禁止把语言名写进正文。",
+        "7. 禁止用 ##代码## 这类自定义包裹，禁止把语言名写进正文。",
     }, "\n")
 end
 
@@ -2711,7 +2715,10 @@ local WASAI_DEEPSEEK_TOOLS = {
     {type="function", ["function"]={name="delete_recent_files", description="删除最近文件", parameters={type="object"}}},
     {type="function", ["function"]={name="noclip", description="穿墙", parameters={type="object", properties={enabled={type="boolean"}}}}},
     {type="function", ["function"]={name="anti_fling", description="防甩飞", parameters={type="object", properties={enabled={type="boolean"}}}}},
-    {type="function", ["function"]={name="read_file", description="读取文件", parameters={type="object", properties={path={type="string"}}, required={"path"}}}},
+    -- ===== 文件工具（read_file / edit_file / del_file）=====
+    {type="function", ["function"]={name="read_file", description="读取文件内容。可整读，也可按行读：start_line 起始行(1起)，count 读多少行或 end_line 结束行（二选一，count 优先）。默认带行号返回，便于配合 edit_file 精确改行。", parameters={type="object", properties={path={type="string", description="文件路径，如 DeltaUI/Script/a.lua"}, start_line={type="number", description="起始行号，1 起，默认 1"}, count={type="number", description="读取行数；与 end_line 同时省略时读到文件末尾"}, end_line={type="number", description="结束行号(含)，与 count 二选一"}, number={type="boolean", description="是否带行号，默认 true"}, max_chars={type="number", description="单次返回字符上限，默认 12000"}}, required={"path"}}}},
+    {type="function", ["function"]={name="edit_file", description="编辑文件（默认先备份为 .bak）。mode：create/overwrite 整文件写入；append/prepend 末尾追加/开头插入；insert 在第 start_line 行后插入 content；replace_range 用 content 替换第 start_line~end_line 行；replace_text 把 old 换成 new（count 次数，默认 1，0=全部）。省略 mode 时按参数自动判断。", parameters={type="object", properties={path={type="string", description="文件路径"}, mode={type="string", description="create|overwrite|append|prepend|insert|replace_range|replace_text"}, content={type="string", description="写入/替换/插入的文本"}, start_line={type="number", description="起始行号，1 起"}, end_line={type="number", description="结束行号(含)"}, count={type="number", description="replace_range 的行数，或 replace_text 的替换次数"}, old={type="string", description="replace_text：被替换的原文（纯文本，不是模式串）"}, new={type="string", description="replace_text：替换后的文本"}, backup={type="boolean", description="是否备份 .bak，默认 true"}}, required={"path"}}}},
+    {type="function", ["function"]={name="del_file", description="删除文件（默认先存入回收站 DeltaUI/Trash，backup=false 可关闭）。删除文件夹必须传 recursive=true。", parameters={type="object", properties={path={type="string", description="文件或文件夹路径"}, recursive={type="boolean", description="删除文件夹时必须为 true"}, backup={type="boolean", description="是否存入回收站，默认 true"}}, required={"path"}}}},
     {type="function", ["function"]={name="report_progress", description="向用户汇报当前处理进度", parameters={type="object", properties={message={type="string", description="进度说明"}}, required={"message"}}}},
     {type="function", ["function"]={name="GotRemote", description="捕获FireServer/InvokeServer调用。进入等待交互后提示用户手动操作一次，AI自动捕获并生成Lua。忽略ping/fps等无用Remote。", parameters={type="object", properties={goal={type="string", description="目标操作说明，如'出售物品'/'领取奖励'"}, timeout={type="number", description="等待秒数，默认30，最大120"}}, required={"goal"}}}},
 
@@ -3919,6 +3926,327 @@ do
     end
 end
 
+
+-- ============================================================================
+--  文件工具：read_file / edit_file / del_file
+--  统一约定（规范）：
+--    path        文件路径（必填，可用 DeltaUI/... 相对路径）
+--    start_line  起始行号，1 起（read_file / edit_file 通用）
+--    end_line    结束行号（含）；与 count 二选一，count 优先
+--    count       行数；read_file 表示读多少行，edit_file 表示替换多少行
+--    content     写入/替换/插入的文本
+--    old/new     replace_text 模式的查找与替换文本（纯文本，非模式串）
+--    backup      默认 true：改动前留备份（edit_file → .bak，del_file → 回收站）
+--  所有工具统一以 [OK] / [ERR] / [WARN] 开头返回，便于模型判断结果。
+-- ============================================================================
+WASAI_FILE_TOOLS_MAX_CHARS = 12000   -- read_file 单次返回字符上限
+
+local function wasaiFileSplitLines(text)
+    local out = {}
+    text = tostring(text or "")
+    local pos = 1
+    while true do
+        local s = text:find("\n", pos, true)
+        if s then
+            out[#out + 1] = text:sub(pos, s - 1)
+            pos = s + 1
+        else
+            out[#out + 1] = text:sub(pos)
+            break
+        end
+    end
+    return out
+end
+
+local function wasaiFileJoinLines(lines)
+    return table.concat(lines, "\n")
+end
+
+-- 文本内容切成行数组；若以换行结尾，去掉尾部多出的空元素（避免多插一个空行）
+local function wasaiFileContentToLines(content)
+    content = tostring(content or "")
+    local lines = wasaiFileSplitLines(content)
+    if #lines > 1 and lines[#lines] == "" and content:sub(-1) == "\n" then
+        table.remove(lines)
+    end
+    return lines
+end
+
+local function wasaiFileLineCount(text)
+    return select(2, tostring(text or ""):gsub("\n", "")) + 1
+end
+
+local function wasaiFileCheckFs()
+    if type(isfile) ~= "function" or type(readfile) ~= "function" or type(writefile) ~= "function" then
+        return false, "当前执行器不支持文件读写接口（isfile/readfile/writefile）"
+    end
+    return true
+end
+
+local function wasaiFileReadRaw(path)
+    local okFs, fsErr = wasaiFileCheckFs()
+    if not okFs then return nil, fsErr end
+    if not isfile(path) then return nil, "文件不存在: " .. tostring(path) end
+    local ok, content = pcall(readfile, path)
+    if not ok or type(content) ~= "string" then
+        return nil, "读取失败: " .. tostring(content)
+    end
+    return content
+end
+
+local function wasaiFileEnsureParent(path)
+    if type(isfolder) ~= "function" or type(makefolder) ~= "function" then return end
+    local folder = tostring(path):match("^(.*)[/\\][^/\\]+$")
+    if folder and folder ~= "" and not isfolder(folder) then
+        pcall(makefolder, folder)
+    end
+end
+
+local function wasaiEscapeLuaPattern(s)
+    return (tostring(s or ""):gsub("([%^%$%(%)%%%.%[%]%*%+%-%?])", "%%%1"))
+end
+
+-- ---------------------------------------------------------------- read_file
+local function wasaiToolReadFile(args)
+    args = args or {}
+    local path = tostring(args.path or "")
+    if path == "" then return "[ERR] read_file: 缺少参数 path" end
+
+    local content, err = wasaiFileReadRaw(path)
+    if not content then return "[ERR] read_file: " .. tostring(err) end
+
+    local lines = wasaiFileSplitLines(content)
+    local total = #lines
+
+    local startLine = math.floor(tonumber(args.start_line) or tonumber(args.start) or 1)
+    if startLine < 1 then startLine = 1 end
+    if startLine > total then startLine = total end
+
+    local count = tonumber(args.count) or tonumber(args.line_count)
+    local endLine
+    if count and count > 0 then
+        endLine = startLine + math.floor(count) - 1
+    else
+        endLine = math.floor(tonumber(args.end_line) or tonumber(args["end"]) or total)
+    end
+    if endLine > total then endLine = total end
+    if endLine < startLine then endLine = startLine end
+
+    local numbered = args.number
+    if numbered == nil then numbered = true end
+
+    local maxChars = tonumber(args.max_chars) or WASAI_FILE_TOOLS_MAX_CHARS
+    local buf = {}
+    local used = 0
+    local truncated = false
+    local lastLine = startLine - 1
+    for i = startLine, endLine do
+        local text = lines[i] or ""
+        local piece = numbered and string.format("%4d| %s", i, text) or text
+        if used + #piece + 1 > maxChars then
+            truncated = true
+            break
+        end
+        buf[#buf + 1] = piece
+        used = used + #piece + 1
+        lastLine = i
+    end
+
+    local head = string.format("[OK] read_file %s | 共 %d 行 | 返回第 %d-%d 行%s",
+        path, total, startLine, math.max(startLine, lastLine),
+        truncated and ("（超出 " .. maxChars .. " 字符已截断，可指定 start_line/count 继续读）") or "")
+    return head .. "\n" .. table.concat(buf, "\n")
+end
+
+-- ---------------------------------------------------------------- edit_file
+local function wasaiToolEditFile(args)
+    args = args or {}
+    if type(isfile) ~= "function" or type(writefile) ~= "function" then
+        return "[ERR] edit_file: 当前执行器不支持文件读写接口"
+    end
+    local path = tostring(args.path or "")
+    if path == "" then return "[ERR] edit_file: 缺少参数 path" end
+
+    local exists = isfile(path)
+    local original = ""
+    if exists then
+        local content, err = wasaiFileReadRaw(path)
+        if not content then return "[ERR] edit_file: " .. tostring(err) end
+        original = content
+    end
+
+    local mode = tostring(args.mode or ""):lower()
+    if mode == "" then
+        if args.old ~= nil then mode = "replace_text"
+        elseif args.append == true then mode = "append"
+        elseif args.prepend == true then mode = "prepend"
+        elseif args.start_line ~= nil then mode = "replace_range"
+        elseif args.content ~= nil then mode = exists and "overwrite" or "create"
+        else
+            return "[ERR] edit_file: 无法判断编辑模式，请给出 mode（create/overwrite/append/prepend/insert/replace_range/replace_text）或对应参数"
+        end
+    end
+
+    if not exists and mode ~= "create" and mode ~= "overwrite" then
+        return "[ERR] edit_file: 文件不存在，新建请用 mode=\"create\": " .. path
+    end
+
+    local beforeLines = wasaiFileLineCount(original)
+    local newContent = original
+    local detail = ""
+    local wrote = true
+
+    if mode == "create" or mode == "overwrite" then
+        newContent = tostring(args.content or "")
+        detail = "整文件写入 " .. wasaiFileLineCount(newContent) .. " 行"
+
+    elseif mode == "append" then
+        local add = tostring(args.content or "")
+        if add == "" then return "[ERR] edit_file: append 需要 content" end
+        if original ~= "" and original:sub(-1) ~= "\n" then original = original .. "\n" end
+        newContent = original .. add
+        detail = "末尾追加 " .. wasaiFileLineCount(add) .. " 行"
+
+    elseif mode == "prepend" then
+        local add = tostring(args.content or "")
+        if add == "" then return "[ERR] edit_file: prepend 需要 content" end
+        newContent = add .. original
+        detail = "开头插入"
+
+    elseif mode == "insert" then
+        local add = tostring(args.content or "")
+        if add == "" then return "[ERR] edit_file: insert 需要 content" end
+        local lines = wasaiFileSplitLines(original)
+        local at = math.floor(tonumber(args.start_line) or tonumber(args.after_line) or 0)
+        if at < 0 then at = 0 end
+        if at > #lines then at = #lines end
+        local addLines = wasaiFileContentToLines(add)
+        local merged = {}
+        for i = 1, at do merged[#merged + 1] = lines[i] end
+        for _, l in ipairs(addLines) do merged[#merged + 1] = l end
+        for i = at + 1, #lines do merged[#merged + 1] = lines[i] end
+        newContent = wasaiFileJoinLines(merged)
+        detail = string.format("在第 %d 行后插入 %d 行", at, #addLines)
+
+    elseif mode == "replace_range" then
+        local lines = wasaiFileSplitLines(original)
+        local s = math.floor(tonumber(args.start_line) or tonumber(args.from_line) or 1)
+        local e = tonumber(args.end_line)
+        if not e then
+            local c = tonumber(args.count)
+            e = c and (s + math.floor(c) - 1) or s
+        end
+        e = math.floor(e)
+        if s < 1 then s = 1 end
+        if s > #lines then s = #lines end
+        if e < s then e = s end
+        if e > #lines then e = #lines end
+        local newLines = wasaiFileContentToLines(tostring(args.content or ""))
+        local merged = {}
+        for i = 1, s - 1 do merged[#merged + 1] = lines[i] end
+        for _, l in ipairs(newLines) do merged[#merged + 1] = l end
+        for i = e + 1, #lines do merged[#merged + 1] = lines[i] end
+        newContent = wasaiFileJoinLines(merged)
+        detail = string.format("替换第 %d-%d 行 → %d 行", s, e, #newLines)
+
+    elseif mode == "replace_text" then
+        local old = tostring(args.old or "")
+        if old == "" then return "[ERR] edit_file: replace_text 需要参数 old" end
+        local new = tostring(args.new or args.content or "")
+        local pat = wasaiEscapeLuaPattern(old)
+        local limit = tonumber(args.count) or 1
+        local replaced = 0
+        if limit <= 0 then
+            newContent, replaced = original:gsub(pat, function() return new end)
+        else
+            local done = 0
+            newContent = original:gsub(pat, function()
+                if done >= limit then return nil end
+                done = done + 1
+                return new
+            end)
+            replaced = done
+        end
+        if replaced == 0 then
+            return "[ERR] edit_file: 未找到待替换文本（" .. string.format("%d", #old) .. " 字符），请先 read_file 确认内容"
+        end
+        detail = string.format("文本替换 %d 处", replaced)
+
+    else
+        return "[ERR] edit_file: 不支持的模式 " .. mode
+    end
+
+    if newContent == original then
+        return "[WARN] edit_file: 内容无变化（" .. detail .. "）"
+    end
+
+    wasaiFileEnsureParent(path)
+
+    local backupPath = nil
+    if exists and args.backup ~= false then
+        backupPath = path .. ".bak"
+        pcall(writefile, backupPath, original)
+    end
+
+    local okW, werr = pcall(writefile, path, newContent)
+    if not okW then
+        wrote = false
+        return "[ERR] edit_file 写入失败: " .. tostring(werr)
+    end
+
+    wasaiTrackFileOp(path)
+    local afterLines = wasaiFileLineCount(newContent)
+    return string.format("[OK] edit_file %s | %s | 行数 %d → %d%s",
+        path, detail, beforeLines, afterLines,
+        backupPath and (" | 备份: " .. backupPath) or "")
+end
+
+-- ---------------------------------------------------------------- del_file
+local function wasaiToolDelFile(args)
+    args = args or {}
+    local path = tostring(args.path or "")
+    if path == "" then return "[ERR] del_file: 缺少参数 path" end
+
+    local isDir = type(isfolder) == "function" and isfolder(path)
+    local isF = type(isfile) == "function" and isfile(path)
+    if not isDir and not isF then return "[ERR] del_file: 路径不存在: " .. path end
+
+    -- 回收站：删除前把文件内容备份到 DeltaUI/Trash/（backup=false 可关闭）
+    local trashed = nil
+    if isF and args.backup ~= false and type(readfile) == "function" and type(writefile) == "function" then
+        local okR, content = pcall(readfile, path)
+        if okR and type(content) == "string" then
+            local trashDir = "DeltaUI/Trash"
+            if type(isfolder) == "function" and type(makefolder) == "function" and not isfolder(trashDir) then
+                pcall(makefolder, trashDir)
+            end
+            local name = path:match("([^/\\]+)$") or "file"
+            trashed = trashDir .. "/" .. tostring(os.time()) .. "_" .. name
+            pcall(writefile, trashed, content)
+        end
+    end
+
+    if isDir then
+        if args.recursive ~= true and args.force ~= true then
+            return "[ERR] del_file: " .. path .. " 是文件夹，确认整目录删除请传 recursive=true"
+        end
+        if type(delfolder) ~= "function" then
+            return "[ERR] del_file: 当前执行器不支持删除文件夹（delfolder）"
+        end
+        local okD, derr = pcall(delfolder, path)
+        if not okD then return "[ERR] del_file 删除文件夹失败: " .. tostring(derr) end
+        return "[OK] del_file 已删除文件夹: " .. path .. (trashed and (" | 回收站: " .. trashed) or "")
+    end
+
+    if type(delfile) ~= "function" then
+        return "[ERR] del_file: 当前执行器不支持 delfile"
+    end
+    local okD, derr = pcall(delfile, path)
+    if not okD then return "[ERR] del_file 删除失败: " .. tostring(derr) end
+    wasaiTrackFileOp(path)
+    return "[OK] del_file 已删除: " .. path .. (trashed and (" | 回收站: " .. trashed) or "")
+end
+
 local function wasaiExecuteToolCall(tool, args)
     wasaiTrackToolCall()
     local ok, result = pcall(function()
@@ -4081,17 +4409,13 @@ local function wasaiExecuteToolCall(tool, args)
             return wasaiSetAntiFling(args.enabled ~= false)
 
         elseif tool == "read_file" then
-            local path = tostring(args.path or "")
-            if path == "" then return "未提供文件路径" end
-            if isfile and isfile(path) then
-                local okR, content = pcall(readfile, path)
-                if okR and content then
-                    if #content > 6000 then content = content:sub(1, 6000) .. "\n…(内容过长已截断)" end
-                    return content
-                end
-                return "读取失败: " .. tostring(content)
-            end
-            return "文件不存在: " .. path
+            return wasaiToolReadFile(args)
+
+        elseif tool == "edit_file" then
+            return wasaiToolEditFile(args)
+
+        elseif tool == "del_file" or tool == "delete_file" or tool == "remove_file" then
+            return wasaiToolDelFile(args)
 
         elseif tool == "report_progress" then
             local msg = wasaiSafeString(tostring(args.message or ""), 80)
@@ -4252,7 +4576,14 @@ local function wasaiGenerateResponseCore(input, authToken)
                 wasaiThinkingPhase = "正在调用工具: " .. toolName
                 wasaiLastToolName = toolName
                 wasaiLastToolPhase = "正在调用工具: " .. toolName
-                local toolResult = wasaiSafeString(wasaiExecuteToolCall(toolName, toolArgs), 2500)
+                -- 文件类工具结果更大，单独放宽上限（read_file 默认最多返回 12000 字符）
+                local resultCap = 2500
+                if toolName == "read_file" then
+                    resultCap = 12000
+                elseif toolName == "list_output_files" or toolName == "edit_file" then
+                    resultCap = 4000
+                end
+                local toolResult = wasaiSafeString(wasaiExecuteToolCall(toolName, toolArgs), resultCap)
 
                 
                 local sig = toolName

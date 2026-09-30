@@ -4323,13 +4323,8 @@ local function wasaiExecuteToolCall(tool, args)
                     return "__PERMISSION_DENIED__"
                 end
             else
-                local preview = code:gsub("%s+", " ")
-                if #preview > 40 then preview = preview:sub(1, 40) .. "…" end
                 wasaiThinkingPhase = "正在执行 Lua 代码"
                 wasaiLastToolPhase = "正在执行 Lua 代码"
-                pcall(function()
-                    ShowNotification("Agent 正在执行 Lua: " .. preview, 2.5)
-                end)
                 task.wait()
             end
             local out, cerr = wasaiExecuteLuaCode(code)
@@ -4628,6 +4623,10 @@ local function wasaiGenerateResponseCore(input, authToken)
                 })
             end
             
+            -- 一轮工具调用结束：收尾当前「深度思考」卡片并开启新一轮
+            if wasaiEndThinkingRound then pcall(wasaiEndThinkingRound) end
+            if wasaiStartThinkingRound then pcall(wasaiStartThinkingRound) end
+
             if not stallWarned and toolCount >= 5 then
                 stallWarned = true
                 table.insert(messages, {
@@ -6448,61 +6447,217 @@ end
 local wasaiShowThinkingBubble
 local wasaiRemoveThinkingBubble
 
+-- ============================================================================
+--  深度思考卡片（workbuddy / DeepSeek 风格）
+--  · 头部：图标 + 「深度思考」+ 状态（进行中显示秒数与阶段 / 完成后显示用时）+ 折叠箭头
+--  · 主体：推理内容（流式刷新），可点击头部展开或收起，超长时内部滚动
+--  · 完成后自动收起，卡片保留在对话流里
+-- ============================================================================
 do
     local currentThinkingContainer = nil
     local currentThinkingThread = nil
+    local currentThinkingBody = nil
+    local currentThinkingLabel = nil
+    local currentThinkingStatus = nil
+    local currentThinkingChevron = nil
+    local currentThinkingStartTime = 0
+    local currentThinkingLastText = ""
+    local currentThinkingExpanded = true
+
+    local function wasaiThinkBodyHeight(text)
+        local frameW = 320
+        pcall(function()
+            if wasaiMessageFrame and wasaiMessageFrame.AbsoluteSize.X > 0 then
+                frameW = wasaiMessageFrame.AbsoluteSize.X
+            end
+        end)
+        local availW = math.max(120, frameW - 120)
+        local TextService = game:GetService("TextService")
+        local ok, size = pcall(function()
+            return TextService:GetTextSize(text, 12, Enum.Font.SourceSans, Vector2.new(availW, 100000))
+        end)
+        local textH = (ok and size and size.Y) or 40
+        return math.clamp(textH + 18, 26, 280)
+    end
+
+    local function wasaiThinkSetBody(text)
+        if not currentThinkingBody or not currentThinkingLabel then return end
+        text = tostring(text or "")
+        if text == currentThinkingLastText then return end
+        currentThinkingLastText = text
+        pcall(function()
+            currentThinkingLabel.Text = text
+            currentThinkingBody.Size = UDim2.new(1, -20, 0, wasaiThinkBodyHeight(text))
+        end)
+    end
+
+    local function wasaiThinkSetExpanded(expanded)
+        currentThinkingExpanded = expanded and true or false
+        if currentThinkingBody then currentThinkingBody.Visible = currentThinkingExpanded end
+        if currentThinkingChevron then
+            currentThinkingChevron.Rotation = currentThinkingExpanded and 90 or 0
+        end
+    end
+
+    wasaiThinkingSetExpanded = wasaiThinkSetExpanded
 
     wasaiShowThinkingBubble = function()
-        wasaiRemoveThinkingBubble()
-        local container, bubble = wasaiCreateMessageContainer("", false)
-        currentThinkingContainer = container
+        -- 上一张还在进行中的卡片先收尾
+        if currentThinkingContainer then
+            pcall(wasaiRemoveThinkingBubble)
+        end
 
-        local label = create("TextLabel", {
-            Name = "TextLabel",
+        local container, bubble = wasaiCreateMessageContainer("", false, nil, true)
+        currentThinkingContainer = container
+        currentThinkingLastText = ""
+        currentThinkingExpanded = true
+        currentThinkingStartTime = tick()
+
+        if bubble then
+            -- 整行卡片：宽度铺满、只按内容高度增长
+            bubble.AutomaticSize = Enum.AutomaticSize.Y
+            bubble.Size = UDim2.new(1, -16, 0, 0)
+            bubble.BackgroundTransparency = 0.55
+        end
+
+        local header = create("TextButton", {
+            Name = "ThinkHeader",
+            Size = UDim2.new(1, 0, 0, 28),
             BackgroundTransparency = 1,
-            Text = "仍在思考(0.00秒)...",
-            TextColor3 = theme.textDim or Color3.fromRGB(140, 140, 150),
-            Font = Enum.Font.SourceSansItalic,
-            TextSize = 14,
-            TextWrapped = true,
+            Text = "",
+            AutoButtonColor = false,
+            Parent = bubble,
+            ZIndex = 5
+        })
+
+        local headIcon = GetIcon("brain", UDim2.new(0, 14, 0, 14), theme.textDim)
+        if not headIcon then
+            headIcon = GetIcon("atom", UDim2.new(0, 14, 0, 14), theme.textDim)
+        end
+        if headIcon then
+            headIcon.Position = UDim2.new(0, 10, 0, 7)
+            headIcon.Parent = header
+        end
+
+        local titleLabel = create("TextLabel", {
+            Name = "ThinkTitle",
+            Position = UDim2.new(0, 30, 0, 0),
+            Size = UDim2.new(0, 68, 1, 0),
+            BackgroundTransparency = 1,
+            Text = "深度思考",
+            TextColor3 = theme.textDim,
+            Font = Enum.Font.SourceSansBold,
+            TextSize = 12,
             TextXAlignment = Enum.TextXAlignment.Left,
-            TextYAlignment = Enum.TextYAlignment.Top,
-            Size = UDim2.new(0, 0, 0, 0),
-            AutomaticSize = Enum.AutomaticSize.XY,
+            TextYAlignment = Enum.TextYAlignment.Center,
+            Parent = header,
+            ZIndex = 6
+        })
+
+        currentThinkingStatus = create("TextLabel", {
+            Name = "ThinkStatus",
+            Position = UDim2.new(0, 96, 0, 0),
+            Size = UDim2.new(1, -130, 1, 0),
+            BackgroundTransparency = 1,
+            Text = "思考中…",
+            TextColor3 = theme.textDim,
+            Font = Enum.Font.SourceSans,
+            TextSize = 11,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            TextYAlignment = Enum.TextYAlignment.Center,
+            TextTruncate = Enum.TextTruncate.AtEnd,
+            Parent = header,
+            ZIndex = 6
+        })
+
+        currentThinkingChevron = GetIcon("chevron-right", UDim2.new(0, 14, 0, 14), theme.textDim)
+        if currentThinkingChevron then
+            currentThinkingChevron.AnchorPoint = Vector2.new(0.5, 0.5)
+            currentThinkingChevron.Position = UDim2.new(1, -16, 0.5, 0)
+            currentThinkingChevron.Rotation = 90
+            currentThinkingChevron.Parent = header
+            currentThinkingChevron.ZIndex = 6
+        end
+
+        -- 左侧竖线 + 推理正文（超长时内部滚动）
+        local bodyWrap = create("ScrollingFrame", {
+            Name = "ThinkBody",
+            Position = UDim2.new(0, 10, 0, 30),
+            Size = UDim2.new(1, -20, 0, 40),
+            BackgroundTransparency = 1,
+            BorderSizePixel = 0,
+            ScrollBarThickness = 3,
+            ScrollBarImageColor3 = theme.textDim,
+            CanvasSize = UDim2.new(0, 0, 0, 0),
+            AutomaticCanvasSize = Enum.AutomaticSize.Y,
+            ScrollingEnabled = true,
+            ClipsDescendants = true,
             Parent = bubble,
             ZIndex = 4
         })
-        create("UIPadding", {
-            PaddingLeft = UDim.new(0, 12),
-            PaddingRight = UDim.new(0, 12),
-            PaddingTop = UDim.new(0, 8),
-            PaddingBottom = UDim.new(0, 8),
-            Parent = label
+        currentThinkingBody = bodyWrap
+
+        local bar = create("Frame", {
+            Name = "ThinkBar",
+            Position = UDim2.new(0, 0, 0, 2),
+            Size = UDim2.new(0, 2, 1, -4),
+            BackgroundColor3 = theme.accent,
+            BackgroundTransparency = 0.5,
+            BorderSizePixel = 0,
+            Parent = bodyWrap,
+            ZIndex = 5
+        })
+        corner(1, bar)
+
+        currentThinkingLabel = create("TextLabel", {
+            Name = "ThinkText",
+            Position = UDim2.new(0, 10, 0, 0),
+            Size = UDim2.new(1, -14, 0, 0),
+            BackgroundTransparency = 1,
+            Text = "",
+            TextColor3 = theme.textDim,
+            Font = Enum.Font.SourceSans,
+            TextSize = 12,
+            TextWrapped = true,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            TextYAlignment = Enum.TextYAlignment.Top,
+            AutomaticSize = Enum.AutomaticSize.Y,
+            Parent = bodyWrap,
+            ZIndex = 5
         })
 
+        wasaiThinkSetExpanded(true)
         wasaiFinalizeMessage(container, false)
 
-        local startTime = tick()
+        header.MouseButton1Click:Connect(function()
+            wasaiThinkSetExpanded(not currentThinkingExpanded)
+        end)
+
+        -- 运行中：刷新计时 / 阶段文字 / 流式推理
+        local startTime = currentThinkingStartTime
         currentThinkingThread = task.spawn(function()
             while currentThinkingContainer == container do
                 local elapsed = tick() - startTime
-                local timeStr = string.format("%.2f", elapsed)
                 local phase = wasaiThinkingPhase or ""
-                local text
-                if phase ~= "" then
-                    local suffix = phase:sub(-1) == "…" and "" or "..."
-                    text = "仍在思考(" .. timeStr .. "秒) · " .. phase .. suffix
-                else
-                    text = "仍在思考(" .. timeStr .. "秒)..."
+                local reasoning = tostring(wasaiLocalAIState and wasaiLocalAIState.lastReasoning or "")
+
+                if reasoning ~= "" then
+                    wasaiThinkSetBody(reasoning)
+                elseif phase ~= "" then
+                    wasaiThinkSetBody(phase .. "…")
                 end
-                local ok = pcall(function()
-                    label.Text = text
-                end)
-                if not ok then break end
+
+                if currentThinkingStatus then
+                    local suffix = phase ~= "" and (" · " .. phase) or ""
+                    local ok = pcall(function()
+                        currentThinkingStatus.Text = string.format("%.1fs", elapsed) .. suffix
+                    end)
+                    if not ok then break end
+                end
                 pcall(function()
                     wasaiMessageFrame.CanvasPosition = Vector2.new(0, wasaiMessageFrame.CanvasSize.Y.Offset)
                 end)
-                task.wait(0.05)
+                task.wait(0.1)
             end
         end)
 
@@ -6514,14 +6669,50 @@ do
         wasaiCustomProgressMsg = ""
         wasaiLastToolName = ""
         wasaiLastToolPhase = ""
+
         if currentThinkingThread then
             pcall(function() task.cancel(currentThinkingThread) end)
             currentThinkingThread = nil
         end
-        if currentThinkingContainer then
-            pcall(function() currentThinkingContainer:Destroy() end)
-            currentThinkingContainer = nil
+
+        local container = currentThinkingContainer
+        currentThinkingContainer = nil
+        if not container then return end
+
+        local elapsed = math.max(0, tick() - (currentThinkingStartTime or tick()))
+
+        -- 固化的正文：优先推理内容，其次最后的阶段文字
+        local finalText = ""
+        pcall(function()
+            local reasoning = tostring(wasaiLocalAIState and wasaiLocalAIState.lastReasoning or "")
+            if reasoning ~= "" then
+                finalText = reasoning
+            elseif currentThinkingLastText ~= "" then
+                finalText = currentThinkingLastText
+            end
+        end)
+        if finalText ~= "" then
+            pcall(wasaiThinkSetBody, finalText)
+        else
+            pcall(wasaiThinkSetBody, "（本轮没有返回思考内容）")
         end
+
+        if currentThinkingStatus then
+            pcall(function()
+                currentThinkingStatus.Text = string.format("（用时 %.1f 秒）", elapsed)
+            end)
+        end
+
+        -- 完成后自动收起，卡片留在对话里
+        pcall(wasaiThinkSetExpanded, false)
+    end
+
+    -- 供工具循环使用：每完成一轮工具调用就收尾当前卡片、开启新一轮「深度思考」
+    wasaiStartThinkingRound = function()
+        return wasaiShowThinkingBubble()
+    end
+    wasaiEndThinkingRound = function()
+        return wasaiRemoveThinkingBubble()
     end
 end
 
@@ -6827,13 +7018,8 @@ wasaiSendMessage = function()
             wasaiRemoveThinkingBubble()
 
             
-            if not wasaiLocalAIConfig.thinkingDisabled and wasaiLocalAIState.lastReasoning and wasaiLocalAIState.lastReasoning ~= "" then
-                local reasoningText = "【思考过程】\n" .. tostring(wasaiLocalAIState.lastReasoning)
-                pcall(function()
-                    wasaiAddMessage(reasoningText, false)
-                end)
-                wasaiLocalAIState.lastReasoning = nil
-            end
+            -- 思考内容已由「深度思考」卡片承载，不再单独发一条消息
+            wasaiLocalAIState.lastReasoning = nil
 
             local statsText = wasaiGenerateStatsText(true)
 

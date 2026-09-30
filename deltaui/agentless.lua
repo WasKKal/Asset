@@ -1,29 +1,4 @@
---[[
-=========================================================================
- AgentLess · DeltaUI 官方页面扩展
--------------------------------------------------------------------------
- name    : agentless
- title   : AgentLess
- 来源    : 从 DeltaUI_LanguageCore.lua 中整体剥离(wasaiPage / nav "atom")
- 版本    : 1.0.0
--------------------------------------------------------------------------
- 加载说明
-   本页面属于「官方页面」，必须在**主环境(免沙箱)**下运行，
-   因此页面内直接使用 loadstring / setfenv / 文件接口 / HTTP 接口。
-   宿主侧放行方式见同目录下的官方页面补丁(deltaui-official-page-patch.md)：
-   页面定义带有 official=true / unrestricted=true 标记，
-   宿主识别到该标记后跳过 makeSafeEnv 与风险正则扫描。
-
- 宿主需提供(DeltaUI 全局，缺失时页面会给出提示)
-   create / corner / stroke / applyGradient / GetIcon      —— UI 构造
-   loadConfig / saveConfig                                  —— 配置读写
-   ShowNotification / t / registerTranslation                —— 通知与文案
-   contentFrame                                              —— 页面容器
-   makeSectionCard / makeSettingRow / makeToggle / makeDropdown / settingsScroll
-                                                             —— 可选：设置卡
-   这些符号缺失时会退回读取 _G.__DeltaUI_* 导出。
-=========================================================================
-]]
+ 
 
 DeltaPageInfo = {
     name = "agentless",
@@ -31,8 +6,8 @@ DeltaPageInfo = {
     icon = "atom",
     dataFolder = "AgentLess",
     version = "1.0.0",
-    official = true,        -- 官方页面：宿主据此跳过沙箱
-    unrestricted = true,    -- 需要完整环境权限
+    official = true,        
+    unrestricted = true,    
 }
 
 local pageDef = {
@@ -58,22 +33,22 @@ local function getGlobalEnv()
     return g or {}
 end
 
--- -------------------------------------------------------------------------
---  [修复] 宿主符号解析
---  宿主主 UI 可能运行在**独立的脚本环境**里（执行器给脚本单独的 env）：
---  此时 getgenv() 只有 Roblox/执行器全局，拿不到宿主脚本自己定义的全局函数
---  （loadConfig / saveConfig / applyGradient / create …），
---  页面 env 只查 getgenv() 就会在第一次裸调用时报
---      "attempt to call a nil value"（AgentLess 第 1974 行就是 loadConfig()）。
---  所以这里依次在下面这些环境里查找（含宿主写入的 __DeltaUI_<name> 导出），
---  最后再回退到宿主通过 helpers 直接传进来的函数：
---      本文件（页面）chunk 环境(getfenv) → getgenv() → _G → helpers
--- -------------------------------------------------------------------------
--- 取“本文件 chunk 自己的环境”：
---   注意不能用 pcall(getfenv)（取到的是 pcall 自己的环境 = 真实全局表），
---   要用 getfenv(函数) 这种传函数的形式，拿到的才是该函数所在 chunk 的环境。
---   某些执行器的 loadstring 会把调用者环境传给新 chunk（宿主环境），这时这个根命中率最高；
---   若执行器和标准 Lua 5.1 一样给新 chunk 真实全局表，这个根就等于 _G，重复但无害。
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 local function hostChunkEnv()
     if type(getfenv) ~= "function" then return nil end
     local probe = function() end
@@ -97,7 +72,7 @@ local HOST_ROOTS = (function()
     return roots
 end)()
 
--- 在若干候选环境里按名字查找宿主符号（含 __DeltaUI_<name> 导出），最后退回 helpers
+
 local function hostSymbol(name, helpers)
     if type(name) ~= "string" then return nil end
     for _, root in ipairs(HOST_ROOTS) do
@@ -112,17 +87,17 @@ local function hostSymbol(name, helpers)
     return nil
 end
 
--- 页面本体（内嵌源码）用裸名字调用的宿主函数清单：
--- 这些名字必须能在 env 里解析到，否则页面会在半路崩掉
+
+
 local HOST_BINDINGS = {
     "create", "corner", "stroke", "applyGradient", "GetIcon",
     "ShowNotification", "AddLog", "t", "loadConfig", "saveConfig",
     "registerTranslation", "pages", "navButtons", "switchPage",
 }
 
--- -------------------------------------------------------------------------
---  宿主符号缺失时的兜底实现（保证页面不会因为一个 nil 直接崩掉）
--- -------------------------------------------------------------------------
+
+
+
 local HOST_CONFIG_FILE = "DeltaUI/Config.json"
 
 local function getHttpService()
@@ -188,7 +163,7 @@ local function makeFallbackApplyGradient(env)
         pcall(function() g.Color = ColorSequence.new(from, to) end)
         pcall(function() frame.BackgroundColor3 = Color3.fromRGB(255, 255, 255) end)
         pcall(function() g.Parent = frame end)
-        -- 与宿主一致：登记到主题渐变色列表，主题切换时一起刷新
+        
         local G = env and env._G
         if type(G) == "table" then
             pcall(function()
@@ -200,7 +175,7 @@ local function makeFallbackApplyGradient(env)
     end
 end
 
--- 宿主没有提供主题表时使用的兜底配色（与 DeltaUI 默认暗色主题一致）
+
 local function builtinTheme()
     return {
         bg = Color3.fromRGB(7, 9, 15),
@@ -221,11 +196,11 @@ local function builtinTheme()
     }
 end
 
--- =========================================================================
---  AgentLess 页面本体（从 DeltaUI_LanguageCore.lua 剥离，逻辑保持原样）
---  仅改了两行：页面根 Frame 改为使用宿主提供的容器，
---  以及去掉了原文件里的 pages["atom"] = wasaiPage 注册（改由官方页面宿主注册）
--- =========================================================================
+
+
+
+
+
 local AGENTLESS_SOURCE = [==[
 -- ============================================================
 -- AgentLess 页面本体（从 DeltaUI_LanguageCore.lua 剥离）
@@ -7442,7 +7417,7 @@ local AGENTLESS_TRANSLATIONS = {
     training_upload_desc = {en = "With your consent, upload anonymized conversation pairs to the game server for training", zh = "开启后，在你同意的情况下把匿名化的对话问答上传到游戏服务器用于训练", ko = "동의하면 익명화된 대화 데이터를 게임 서버로 업로드", ja = "同意した場合、匿名化した会話データをゲームサーバーへ送信"},
 }
 
--- 可选的设置卡：宿主存在 makeSectionCard / makeSettingRow 时启用
+
 local function buildAgentLessSettings(env, G)
     if type(makeSectionCard) ~= "function" or type(makeSettingRow) ~= "function" then
         return false
@@ -7561,7 +7536,7 @@ local function buildAgentLessSettings(env, G)
             writeCfg("thinkingMode", state)
             local setter = G.__DeltaAI_setThinkingMode
             if type(setter) == "function" then pcall(setter, state) end
-            -- 同步输入框上方的「深度思考」胶囊按钮
+            
             local pill = G.__DeltaAI_updateThinkPill
             if type(pill) == "function" then pcall(pill, state) end
         end, "thinkingMode")
@@ -7600,12 +7575,12 @@ local function buildAgentLessEnv(frame, helpers)
     env.theme = hostSymbol("theme", helpers) or builtinTheme()
     env.contentFrame = frame.Parent or hostSymbol("contentFrame", helpers) or frame
 
-    -- [修复] 页面本体的 _G 必须与页面自身/宿主 看到的是同一张表
-    -- （__DeltaAI_* / __DeltaUI_* 这些跨模块符号都挂在 _G 上）
+    
+    
     env._G = G
 
-    -- [修复] 页面本体是裸名字调用这些宿主函数的，这里显式绑定，
-    -- 不再只依赖 env.__index 去猜；宿主没导出时下面还有兜底实现。
+    
+    
     for _, key in ipairs(HOST_BINDINGS) do
         local v = hostSymbol(key, helpers)
         if v ~= nil then env[key] = v end
@@ -7632,7 +7607,7 @@ local function buildAgentLessEnv(frame, helpers)
         warn("[AgentLess] 宿主未提供以下符号，已用页面内置兜底: " .. table.concat(fallbackUsed, ", "))
     end
 
-    -- 原 DeltaUI 里由「设置页」提供，这里补上：控制模型标签的显隐
+    
     env.updateExternalApiUI = function(forceState)
         local enabled = forceState
         if enabled == nil then
@@ -7672,7 +7647,7 @@ function pageDef.build(frame, helpers)
         end
     end
 
-    -- 官方页面必须运行在非沙箱环境里，否则文件 / HTTP / loadstring 全部不可用
+    
     if type(setfenv) ~= "function" then
         fail("AgentLess 需要在主环境(免沙箱)加载：请升级 DeltaUI 的官方页面放行，或在设置中关闭「页面安全模式」")
         return

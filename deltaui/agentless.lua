@@ -6664,6 +6664,10 @@ function wasaiCreateMessageContainer(text, isUser, customBubbleColor, noAvatar)
     corner(12, bubble)
 
     if isUser then
+        if avatar then
+            avatar.AnchorPoint = Vector2.new(1, 0)
+            avatar.Position = UDim2.new(1, -8, 0, 0)
+        end
         bubble.AnchorPoint = Vector2.new(1, 0)
         bubble.Position = noAvatar and UDim2.new(1, -8, 0, 0) or UDim2.new(1, -52, 0, 0)
     elseif noAvatar then

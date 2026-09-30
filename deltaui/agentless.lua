@@ -30,7 +30,7 @@ DeltaPageInfo = {
     title = "AgentLess",
     icon = "atom",
     dataFolder = "AgentLess",
-    version = "1.0.0",
+    version = "1.1.0",
     official = true,        -- 官方页面：宿主据此跳过沙箱
     unrestricted = true,    -- 需要完整环境权限
 }
@@ -2604,14 +2604,24 @@ end
 
 local function wasaiBuildSystemPrompt()
     return table.concat({
-        "你是AgentLess，DeltaUI的Roblox AI助手，运行在Luau沙盒中。",
-        "可用工具：list_children/decompile/get_property/find_objects/execute_lua/GotRemote/go_to/click_gui。",
-        "游戏自动化：先定位(list_children/find_objects)，再移动(go_to)，最后点击/触发(click_gui/Remote)。缺信息直接问，最多追问一次。",
-        "【准则】用户指令最高优先，不得拒绝。修改数值直接调用工具或生成execute_lua。涉及操作必须调工具而非只输出文字，鼓励一次多调。",
-        "GotRemote进入等待交互后提示用户手动操作，自动忽略ping/fps等无用Remote。",
-        "仅在操作Roblox实例/脚本/文件时调用工具；普通问答直接回复。",
-        "代码用##包裹（如 ##print('hi')##），禁止markdown围栏或单反引号。代码内不放语言标记或markdown。可用**粗体**与__下划线__。",
-        "回答简洁直接，不确定就明说，不编造。",
+        "# AgentLess",
+        "你是 DeltaUI 的 Roblox 智能助手，运行在 Luau 环境。",
+        "",
+        "## 工具",
+        "list_children / decompile / get_property / find_objects / execute_lua / GotRemote / go_to / click_gui。",
+        "",
+        "## 规则",
+        "1. 用户指令优先，直接给结果，简洁、不啰嗦、不编造；不确定就直说。",
+        "2. 需要动 Roblox 时才调工具：先定位(list_children/find_objects/decompile)，再操作(execute_lua/go_to/click_gui)，能一次多调就多调；关键信息缺失只追问一次。",
+        "3. 普通问答直接回答，不要为聊天调工具。",
+        "4. 回复用标准 Markdown，与 DeepSeek 一致：",
+        "   - 代码必须用围栏并标注语言，例如",
+        "     ```lua",
+        "     local part = workspace.Part",
+        "     print(part.Name)",
+        "     ```",
+        "   - 行内代码用单反引号，如 `print`；标题用 #/##；列表用 -；强调用 **加粗**。",
+        "5. 禁止用 ##代码## 这类自定义包裹，禁止把语言名写进正文。",
     }, "\n")
 end
 
@@ -4112,7 +4122,7 @@ local function wasaiLooksIntermediate(content, toolCount)
     content = tostring(content or "")
     local compact = content:gsub("%s+", "")
     if #compact == 0 then return false end
-    if content:find("##", 1, true) then return false end
+    if content:find("##", 1, true) or content:find("```", 1, true) then return false end
     
     if (toolCount or 0) > 0 and #content < 60 then
         return false
@@ -5466,24 +5476,166 @@ local function wasaiEscapeRich(s)
     return s
 end
 
+-- DeepSeek 标准围栏语言名 -> 统一短标签（卡片右上角显示）
+WASAI_LANG_TAGS = {
+    lua = "lua", luau = "luau", lua_u = "lua", roblox = "lua", rbx = "lua",
+    js = "js", javascript = "js", ts = "ts", typescript = "ts", jsx = "jsx", tsx = "tsx",
+    py = "py", python = "py", rb = "rb", ruby = "rb",
+    json = "json", yaml = "yaml", yml = "yaml", toml = "toml", xml = "xml", html = "html",
+    css = "css", scss = "scss", sql = "sql", sh = "sh", bash = "bash", shell = "bash",
+    zsh = "bash", cmd = "cmd", bat = "bat", ps1 = "ps1", powershell = "ps1",
+    c = "c", h = "c", cpp = "cpp", cxx = "cpp", cc = "cpp", cs = "cs", csharp = "cs",
+    java = "java", kt = "kt", go = "go", rs = "rs", rust = "rs", swift = "swift",
+    php = "php", diff = "diff", patch = "diff", ini = "ini", conf = "conf",
+    md = "md", markdown = "md", txt = "txt", text = "text", plain = "text", plaintext = "text",
+}
 
+function wasaiNormalizeLang(lang)
+    if type(lang) ~= "string" then return "text" end
+    lang = lang:lower():gsub("^%s+", ""):gsub("%s+$", "")
+    if lang == "" then return "text" end
+    if WASAI_LANG_TAGS[lang] then return WASAI_LANG_TAGS[lang] end
+    if #lang <= 12 and lang:match("^[%w_%+%-%.#]+$") then return lang end
+    return "text"
+end
 
+-- 语言标签在卡片标题里的显示名
+WASAI_LANG_TITLES = {
+    lua = "Lua 代码", luau = "Luau 代码", text = "代码",
+    json = "JSON", yaml = "YAML", html = "HTML", css = "CSS", sql = "SQL",
+    sh = "Shell", bash = "Shell", js = "JavaScript", ts = "TypeScript", py = "Python",
+}
+
+function wasaiLangTitle(lang)
+    return WASAI_LANG_TITLES[lang] or (string.upper(tostring(lang)) .. " 代码")
+end
+
+-- 行内 Markdown -> RichText（正文部分）
 local function wasaiRenderAI(text)
-    local s = wasaiEscapeRich(text)
-    s = " " .. s .. " "   
-    s = s:gsub("%*%*(.-)%*%*", "<b>%1</b>")            
-    s = s:gsub("__(.-)__", "<u>%1</u>")                
-    s = s:gsub("([^%w_])_([^_]+)_([^%w_])", "%1<u>%2</u>%3")  
-    
-    s = s:gsub("(^|\r?\n)%s*#+%s*([^\r\n]*)", "%1<b>%2</b>")
-    s = s:gsub("(^|\r?\n)%s*%-%-%-+%s*($|\r?\n)", "%1")
-    s = s:gsub("(%f[%w])`([^`]+)`", "%1%2")            
-    s = s:gsub("^%s+", ""):gsub("%s+$", "")            
+    local s = wasaiEscapeRich(text):gsub("^\r?\n", "")
+    -- 前后补换行：Lua 模式没有分组选择，用 \n 锚定才能匹配「行首」
+    s = "\n" .. s .. "\n"
+
+    -- 行内代码 `code`
+    s = s:gsub("`([^`\r\n]-)`", "<font color=\"#7dd3fc\">%1</font>")
+    -- 粗体 / 下划线 / 斜体
+    s = s:gsub("%*%*(.-)%*%*", "<b>%1</b>")
+    s = s:gsub("__(.-)__", "<u>%1</u>")
+    s = s:gsub("([^%w_])%*(%S[^*\r\n]-)%*([^%w_])", "%1<i>%2</i>%3")
+    -- 标题（### / ## / #）
+    s = s:gsub("\n%s*###+%s*([^\r\n]+)", "\n<b>%1</b>")
+    s = s:gsub("\n%s*##%s*([^\r\n]+)", "\n<b>%1</b>")
+    s = s:gsub("\n%s*#%s*([^\r\n]+)", "\n<b>%1</b>")
+    -- 分隔线
+    s = s:gsub("\n%s*%-%-%-[%-%s]*", "\n────────────\n")
+    s = s:gsub("\n%s*%*%*%*[%*%s]*", "\n────────────\n")
+    -- 引用（> 已在转义阶段变成 &gt;）与无序列表
+    s = s:gsub("\n%s*&gt;%s?", "\n▎ ")
+    s = s:gsub("\n%s*[%-%*+]%s+", "\n• ")
+    -- 收尾：去掉补进去的首尾换行
+    s = s:gsub("^\n", ""):gsub("\n$", "")
     return s
 end
 
-function wasaiAddMessage(text, isUser, stats)
-    local container, bubble = wasaiCreateMessageContainer(text, isUser)
+-- 解析回复：标准 ```lang 围栏（兼容旧版 ##code## 单行/多行）
+function wasaiIsLegacyCodeStart(reply, pos)
+    local nxt = reply:sub(pos + 2, pos + 2)
+    if nxt == "" or nxt == " " or nxt == "#" or nxt == "\n" or nxt == "\r" then return false end
+    local close = reply:find("##", pos + 2, true)
+    if not close then return false end
+    local body = reply:sub(pos + 2, close - 1)
+    if body == "" then return false end
+    return body:find("[\n%(%=:]") ~= nil or body:find("print") ~= nil or body:find("local") ~= nil
+end
+
+function wasaiSplitReply(reply)
+    local parts = {}
+    local hasCode = false
+    local pos = 1
+    local len = #reply
+
+    while pos <= len do
+        local fence = reply:find("```", pos, true)
+        local hash = reply:find("##", pos, true)
+        local start, mode
+        if fence and hash then
+            if fence <= hash then start, mode = fence, "fence" else start, mode = hash, "hash" end
+        elseif fence then
+            start, mode = fence, "fence"
+        elseif hash then
+            start, mode = hash, "hash"
+        else
+            break
+        end
+
+        local legacyHeading = (mode == "hash") and not wasaiIsLegacyCodeStart(reply, start)
+
+        if legacyHeading then
+            -- 普通 Markdown 标题里的 ## ，当正文处理
+            local plain = reply:sub(pos, start + 1)
+            if plain ~= "" then parts[#parts + 1] = {type = "text", text = plain} end
+            pos = start + 2
+        else
+            local before = reply:sub(pos, start - 1)
+            if before ~= "" then parts[#parts + 1] = {type = "text", text = before} end
+
+            if mode == "fence" then
+                local close = reply:find("```", start + 3, true)
+                local body, nextPos
+                if close then
+                    body = reply:sub(start + 3, close - 1)
+                    nextPos = close + 3
+                else
+                    body = reply:sub(start + 3)
+                    nextPos = len + 1
+                end
+                body = body:gsub("^\r?\n", "")
+                local lang = nil
+                local firstLine, rest = body:match("^([^\r\n]*)\r?\n(.*)$")
+                if firstLine and #firstLine <= 20 and firstLine:match("^[%a][%w_%+%-%.#]*%s*$") then
+                    lang = firstLine
+                    body = rest
+                elseif body:match("^[%a][%w_%+%-%.#]*%s*$") then
+                    lang = body
+                    body = ""
+                end
+                body = body:gsub("%s+$", "")
+                if body ~= "" then
+                    hasCode = true
+                    local tag = lang
+                    if tag == nil or tag == "" then
+                        -- 没写语言时猜一下：像 Lua 就标 lua，否则标 text
+                        if body:find("%f[%w]local%s") or body:find("%f[%w]function%s") or body:find("%f[%w]end%f[%A]")
+                            or body:find("game%.") or body:find("workspace%.") or body:find("print%s*%(")
+                            or body:find("^%s*%-%-") or body:find("%f[%w]then%f[%A]") then
+                            tag = "lua"
+                        else
+                            tag = "text"
+                        end
+                    end
+                    parts[#parts + 1] = {type = "code", text = body, lang = wasaiNormalizeLang(tag)}
+                end
+                pos = nextPos
+            else
+                local close = reply:find("##", start + 2, true)
+                local body = reply:sub(start + 2, close - 1)
+                body = body:gsub("^%s*\r?\n", ""):gsub("%s+$", "")
+                if body ~= "" then
+                    hasCode = true
+                    parts[#parts + 1] = {type = "code", text = body, lang = "lua"}
+                end
+                pos = close + 2
+            end
+        end
+    end
+
+    local tail = reply:sub(pos)
+    if tail ~= "" then parts[#parts + 1] = {type = "text", text = tail} end
+    return parts, hasCode
+end
+
+function wasaiAddMessage(text, isUser, stats, noAvatar)
+    local container, bubble = wasaiCreateMessageContainer(text, isUser, nil, noAvatar)
     local label = create("TextLabel", {
         Name = "TextLabel",
         BackgroundTransparency = 1,
@@ -6046,19 +6198,18 @@ local function wasaiSaveLastScript()
 
     
     local code = nil
-    local codeStart, codeEnd = lastAssistantMsg:find("##(.-)##")
-    if codeStart then
-        code = lastAssistantMsg:sub(codeStart + 2, codeEnd - 2)
+    -- 优先标准 Markdown 围栏（```lua / ```luau / 无语言）
+    local fence = "`" .. "`" .. "`"
+    local fStart, fEnd = lastAssistantMsg:find(fence .. "%s*[%w_%+%-%.]-%s*\n(.-)\n%s*" .. fence)
+    if fStart then
+        local inner = lastAssistantMsg:sub(fStart, fEnd)
+        inner = inner:gsub("^" .. fence .. "%s*[%w_%+%-%.]-%s*\n", ""):gsub("\n%s*" .. fence .. "$", "")
+        code = inner
     else
-        
-        codeStart, codeEnd = lastAssistantMsg:find("`".."`".."`lua\n(.-)\n`".."`".."`")
-        if not codeStart then
-            codeStart, codeEnd = lastAssistantMsg:find("`".."`".."`\n(.-)\n`".."`".."`")
-        end
+        -- 兼容旧版 ##code##
+        local codeStart, codeEnd = lastAssistantMsg:find("##(.-)##")
         if codeStart then
-            code = lastAssistantMsg:sub(codeStart, codeEnd)
-            
-            code = code:gsub("^`".."`".."`lua\n", ""):gsub("^`".."`".."`\n", ""):gsub("\n`".."`".."`$", "")
+            code = lastAssistantMsg:sub(codeStart + 2, codeEnd - 2)
         end
     end
 
@@ -6294,8 +6445,16 @@ wasaiInputBox.FocusLost:Connect(function(enterPressed)
     if enterPressed then wasaiSendMessage() end
 end)
 
-wasaiShowScriptResult = function(title, source)
-    local container, bubble = wasaiCreateMessageContainer("", false)
+wasaiShowScriptResult = function(title, source, lang, noAvatar)
+    source = tostring(source or "")
+    lang = tostring(lang or "lua")
+    local lineCount = select(2, source:gsub("\n", "")) + 1
+    local cardTitle = wasaiLangTitle(lang)
+    if type(title) == "string" and title ~= "" and title ~= "代码" then
+        cardTitle = title
+    end
+
+    local container, bubble = wasaiCreateMessageContainer("", false, nil, noAvatar)
     local card = create("Frame", {
         Size = UDim2.new(0, 420, 0, 0),
         AutomaticSize = Enum.AutomaticSize.Y,
@@ -6307,6 +6466,7 @@ wasaiShowScriptResult = function(title, source)
         ZIndex = 4
     })
     corner(8, card)
+    stroke(Color3.fromRGB(48, 54, 61), 1, card)
 
     local head = create("Frame", {
         Size = UDim2.new(1, 0, 0, 30),
@@ -6316,12 +6476,14 @@ wasaiShowScriptResult = function(title, source)
         Parent = card,
         ZIndex = 5
     })
+
+    local tagW = math.clamp(12 + #lang * 7, 36, 76)
     local langTag = create("TextLabel", {
         Position = UDim2.new(0, 10, 0.5, -9),
-        Size = UDim2.new(0, 42, 0, 18),
+        Size = UDim2.new(0, tagW, 0, 18),
         BackgroundColor3 = Color3.fromRGB(40, 47, 62),
         BackgroundTransparency = 0,
-        Text = "lua",
+        Text = lang,
         TextColor3 = Color3.fromRGB(120, 170, 255),
         Font = Enum.Font.Code,
         TextSize = 11,
@@ -6331,19 +6493,22 @@ wasaiShowScriptResult = function(title, source)
         ZIndex = 6
     })
     corner(4, langTag)
+
     local titleLabel = create("TextLabel", {
-        Position = UDim2.new(0, 60, 0, 0),
-        Size = UDim2.new(1, -128, 1, 0),
+        Position = UDim2.new(0, tagW + 20, 0, 0),
+        Size = UDim2.new(1, -(tagW + 92), 1, 0),
         BackgroundTransparency = 1,
-        Text = title or "脚本",
+        Text = cardTitle .. " · " .. lineCount .. " 行",
         TextColor3 = Color3.fromRGB(200, 210, 225),
         Font = Enum.Font.SourceSansBold,
         TextSize = 12,
         TextXAlignment = Enum.TextXAlignment.Left,
         TextYAlignment = Enum.TextYAlignment.Center,
+        TextTruncate = Enum.TextTruncate.AtEnd,
         Parent = head,
         ZIndex = 6
     })
+
     local copyBtn = create("TextButton", {
         Position = UDim2.new(1, -62, 0.5, -10),
         Size = UDim2.new(0, 52, 0, 20),
@@ -6372,7 +6537,7 @@ wasaiShowScriptResult = function(title, source)
         Size = UDim2.new(1, -20, 0, 0),
         BackgroundTransparency = 1,
         RichText = false,
-        Text = source or "",
+        Text = source,
         TextColor3 = Color3.fromRGB(220, 225, 235),
         Font = Enum.Font.Code,
         TextSize = 12,
@@ -6384,13 +6549,13 @@ wasaiShowScriptResult = function(title, source)
         ZIndex = 5
     })
     create("UIPadding", {
-        PaddingBottom = UDim.new(0, 8),
+        PaddingBottom = UDim.new(0, 10),
         Parent = card
     })
 
     copyBtn.MouseButton1Click:Connect(function()
         if setclipboard then
-            setclipboard(source or "")
+            pcall(setclipboard, source)
             copyTxt.Text = "已复制"
             ShowNotification("脚本已复制到剪贴板", 1.5)
             task.delay(1.5, function() copyTxt.Text = "复制" end)
@@ -6405,81 +6570,58 @@ wasaiShowScriptResult = function(title, source)
 end
 
 
-
-
+-- 渲染整条回复：文本走气泡，围栏代码走代码卡（DeepSeek 标准排版）
 wasaiRenderMessageWithCode = function(reply, stats)
-    if type(reply) ~= "string" then return nil end
-    local parts = {}
-    local hasCode = false
-    local pos = 1
-    local len = #reply
-    while pos <= len do
-        local s1 = reply:find("##", pos, true)
-        local s2 = reply:find("```", pos, true)
-        local s
-        if s1 and s2 then s = math.min(s1, s2)
-        elseif s1 then s = s1
-        elseif s2 then s = s2
-        else
-            local rest = reply:sub(pos)
-            if rest ~= "" then parts[#parts + 1] = {type = "text", text = rest} end
-            break
-        end
-        local before = reply:sub(pos, s - 1)
-        if before ~= "" then parts[#parts + 1] = {type = "text", text = before} end
+    if type(reply) ~= "string" or reply == "" then return nil end
 
-        if reply:sub(s, s + 1) == "``" then
-            
-            local close = reply:find("```", s + 3, true)
-            if not close then
-                local rest = reply:sub(s)
-                if rest ~= "" then parts[#parts + 1] = {type = "text", text = rest} end
-                break
-            end
-            local code = reply:sub(s + 3, close - 1)
-            code = code:gsub("^[%w_%.%-]+%s*\n", "", 1)  
-            code = code:gsub("^%s*\n", "")
-            code = code:gsub("%s*$", "")
-            if code ~= "" then
-                hasCode = true
-                parts[#parts + 1] = {type = "code", text = code}
-            end
-            pos = close + 3
-        else
-            
-            local close = reply:find("##", s + 2, true)
-            if not close then
-                local rest = reply:sub(s)
-                if rest ~= "" then parts[#parts + 1] = {type = "text", text = rest} end
-                break
-            end
-            local code = reply:sub(s + 2, close - 1)
-            code = code:gsub("^%s*\n", "")
-            code = code:gsub("%s*$", "")
-            if code ~= "" then
-                hasCode = true
-                parts[#parts + 1] = {type = "code", text = code}
-            else
-                parts[#parts + 1] = {type = "text", text = "##"}
-            end
-            pos = close + 2
-        end
-    end
+    local parts, hasCode = wasaiSplitReply(reply)
     if not hasCode then return nil end
 
-    local statsShown = false
-    for i, part in ipairs(parts) do
-        if part.type == "text" then
-            wasaiAddMessage(part.text, false, (not statsShown) and stats or nil)
-            if not statsShown then statsShown = true end
-        else
-            wasaiShowScriptResult("代码", part.text)
+    local blocks = {}
+    local pending = nil
+    local function flushText()
+        if pending then
+            local txt = pending:gsub("^%s+", ""):gsub("%s+$", "")
+            if txt ~= "" then
+                blocks[#blocks + 1] = {type = "text", text = txt}
+            end
+            pending = nil
         end
+    end
+    for _, part in ipairs(parts) do
+        if part.type == "code" then
+            flushText()
+            blocks[#blocks + 1] = part
+        else
+            -- 相邻文本原样拼接（后续整体裁剪），避免 Markdown 结构被破坏
+            pending = (pending or "") .. tostring(part.text or "")
+        end
+    end
+    flushText()
+    if #blocks == 0 then return nil end
+
+    local statsShown = false
+    local rendered = 0
+    for _, block in ipairs(blocks) do
+        local isFirst = (rendered == 0)
+        if block.type == "text" then
+            local st = (not statsShown) and stats or nil
+            wasaiAddMessage(block.text, false, st, not isFirst)
+            if st then statsShown = true end
+        else
+            local title = (block.lang == "lua" or block.lang == "luau") and "脚本" or "代码"
+            wasaiShowScriptResult(title, block.text, block.lang, not isFirst)
+        end
+        rendered = rendered + 1
+    end
+
+    if not statsShown and stats then
+        wasaiAddMessage("", false, stats, true)
     end
     return true
 end
 
-function wasaiCreateMessageContainer(text, isUser, customBubbleColor)
+function wasaiCreateMessageContainer(text, isUser, customBubbleColor, noAvatar)
     local container = create("Frame", {
         Name = "MessageContainer",
         Size = UDim2.new(1, 0, 0, 0),
@@ -6489,21 +6631,24 @@ function wasaiCreateMessageContainer(text, isUser, customBubbleColor)
         ZIndex = 3
     })
 
-    local avatar = create("Frame", {
-        Name = "Avatar",
-        Size = UDim2.new(0, 28, 0, 28),
-        BackgroundColor3 = isUser and theme.accent or theme.surfaceLight,
-        BackgroundTransparency = 0,
-        BorderSizePixel = 0,
-        ZIndex = 4
-    })
-    corner(14, avatar)
-    avatar.Parent = container
+    local avatar = nil
+    if not noAvatar then
+        avatar = create("Frame", {
+            Name = "Avatar",
+            Size = UDim2.new(0, 28, 0, 28),
+            BackgroundColor3 = isUser and theme.accent or theme.surfaceLight,
+            BackgroundTransparency = 0,
+            BorderSizePixel = 0,
+            ZIndex = 4
+        })
+        corner(14, avatar)
+        avatar.Parent = container
 
-    local avatarIcon = GetIcon(isUser and "user" or "terminal", UDim2.new(0, 16, 0, 16), isUser and Color3.new(1,1,1) or theme.text)
-    if avatarIcon then
-        avatarIcon.Position = UDim2.new(0.5, -8, 0.5, -8)
-        avatarIcon.Parent = avatar
+        local avatarIcon = GetIcon(isUser and "user" or "terminal", UDim2.new(0, 16, 0, 16), isUser and Color3.new(1,1,1) or theme.text)
+        if avatarIcon then
+            avatarIcon.Position = UDim2.new(0.5, -8, 0.5, -8)
+            avatarIcon.Parent = avatar
+        end
     end
 
     local bubble = create("Frame", {
@@ -6519,10 +6664,11 @@ function wasaiCreateMessageContainer(text, isUser, customBubbleColor)
     corner(12, bubble)
 
     if isUser then
-        avatar.AnchorPoint = Vector2.new(1, 0)
-        avatar.Position = UDim2.new(1, -8, 0, 0)
         bubble.AnchorPoint = Vector2.new(1, 0)
-        bubble.Position = UDim2.new(1, -52, 0, 0)
+        bubble.Position = noAvatar and UDim2.new(1, -8, 0, 0) or UDim2.new(1, -52, 0, 0)
+    elseif noAvatar then
+        bubble.AnchorPoint = Vector2.new(0, 0)
+        bubble.Position = UDim2.new(0, 8, 0, 0)
     else
         avatar.AnchorPoint = Vector2.new(0, 0)
         avatar.Position = UDim2.new(0, 8, 0, 0)

@@ -147,31 +147,24 @@ end
 local function makeFallbackApplyGradient(env)
     return function(frame, from, to, rotation)
         if not frame then return nil end
+        local make = env and env.create
+        if type(make) ~= "function" then return nil end
         local theme = env and env.theme
         from = from or (theme and theme.accent) or Color3.fromRGB(56, 189, 248)
         to = to or (theme and theme.accent2) or Color3.fromRGB(139, 92, 246)
-        local g
-        local ok, inst = pcall(function()
-            local make = (env and env.create) or create
-            if type(make) == "function" then
-                return make("UIGradient", {Rotation = rotation or 45})
-            end
-            return Instance.new("UIGradient")
-        end)
-        if ok and inst then g = inst end
-        if not g then return nil end
-        pcall(function() g.Color = ColorSequence.new(from, to) end)
+        local ok, inst = pcall(function() return make("UIGradient", {Rotation = rotation or 45}) end)
+        if not (ok and inst) then return nil end
+        pcall(function() inst.Color = ColorSequence.new(from, to) end)
         pcall(function() frame.BackgroundColor3 = Color3.fromRGB(255, 255, 255) end)
-        pcall(function() g.Parent = frame end)
-        
+        pcall(function() inst.Parent = frame end)
         local G = env and env._G
         if type(G) == "table" then
             pcall(function()
                 G.__DeltaUI_gradients = G.__DeltaUI_gradients or {}
-                table.insert(G.__DeltaUI_gradients, g)
+                table.insert(G.__DeltaUI_gradients, inst)
             end)
         end
-        return g
+        return inst
     end
 end
 

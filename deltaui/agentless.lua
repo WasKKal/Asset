@@ -198,27 +198,27 @@ local AGENTLESS_SOURCE = [==[
 -- ============================================================
 -- AgentLess 页面本体（从 DeltaUI_LanguageCore.lua 剥离）
 -- 说明：运行在官方页面宿主注入的环境里，
---       theme / svc / v7 / wasaiPage / contentFrame 由宿主提供。
+--       theme / svc / v7 / AgentPage / contentFrame 由宿主提供。
 -- ============================================================
-local wasaiPage = __AGENTLESS_FRAME
-if contentFrame then wasaiPage.Parent = contentFrame end
+local AgentPage = __AGENTLESS_FRAME
+if contentFrame then AgentPage.Parent = contentFrame end
 
-local wasaiPromptResumeChat
-local wasaiMessageFrame
-local wasaiInputBox
-local wasaiSendButton
-local wasaiFinalizeMessage
-local wasaiShowScriptResult
-local wasaiAddMessage
-local wasaiTypewriteMessage
-local wasaiRenderMessageWithCode
-local wasaiSendMessage
+local AgentPromptResumeChat
+local AgentMessageFrame
+local AgentInputBox
+local AgentSendButton
+local AgentFinalizeMessage
+local AgentShowScriptResult
+local AgentAddMessage
+local AgentTypewriteMessage
+local AgentRenderMessageWithCode
+local AgentSendMessage
 do
-local wasaiChatMemory = { lastPath = nil, lastObj = nil, lastDeletedDir = nil }
-local wasaiResumeParent = nil
+local AgentChatMemory = { lastPath = nil, lastObj = nil, lastDeletedDir = nil }
+local AgentResumeParent = nil
 
 
-local function wasaiValidatePath(path)
+local function AgentValidatePath(path)
     if type(path) ~= "string" or path == "" then return false end
     
     if path:find("%.%.%/") or path:find("%.%.\\") or path:find("%.%.%.$") then return false end
@@ -229,7 +229,7 @@ local function wasaiValidatePath(path)
 end
 
 
-local function wasaiGetInstanceFromPath(path)
+local function AgentGetInstanceFromPath(path)
     local i2, j2 = 1, #path
     while i2 <= j2 and string.byte(path:sub(i2,i2)) <= 32 do i2 = i2 + 1 end
     while j2 >= i2 and string.byte(path:sub(j2,j2)) <= 32 do j2 = j2 - 1 end
@@ -254,7 +254,7 @@ local function wasaiGetInstanceFromPath(path)
     return result, nil
 end
 
-local function wasaiGetChildNames(instance)
+local function AgentGetChildNames(instance)
     if not instance then return {} end
     local names = {}
     for _, child in ipairs(instance:GetChildren()) do
@@ -263,7 +263,7 @@ local function wasaiGetChildNames(instance)
     return names
 end
 
-local function wasaiTryDecompile(scriptObj)
+local function AgentTryDecompile(scriptObj)
     if not scriptObj:IsA("LuaSourceContainer") then return nil, "不是脚本/模块" end
     if not decompile then return nil, "当前环境不支持反编译 (decompile 函数缺失)" end
     local success, source = pcall(decompile, scriptObj)
@@ -271,7 +271,7 @@ local function wasaiTryDecompile(scriptObj)
     return source, nil
 end
 
-local function wasaiGetAllScripts(container)
+local function AgentGetAllScripts(container)
     
     local scripts = {}
     local stack = {container}
@@ -291,16 +291,16 @@ local function wasaiGetAllScripts(container)
 end
 
 
-local function wasaiSafeSegment(seg)
+local function AgentSafeSegment(seg)
     seg = tostring(seg or ""):gsub("[\\/:*?\"<>|%c\r\n\t]", "_")
     if seg == "" then seg = "_" end
     if #seg > 40 then seg = seg:sub(1, 40) end
     return seg
 end
 
-local function wasaiSaveScriptToFile(script, baseDir, rootName)
+local function AgentSaveScriptToFile(script, baseDir, rootName)
     if not writefile or not makefolder or not isfolder then return false, "文件系统函数不可用" end
-    local source, err = wasaiTryDecompile(script)
+    local source, err = AgentTryDecompile(script)
     if not source then return false, err end
 
     local fullName = script:GetFullName()
@@ -325,7 +325,7 @@ local function wasaiSaveScriptToFile(script, baseDir, rootName)
     
     local segs = {}
     for seg in relativePath:gmatch("[^%.]+") do
-        table.insert(segs, wasaiSafeSegment(seg))
+        table.insert(segs, AgentSafeSegment(seg))
     end
     local fullPath = baseDir .. "/" .. table.concat(segs, "/") .. ".lua"
     if #fullPath > 200 then
@@ -346,11 +346,11 @@ local function wasaiSaveScriptToFile(script, baseDir, rootName)
     if isfolder(fullPath) then fullPath = fullPath .. "_" .. tostring(os.time()) .. ".lua" end
     local successWrite, errWrite = pcall(writefile, fullPath, source)
     if not successWrite then return false, tostring(errWrite) end
-    wasaiTrackFileOp(fullPath)
+    AgentTrackFileOp(fullPath)
     return true, fullPath
 end
 
-local function wasaiListAllProperties(instance)
+local function AgentListAllProperties(instance)
     if not instance then return {} end
     local props = {}
     for _, prop in ipairs(instance:GetProperties()) do
@@ -361,7 +361,7 @@ local function wasaiListAllProperties(instance)
     return props
 end
 
-local function wasaiFindObjectsByName(name, container)
+local function AgentFindObjectsByName(name, container)
     local results = {}
     local function recurse(obj)
         if obj.Name:lower():find(name:lower(), 1, true) then
@@ -373,7 +373,7 @@ local function wasaiFindObjectsByName(name, container)
     return results
 end
 
-local function wasaiListChildrenDepth(instance, maxDepth)
+local function AgentListChildrenDepth(instance, maxDepth)
     local result = {}
     local function recurse(obj, depth)
         if depth > maxDepth then return end
@@ -386,7 +386,7 @@ local function wasaiListChildrenDepth(instance, maxDepth)
 end
 
 
-local function wasaiExecWithTimeout(func, seconds)
+local function AgentExecWithTimeout(func, seconds)
     local done = false
     local okRes, ret, err = nil, nil, nil
     local th = task.spawn(function()
@@ -407,10 +407,10 @@ local function wasaiExecWithTimeout(func, seconds)
     if okRes then return ret, nil else return nil, tostring(err) end
 end
 
-local function wasaiExecuteLuaCode(code)
+local function AgentExecuteLuaCode(code)
     local func, err = loadstring(code)
     if not func then return nil, "编译错误: " .. err end
-    local execTimeout = tonumber(wasaiLocalAIConfig.executeTimeout) or 15
+    local execTimeout = tonumber(AgentLocalAIConfig.executeTimeout) or 15
 
     
     local out = {}
@@ -435,7 +435,7 @@ local function wasaiExecuteLuaCode(code)
         local okSet = pcall(setfenv, func, env)
         if not okSet then
             
-            local success, result = wasaiExecWithTimeout(func, execTimeout)
+            local success, result = AgentExecWithTimeout(func, execTimeout)
             if not success then return nil, "执行错误: " .. tostring(result) end
             if result ~= nil then table.insert(out, tostring(result)) end
             return table.concat(out, "\n"), nil
@@ -443,28 +443,28 @@ local function wasaiExecuteLuaCode(code)
     else
         local okSet = pcall(setfenv, func, {print = makePrint()})
         if not okSet then
-            local success, result = wasaiExecWithTimeout(func, execTimeout)
+            local success, result = AgentExecWithTimeout(func, execTimeout)
             if not success then return nil, "执行错误: " .. tostring(result) end
             if result ~= nil then table.insert(out, tostring(result)) end
             return table.concat(out, "\n"), nil
         end
     end
 
-    local success, result = wasaiExecWithTimeout(func, execTimeout)
+    local success, result = AgentExecWithTimeout(func, execTimeout)
     if not success then return nil, "执行错误: " .. tostring(result) end
     if result ~= nil then table.insert(out, tostring(result)) end
     return table.concat(out, "\n"), nil
 end
 
-local function wasaiTrim(str)
+local function AgentTrim(str)
     local i, j = 1, #str
     while i <= j and string.byte(str:sub(i,i)) <= 32 do i = i + 1 end
     while j >= i and string.byte(str:sub(j,j)) <= 32 do j = j - 1 end
     return str:sub(i, j)
 end
 
-local function wasaiIsPathInput(text)
-    local trimmed = wasaiTrim(text)
+local function AgentIsPathInput(text)
+    local trimmed = AgentTrim(text)
     local pathPrefixes = {"game.", "workspace.", "Players.", "ReplicatedStorage.", "ServerScriptService.", "StarterGui.", "StarterPack.", "StarterPlayer.", "Lighting.", "SoundService."}
     for _, prefix in ipairs(pathPrefixes) do
         if trimmed:sub(1, #prefix) == prefix then
@@ -472,44 +472,44 @@ local function wasaiIsPathInput(text)
         end
     end
     if trimmed:find(".", 1, true) and #trimmed > 5 then
-        local test, _ = wasaiGetInstanceFromPath(trimmed)
+        local test, _ = AgentGetInstanceFromPath(trimmed)
         if test then return true end
     end
     return false
 end
 
 
-local wasaiConversationState = {
+local AgentConversationState = {
     topic = nil, topicEntities = {}, userMood = "neutral", contextMemory = {}, lastAction = nil, }
 
-local function wasaiUpdateConversationState(input, intent, entities)
+local function AgentUpdateConversationState(input, intent, entities)
         if entities.path then
-        wasaiConversationState.topic = "instance"
-        wasaiConversationState.topicEntities.path = entities.path
+        AgentConversationState.topic = "instance"
+        AgentConversationState.topicEntities.path = entities.path
     elseif intent == "search" then
-        wasaiConversationState.topic = "search"
-        wasaiConversationState.topicEntities.target = entities.target
+        AgentConversationState.topic = "search"
+        AgentConversationState.topicEntities.target = entities.target
     end
 
-        wasaiConversationState.lastAction = {
+        AgentConversationState.lastAction = {
         intent = intent,
         entities = entities,
         timestamp = os.time()
     }
 
         if input:match("谢谢|感谢|好棒|太棒了") then
-        wasaiConversationState.userMood = "happy"
+        AgentConversationState.userMood = "happy"
     elseif input:match("算了|不用了|错误|失败|糟糕") then
-        wasaiConversationState.userMood = "frustrated"
+        AgentConversationState.userMood = "frustrated"
     elseif input:match("为什么|怎么|如何") then
-        wasaiConversationState.userMood = "curious"
+        AgentConversationState.userMood = "curious"
     else
-        wasaiConversationState.userMood = "neutral"
+        AgentConversationState.userMood = "neutral"
     end
 end
 
 
-local wasaiChineseSensitiveWords = {
+local AgentChineseSensitiveWords = {
     "他妈的", "他妈", "草你妈", "操你妈", "傻逼", "煞笔", "傻b", "cnm", "qnmd", "tmd",
     "废物", "去死", "脑残", "弱智", "白痴", "神经病", "杂种", "王八蛋",
     "操你", "操蛋", "草你", "草泥马", "贱人", "贱货", "贱逼", "婊子",
@@ -518,12 +518,12 @@ local wasaiChineseSensitiveWords = {
     "滚蛋", "滚开", "滚犊子",
 }
 
-local wasaiEnglishSensitiveWords = {
+local AgentEnglishSensitiveWords = {
     "fuck", "fucking", "fucked", "fucker", "shit", "shitting", "bitch", "bitchy",
     "asshole", "dickhead", "cock", "cunt", "nigger", "faggot", "retard", "damn", "dammit", "sb",
 }
 
-local wasaiContextSensitiveWords = { "草", "操", "滚", "贱", "狗", "猪" }
+local AgentContextSensitiveWords = { "草", "操", "滚", "贱", "狗", "猪" }
 
 local function isBoundary(c)
     if c == "" then return true end
@@ -547,11 +547,11 @@ local function isWholeWord(text, pos, len)
     return isBoundary(before) and isBoundary(after)
 end
 
-local function wasaiCheckSensitive(text)
+local function AgentCheckSensitive(text)
     if not text or text == "" then return false end
     local lower = string.lower(text)
 
-    for _, w in ipairs(wasaiEnglishSensitiveWords) do
+    for _, w in ipairs(AgentEnglishSensitiveWords) do
         local pos = 1
         while true do
             local s, e = lower:find(w, pos, true)
@@ -561,11 +561,11 @@ local function wasaiCheckSensitive(text)
         end
     end
 
-    for _, w in ipairs(wasaiChineseSensitiveWords) do
+    for _, w in ipairs(AgentChineseSensitiveWords) do
         if lower:find(w, 1, true) then return true end
     end
 
-    for _, w in ipairs(wasaiContextSensitiveWords) do
+    for _, w in ipairs(AgentContextSensitiveWords) do
         local pos = 1
         while true do
             local s, e = lower:find(w, pos, true)
@@ -577,7 +577,7 @@ local function wasaiCheckSensitive(text)
     return false
 end
 
-local wasaiThinkingPhases = {
+local AgentThinkingPhases = {
     instruction = {
         "分析指令意图...",
         "解析参数结构...",
@@ -628,7 +628,7 @@ local wasaiThinkingPhases = {
     }
 }
 
-local wasaiRobloxKnowledge = {
+local AgentRobloxKnowledge = {
     services = {
         game = {"Workspace", "Players", "ReplicatedStorage", "ServerScriptService", "StarterGui", "StarterPack", "Lighting", "SoundService", "TextChatService"},
         Workspace = {"BasePart", "Model", "Terrain", "Camera"},
@@ -647,78 +647,78 @@ local wasaiRobloxKnowledge = {
     }
 }
 
-local wasaiMetrics = {
+local AgentMetrics = {
     thinkingStartTime = 0, toolCalls = 0, fileOperations = 0, }
 
-local wasaiThinkingPhase = ""
-local wasaiCustomProgressMsg = ""
-local wasaiLastToolName = ""
-local wasaiLastToolPhase = ""
-local wasaiLastToolOp = {}
+local AgentThinkingPhase = ""
+local AgentCustomProgressMsg = ""
+local AgentLastToolName = ""
+local AgentLastToolPhase = ""
+local AgentLastToolOp = {}
 
-local wasaiRecentSavedFiles = {}
-local wasaiLastDecompileDir = nil
+local AgentRecentSavedFiles = {}
+local AgentLastDecompileDir = nil
 
-local function wasaiResetMetrics()
-    wasaiMetrics.thinkingStartTime = 0
-    wasaiMetrics.toolCalls = 0
-    wasaiMetrics.fileOperations = 0
+local function AgentResetMetrics()
+    AgentMetrics.thinkingStartTime = 0
+    AgentMetrics.toolCalls = 0
+    AgentMetrics.fileOperations = 0
 end
 
-local function wasaiStartTiming()
-    wasaiMetrics.thinkingStartTime = tick()
+local function AgentStartTiming()
+    AgentMetrics.thinkingStartTime = tick()
 end
 
-local function wasaiTrackToolCall()
-    wasaiMetrics.toolCalls = wasaiMetrics.toolCalls + 1
+local function AgentTrackToolCall()
+    AgentMetrics.toolCalls = AgentMetrics.toolCalls + 1
 end
 
-function wasaiTrackFileOp(filePath) -- [官方页面] 提为全局：原文件部分引用早于 local 声明
-    wasaiMetrics.fileOperations = wasaiMetrics.fileOperations + 1
+function AgentTrackFileOp(filePath) -- [官方页面] 提为全局：原文件部分引用早于 local 声明
+    AgentMetrics.fileOperations = AgentMetrics.fileOperations + 1
     if filePath and type(filePath) == "string" then
-        table.insert(wasaiRecentSavedFiles, filePath)
-        if #wasaiRecentSavedFiles > 500 then
-            table.remove(wasaiRecentSavedFiles, 1)
+        table.insert(AgentRecentSavedFiles, filePath)
+        if #AgentRecentSavedFiles > 500 then
+            table.remove(AgentRecentSavedFiles, 1)
         end
     end
 end
 
-local function wasaiClearSavedFilesTracking()
-    wasaiRecentSavedFiles = {}
-    wasaiLastDecompileDir = nil
+local function AgentClearSavedFilesTracking()
+    AgentRecentSavedFiles = {}
+    AgentLastDecompileDir = nil
 end
 
-local function wasaiGetThinkingDuration()
+local function AgentGetThinkingDuration()
     local elapsed
-    if wasaiMetrics.thinkingStartTime == 0 then
-        elapsed = wasaiLocalAIState.lastLatency or 0
+    if AgentMetrics.thinkingStartTime == 0 then
+        elapsed = AgentLocalAIState.lastLatency or 0
     else
-        elapsed = math.floor((tick() - wasaiMetrics.thinkingStartTime) * 100) / 100
+        elapsed = math.floor((tick() - AgentMetrics.thinkingStartTime) * 100) / 100
     end
-    local complexity = wasaiMetrics.toolCalls * 0.8 + wasaiMetrics.fileOperations * 0.4
+    local complexity = AgentMetrics.toolCalls * 0.8 + AgentMetrics.fileOperations * 0.4
     local minTime = math.floor((1.5 + math.min(complexity, 3.0)) * 100) / 100
     local float = math.floor(math.random() * 0.5 * 100) / 100
     return math.floor(math.max(elapsed, minTime) * 100 + float * 100) / 100
 end
 
-local function wasaiGenerateStatsText(done)
-    local duration = wasaiGetThinkingDuration()
+local function AgentGenerateStatsText(done)
+    local duration = AgentGetThinkingDuration()
     local durationStr = string.format("%.2f", duration)
     local prefix = done and "思考完成" or "仍在思考"
-    if wasaiMetrics.toolCalls == 0 and wasaiMetrics.fileOperations == 0 then
+    if AgentMetrics.toolCalls == 0 and AgentMetrics.fileOperations == 0 then
         return prefix .. " " .. durationStr .. "s"
     end
     local parts = {prefix .. " " .. durationStr .. "s"}
-    if wasaiMetrics.toolCalls > 0 then
-        table.insert(parts, "执行了 " .. wasaiMetrics.toolCalls .. " 次 lua")
+    if AgentMetrics.toolCalls > 0 then
+        table.insert(parts, "执行了 " .. AgentMetrics.toolCalls .. " 次 lua")
     end
-    if wasaiMetrics.fileOperations > 0 then
-        table.insert(parts, "操作 " .. wasaiMetrics.fileOperations .. " 次文件系统")
+    if AgentMetrics.fileOperations > 0 then
+        table.insert(parts, "操作 " .. AgentMetrics.fileOperations .. " 次文件系统")
     end
     return table.concat(parts, " · ")
 end
 
-local wasaiCurrentSession = {
+local AgentCurrentSession = {
     sessionDir = nil,
     sessionFile = nil,
     placeId = nil,
@@ -728,7 +728,7 @@ local wasaiCurrentSession = {
     titleTried = false,
 }
 
-local function wasaiGenerateTitle(userInput)
+local function AgentGenerateTitle(userInput)
     if not userInput or userInput == "" then return "新对话" end
     local cleaned = tostring(userInput):gsub("[，。！？、,%.!?：:；;…—%-]+", " ")
     cleaned = cleaned:gsub("%s+", " ")
@@ -738,7 +738,7 @@ local function wasaiGenerateTitle(userInput)
     return title ~= "" and title or "新对话"
 end
 
-local function wasaiEnsureAgentFolders()
+local function AgentEnsureAgentFolders()
     if not makefolder then return false end
     pcall(function()
         if not isfolder("DeltaUI") then makefolder("DeltaUI") end
@@ -749,10 +749,10 @@ local function wasaiEnsureAgentFolders()
     return true
 end
 
-local function wasaiInitSessionDir()
-    if wasaiCurrentSession.sessionDir then return wasaiCurrentSession.sessionDir end
+local function AgentInitSessionDir()
+    if AgentCurrentSession.sessionDir then return AgentCurrentSession.sessionDir end
 
-    wasaiEnsureAgentFolders()
+    AgentEnsureAgentFolders()
 
     local placeId = tostring(game.PlaceId or 0)
     local baseDir = "DeltaUI/Agent/Chat/对话_" .. placeId
@@ -761,11 +761,11 @@ local function wasaiInitSessionDir()
         pcall(function() makefolder(baseDir) end)
     end
 
-    wasaiCurrentSession.sessionDir = baseDir
-    wasaiCurrentSession.placeId = tonumber(placeId) or 0
-    wasaiCurrentSession.sessionTime = os.time()
+    AgentCurrentSession.sessionDir = baseDir
+    AgentCurrentSession.placeId = tonumber(placeId) or 0
+    AgentCurrentSession.sessionTime = os.time()
 
-    local titleName = wasaiCurrentSession.sessionTitle or "新对话"
+    local titleName = AgentCurrentSession.sessionTitle or "新对话"
     local safeTitle = tostring(titleName):gsub("[/\\:*?\"<>|\r\n\t ]+", "_"):gsub("^_+", ""):gsub("_+$", "")
     if safeTitle == "" then safeTitle = "default" end
     if #safeTitle > 40 then safeTitle = safeTitle:sub(1, 40) end
@@ -773,17 +773,17 @@ local function wasaiInitSessionDir()
     if isfile(filePath) then
         filePath = baseDir .. "/" .. safeTitle .. "_" .. os.time() .. ".chat"
     end
-    wasaiCurrentSession.sessionFile = filePath
-    wasaiCurrentSession.sessionKey = safeTitle
+    AgentCurrentSession.sessionFile = filePath
+    AgentCurrentSession.sessionKey = safeTitle
 
     return baseDir
 end
 
-local function wasaiRenameSessionDir(title)
-    wasaiCurrentSession.sessionTitle = title or wasaiCurrentSession.sessionTitle or "新对话"
+local function AgentRenameSessionDir(title)
+    AgentCurrentSession.sessionTitle = title or AgentCurrentSession.sessionTitle or "新对话"
 end
 
-local function wasaiReadChatFile(path)
+local function AgentReadChatFile(path)
     if not path or not isfile or not readfile or not isfile(path) then return nil end
     local ok, content = pcall(readfile, path)
     if not ok or not content or content == "" then return nil end
@@ -798,8 +798,8 @@ local function wasaiReadChatFile(path)
     return nil
 end
 
-local function wasaiFindLatestChat()
-    wasaiEnsureAgentFolders()
+local function AgentFindLatestChat()
+    AgentEnsureAgentFolders()
     local placeId = tostring(game.PlaceId or 0)
     local folder = "DeltaUI/Agent/Chat/对话_" .. placeId
     if not isfolder(folder) or not listfiles then return nil end
@@ -810,7 +810,7 @@ local function wasaiFindLatestChat()
 
     for _, path in ipairs(files) do
         if isfile(path) and path:match("%.chat$") then
-            local data = wasaiReadChatFile(path)
+            local data = AgentReadChatFile(path)
             if data and data.messages and #data.messages > 0 then
                 local name = path:match("([^/\\]+)$") or path
                 local modified = 0
@@ -838,35 +838,35 @@ local function wasaiFindLatestChat()
     return candidates[1]
 end
 
-local function wasaiLoadChatHistory(chatFolder)
+local function AgentLoadChatHistory(chatFolder)
     if not chatFolder then return false end
-    local data = chatFolder.data or wasaiReadChatFile(chatFolder.chatFile)
+    local data = chatFolder.data or AgentReadChatFile(chatFolder.chatFile)
     if not data or type(data.messages) ~= "table" then return false end
 
-    wasaiChatMemory.conversationHistory = data.messages
+    AgentChatMemory.conversationHistory = data.messages
     if data.metadata then
-        wasaiChatMemory.lastPath = data.metadata.lastPath
-        wasaiChatMemory.lastDeletedDir = data.metadata.lastDeletedDir
+        AgentChatMemory.lastPath = data.metadata.lastPath
+        AgentChatMemory.lastDeletedDir = data.metadata.lastDeletedDir
     end
 
-    wasaiCurrentSession.sessionDir = chatFolder.path
-    wasaiCurrentSession.sessionFile = chatFolder.chatFile
-    wasaiCurrentSession.sessionKey = chatFolder.name
-    wasaiCurrentSession.sessionTitle = data.metadata and data.metadata.title or chatFolder.name
-    wasaiCurrentSession.sessionTime = data.createdAt or os.time()
-    wasaiCurrentSession.placeId = tonumber(game.PlaceId or 0) or 0
-    wasaiCurrentSession.isFirstRound = false
+    AgentCurrentSession.sessionDir = chatFolder.path
+    AgentCurrentSession.sessionFile = chatFolder.chatFile
+    AgentCurrentSession.sessionKey = chatFolder.name
+    AgentCurrentSession.sessionTitle = data.metadata and data.metadata.title or chatFolder.name
+    AgentCurrentSession.sessionTime = data.createdAt or os.time()
+    AgentCurrentSession.placeId = tonumber(game.PlaceId or 0) or 0
+    AgentCurrentSession.isFirstRound = false
     return true
 end
 
-wasaiPromptResumeChat = function()
-    local latest = wasaiFindLatestChat()
+AgentPromptResumeChat = function()
+    local latest = AgentFindLatestChat()
     if not latest then return false end
-    if not wasaiResumeParent or not wasaiResumeParent.Parent then return false end
+    if not AgentResumeParent or not AgentResumeParent.Parent then return false end
 
     local title = ""
     local summary = ""
-    local data = latest.data or wasaiReadChatFile(latest.chatFile)
+    local data = latest.data or AgentReadChatFile(latest.chatFile)
     if data then
         title = data.metadata and data.metadata.title or latest.name or "未知对话"
         if data.messages then
@@ -890,7 +890,7 @@ wasaiPromptResumeChat = function()
         BorderSizePixel = 0,
         ZIndex = 60,
         Active = true,
-        Parent = wasaiResumeParent
+        Parent = AgentResumeParent
     })
     corner(12, card)
     stroke(theme.border, 1, card)
@@ -974,12 +974,12 @@ wasaiPromptResumeChat = function()
 
     confirmBtn.MouseButton1Click:Connect(function()
         card:Destroy()
-        if wasaiLoadChatHistory(latest) then
-            wasaiCurrentSession.isFirstRound = false
+        if AgentLoadChatHistory(latest) then
+            AgentCurrentSession.isFirstRound = false
             task.spawn(function()
-                local history = wasaiChatMemory.conversationHistory or {}
+                local history = AgentChatMemory.conversationHistory or {}
                 for _, msg in ipairs(history) do
-                    wasaiAddMessage(msg.content, msg.role == "user")
+                    AgentAddMessage(msg.content, msg.role == "user")
                     task.wait(0.05)
                 end
             end)
@@ -989,16 +989,16 @@ wasaiPromptResumeChat = function()
     return true
 end
 
-local function wasaiSaveChatHistory()
+local function AgentSaveChatHistory()
     if not writefile or not svc.HttpService then return end
 
-    local sessionDir = wasaiInitSessionDir()
-    if not wasaiCurrentSession.sessionFile then
-        wasaiCurrentSession.sessionFile = sessionDir .. "/default.chat"
-        wasaiCurrentSession.sessionKey = "default"
+    local sessionDir = AgentInitSessionDir()
+    if not AgentCurrentSession.sessionFile then
+        AgentCurrentSession.sessionFile = sessionDir .. "/default.chat"
+        AgentCurrentSession.sessionKey = "default"
     end
 
-    local messages = wasaiChatMemory.conversationHistory or {}
+    local messages = AgentChatMemory.conversationHistory or {}
     
     local modelsUsed = {}
     local lastModel = nil
@@ -1014,16 +1014,16 @@ local function wasaiSaveChatHistory()
     table.sort(modelList)
     local chatData = {
         version = 2,
-        sessionKey = wasaiCurrentSession.sessionKey,
-        placeId = wasaiCurrentSession.placeId or game.PlaceId or 0,
-        createdAt = wasaiCurrentSession.sessionTime or os.time(),
+        sessionKey = AgentCurrentSession.sessionKey,
+        placeId = AgentCurrentSession.placeId or game.PlaceId or 0,
+        createdAt = AgentCurrentSession.sessionTime or os.time(),
         updatedAt = os.time(),
         messages = messages,
         metadata = {
-            lastPath = wasaiChatMemory.lastPath,
-            lastDeletedDir = wasaiChatMemory.lastDeletedDir,
+            lastPath = AgentChatMemory.lastPath,
+            lastDeletedDir = AgentChatMemory.lastDeletedDir,
             totalRounds = #messages,
-            title = wasaiCurrentSession.sessionTitle or "新对话",
+            title = AgentCurrentSession.sessionTitle or "新对话",
             model = lastModel,
             models = modelList
         }
@@ -1033,26 +1033,26 @@ local function wasaiSaveChatHistory()
         return svc.HttpService:JSONEncode(chatData)
     end)
     if ok and jsonStr then
-        pcall(function() writefile(wasaiCurrentSession.sessionFile, jsonStr) end)
+        pcall(function() writefile(AgentCurrentSession.sessionFile, jsonStr) end)
     end
 end
 
-local wasaiMemoryDBPath = "DeltaUI/Agent/Remember/memory_v3.db"
-local wasaiMemoryCache = nil
-local wasaiMemoryCachePath = nil
-local wasaiMemoryDBPathFallback = wasaiMemoryDBPath
+local AgentMemoryDBPath = "DeltaUI/Agent/Remember/memory_v3.db"
+local AgentMemoryCache = nil
+local AgentMemoryCachePath = nil
+local AgentMemoryDBPathFallback = AgentMemoryDBPath
 
 
 
-local function wasaiGetMemoryDBPath()
-    local dir = wasaiCurrentSession and wasaiCurrentSession.sessionDir
+local function AgentGetMemoryDBPath()
+    local dir = AgentCurrentSession and AgentCurrentSession.sessionDir
     if dir and dir ~= "" then
         return dir .. "/memory.db"
     end
-    return wasaiMemoryDBPathFallback
+    return AgentMemoryDBPathFallback
 end
-local wasaiMemoryDirty = false
-local wasaiMemoryCategories = {
+local AgentMemoryDirty = false
+local AgentMemoryCategories = {
     fact = {decayRate = 0.005, minImportance = 0.3},
     preference = {decayRate = 0.002, minImportance = 0.5},
     decision = {decayRate = 0.003, minImportance = 0.4},
@@ -1061,13 +1061,13 @@ local wasaiMemoryCategories = {
     context = {decayRate = 0.015, minImportance = 0.1},
 }
 
-local function wasaiMemoryNormalize(text)
+local function AgentMemoryNormalize(text)
     return tostring(text or ""):lower():gsub("%s+", " "):gsub("^%s+", ""):gsub("%s+$", "")
 end
 
-local function wasaiMemoryTokenize(text)
+local function AgentMemoryTokenize(text)
     local tokens = {}
-    local normalized = wasaiMemoryNormalize(text)
+    local normalized = AgentMemoryNormalize(text)
     for word in normalized:gmatch("[%a_]+") do
         if #word >= 2 then
             tokens[#tokens + 1] = word
@@ -1084,13 +1084,13 @@ local function wasaiMemoryTokenize(text)
     end
     return tokens
 end
-local function wasaiExtractMemories(input, output, context)
+local function AgentExtractMemories(input, output, context)
     local memories = {}
     local userInput = tostring(input or "")
     local aiOutput = tostring(output or "")
     local combined = userInput .. " " .. aiOutput
     local now = os.time()
-    local topic = wasaiConversationState and wasaiConversationState.topic or nil
+    local topic = AgentConversationState and AgentConversationState.topic or nil
     for scriptPath, byteCount in aiOutput:gmatch("已反编译%s*([^\n，,]+)[^%d]*(%d+)%s*字节") do
         memories[#memories + 1] = {
             category = "tool_result",
@@ -1103,7 +1103,7 @@ local function wasaiExtractMemories(input, output, context)
         }
     end
     for filePath in aiOutput:gmatch("已保存到：([^\n]+)") do
-        filePath = wasaiTrim(filePath)
+        filePath = AgentTrim(filePath)
         if filePath ~= "" then
             memories[#memories + 1] = {
                 category = "tool_result",
@@ -1155,7 +1155,7 @@ local function wasaiExtractMemories(input, output, context)
     end
     if userInput:match("我喜欢|我偏好|我习惯|我总是|我喜欢用|帮我用") then
         local prefContent = userInput:match("我喜欢(.+)") or userInput:match("我偏好(.+)") or userInput:match("我习惯(.+)") or ""
-        prefContent = wasaiTrim(prefContent)
+        prefContent = AgentTrim(prefContent)
         if prefContent ~= "" and #prefContent < 200 then
             memories[#memories + 1] = {
                 category = "preference",
@@ -1171,7 +1171,7 @@ local function wasaiExtractMemories(input, output, context)
 
     if userInput:match("那就用|决定|选择|那就这么") then
         local decisionContent = userInput:match("那就用(.+)") or userInput:match("决定(.+)") or userInput:match("选择(.+)") or ""
-        decisionContent = wasaiTrim(decisionContent)
+        decisionContent = AgentTrim(decisionContent)
         if decisionContent ~= "" and #decisionContent < 200 then
             memories[#memories + 1] = {
                 category = "decision",
@@ -1185,7 +1185,7 @@ local function wasaiExtractMemories(input, output, context)
         end
     end
     for fact in aiOutput:gmatch("([^\n。！？]+[是包含有][^\n。！？]+)") do
-        fact = wasaiTrim(fact)
+        fact = AgentTrim(fact)
         if #fact > 10 and #fact < 300 then
             if not fact:find("已反编译") and not fact:find("已保存") and not fact:find("共保存") then
                 memories[#memories + 1] = {
@@ -1202,7 +1202,7 @@ local function wasaiExtractMemories(input, output, context)
     end
 
     
-    local contextSummary = wasaiTrim(userInput:sub(1, 80))
+    local contextSummary = AgentTrim(userInput:sub(1, 80))
     if contextSummary ~= "" then
         memories[#memories + 1] = {
             category = "context",
@@ -1217,10 +1217,10 @@ local function wasaiExtractMemories(input, output, context)
 
     return memories
 end
-local function wasaiMemorySimilarity(memA, memB)
-    local tokensA = wasaiMemoryTokenize(memA.content)
+local function AgentMemorySimilarity(memA, memB)
+    local tokensA = AgentMemoryTokenize(memA.content)
     local tokensB_set = {}
-    for _, t in ipairs(wasaiMemoryTokenize(memB.content)) do
+    for _, t in ipairs(AgentMemoryTokenize(memB.content)) do
         tokensB_set[t] = true
     end
     if #tokensA == 0 then return 0 end
@@ -1232,55 +1232,55 @@ local function wasaiMemorySimilarity(memA, memB)
 end
 
 
-local function wasaiLoadMemoryDB()
-    local path = wasaiGetMemoryDBPath()
+local function AgentLoadMemoryDB()
+    local path = AgentGetMemoryDBPath()
     
-    if wasaiMemoryCache and wasaiMemoryCachePath == path then return wasaiMemoryCache end
-    wasaiMemoryCache = {}
-    wasaiMemoryCachePath = path
+    if AgentMemoryCache and AgentMemoryCachePath == path then return AgentMemoryCache end
+    AgentMemoryCache = {}
+    AgentMemoryCachePath = path
     if not isfile or not readfile or not isfile(path) then
-        return wasaiMemoryCache
+        return AgentMemoryCache
     end
     local ok, content = pcall(readfile, path)
-    if not ok or not content then return wasaiMemoryCache end
+    if not ok or not content then return AgentMemoryCache end
     for line in tostring(content):gmatch("[^\r\n]+") do
         local data
         local decoded = pcall(function() data = svc.HttpService:JSONDecode(line) end)
         if decoded and type(data) == "table" and data.content and data.category then
-            wasaiMemoryCache[#wasaiMemoryCache + 1] = data
+            AgentMemoryCache[#AgentMemoryCache + 1] = data
         end
     end
-    return wasaiMemoryCache
+    return AgentMemoryCache
 end
 
 
-local function wasaiSaveMemoryDB()
-    if not wasaiMemoryDirty or not writefile then return end
-    wasaiEnsureAgentFolders()
-    local path = wasaiGetMemoryDBPath()
+local function AgentSaveMemoryDB()
+    if not AgentMemoryDirty or not writefile then return end
+    AgentEnsureAgentFolders()
+    local path = AgentGetMemoryDBPath()
     
-    local dir = wasaiCurrentSession and wasaiCurrentSession.sessionDir
+    local dir = AgentCurrentSession and AgentCurrentSession.sessionDir
     if dir and dir ~= "" and isfolder and not isfolder(dir) then
         pcall(function() makefolder(dir) end)
     end
     local lines = {}
-    for _, mem in ipairs(wasaiMemoryCache or {}) do
+    for _, mem in ipairs(AgentMemoryCache or {}) do
         local ok, encoded = pcall(function() return svc.HttpService:JSONEncode(mem) end)
         if ok and encoded then
             lines[#lines + 1] = encoded
         end
     end
     pcall(function() writefile(path, table.concat(lines, "\n")) end)
-    wasaiMemoryDirty = false
+    AgentMemoryDirty = false
 end
 
 
-local function wasaiAddMemory(mem)
-    local db = wasaiLoadMemoryDB()
+local function AgentAddMemory(mem)
+    local db = AgentLoadMemoryDB()
     
     for i, existing in ipairs(db) do
         if existing.category == mem.category then
-            local sim = wasaiMemorySimilarity(existing, mem)
+            local sim = AgentMemorySimilarity(existing, mem)
             if sim >= 0.75 then
                 
                 if #mem.content > #existing.content then
@@ -1300,14 +1300,14 @@ local function wasaiAddMemory(mem)
                         if not found then table.insert(db[i].tags, tag) end
                     end
                 end
-                wasaiMemoryDirty = true
+                AgentMemoryDirty = true
                 return
             end
         end
     end
     
     db[#db + 1] = mem
-    wasaiMemoryDirty = true
+    AgentMemoryDirty = true
     
     local maxMemories = 500
     if #db > maxMemories then
@@ -1319,18 +1319,18 @@ local function wasaiAddMemory(mem)
         end)
         local trimmed = {}
         for i = 1, maxMemories do trimmed[i] = db[i] end
-        wasaiMemoryCache = trimmed
+        AgentMemoryCache = trimmed
     end
 end
 
 
-local function wasaiMemoryScore(query, mem)
+local function AgentMemoryScore(query, mem)
     if type(mem) ~= "table" then return 0 end
     local qTokens = {}
-    for _, t in ipairs(wasaiMemoryTokenize(query)) do qTokens[t] = true end
+    for _, t in ipairs(AgentMemoryTokenize(query)) do qTokens[t] = true end
     if next(qTokens) == nil then return 0 end
 
-    local memText = wasaiMemoryNormalize((mem.content or "") .. " " .. table.concat(mem.tags or {}, " "))
+    local memText = AgentMemoryNormalize((mem.content or "") .. " " .. table.concat(mem.tags or {}, " "))
     if memText == "" then return 0 end
 
     
@@ -1357,7 +1357,7 @@ local function wasaiMemoryScore(query, mem)
     
     local age = math.max(0, os.time() - tonumber(mem.time or 0)) / 86400
     local category = mem.category or "context"
-    local decayRate = (wasaiMemoryCategories[category] or {}).decayRate or 0.01
+    local decayRate = (AgentMemoryCategories[category] or {}).decayRate or 0.01
     local decay = math.max(0.2, 1 - age * decayRate)
 
     
@@ -1369,16 +1369,16 @@ end
 
 
 
-local wasaiSafeString
+local AgentSafeString
 
 
-local function wasaiRetrieveMemory(query, limit)
-    local db = wasaiLoadMemoryDB()
+local function AgentRetrieveMemory(query, limit)
+    local db = AgentLoadMemoryDB()
     if #db == 0 then return {} end
 
     local scored = {}
     for _, mem in ipairs(db) do
-        local score = wasaiMemoryScore(query, mem)
+        local score = AgentMemoryScore(query, mem)
         if score > 0.05 then
             scored[#scored + 1] = {score = score, record = mem}
         end
@@ -1398,10 +1398,10 @@ local function wasaiRetrieveMemory(query, limit)
         r.accessCount = (r.accessCount or 0) + 1
         r.content = r.content or ""
         r.lastAccess = os.time()
-        wasaiMemoryDirty = true
+        AgentMemoryDirty = true
         local item = {
             score = scored[i].score,
-            content = wasaiSafeString(r.content or "", 800),
+            content = AgentSafeString(r.content or "", 800),
             category = r.category or "unknown",
             tags = r.tags or {},
         }
@@ -1410,24 +1410,24 @@ local function wasaiRetrieveMemory(query, limit)
         result[#result + 1] = item
     end
     
-    wasaiSaveMemoryDB()
+    AgentSaveMemoryDB()
     return result
 end
 
 
-local function wasaiSaveMemory(input, output)
+local function AgentSaveMemory(input, output)
     if not input or not output then return end
-    wasaiEnsureAgentFolders()
-    local memories = wasaiExtractMemories(input, output, wasaiConversationState)
+    AgentEnsureAgentFolders()
+    local memories = AgentExtractMemories(input, output, AgentConversationState)
     for _, mem in ipairs(memories) do
-        wasaiAddMemory(mem)
+        AgentAddMemory(mem)
     end
-    wasaiSaveMemoryDB()
+    AgentSaveMemoryDB()
 end
 
 
-local function wasaiLoadMemoryRecords(limit)
-    local db = wasaiLoadMemoryDB()
+local function AgentLoadMemoryRecords(limit)
+    local db = AgentLoadMemoryDB()
     local max = limit or 80
     local start = math.max(1, #db - max + 1)
     local trimmed = {}
@@ -1443,14 +1443,14 @@ local function wasaiLoadMemoryRecords(limit)
     return trimmed
 end
 
-local function wasaiGetOutputDir()
-    local sessionDir = wasaiInitSessionDir()
+local function AgentGetOutputDir()
+    local sessionDir = AgentInitSessionDir()
     local outputDir = sessionDir .. "/Output"
     if not isfolder(outputDir) and makefolder then pcall(function() makefolder(outputDir) end) end
     return outputDir
 end
 
-local function wasaiCalculateThinkingDuration(steps, inputType)
+local function AgentCalculateThinkingDuration(steps, inputType)
     local base = 0.25
     local typeMultiplier = {
         instruction = 1.1,
@@ -1467,13 +1467,13 @@ local function wasaiCalculateThinkingDuration(steps, inputType)
 end
 
 
-local function wasaiResolveDecompileTarget(targetStr)
+local function AgentResolveDecompileTarget(targetStr)
     if not targetStr or targetStr == "" then return nil, "未提供目标" end
-    targetStr = wasaiTrim(targetStr)
+    targetStr = AgentTrim(targetStr)
 
     
     if targetStr:find("^game%.") or targetStr:find("^workspace") then
-        local obj, err = wasaiGetInstanceFromPath(targetStr)
+        local obj, err = AgentGetInstanceFromPath(targetStr)
         if obj then return obj, nil, targetStr end
         return nil, err or "路径不可达", targetStr
     end
@@ -1551,36 +1551,36 @@ local function wasaiResolveDecompileTarget(targetStr)
 end
 
 
-local function wasaiDecompileSmart(targetStr)
-    local obj, err, resolvedPath = wasaiResolveDecompileTarget(targetStr)
+local function AgentDecompileSmart(targetStr)
+    local obj, err, resolvedPath = AgentResolveDecompileTarget(targetStr)
     if not obj then
         return "找不到目标：" .. tostring(err or "未知错误") .. "。请提供脚本路径或名称，例如「反编译 game.Workspace.Script」或「反编译 PlayerScripts 下的某脚本」。"
     end
 
     local isScript = obj:IsA("LuaSourceContainer")
     local childCount = #obj:GetChildren()
-    local childScripts = wasaiGetAllScripts(obj)
+    local childScripts = AgentGetAllScripts(obj)
     local hasChildScripts = #childScripts > 0
 
     
     if not isfolder("DeltaUI") then makefolder("DeltaUI") end
     if not isfolder("DeltaUI/Agent") then makefolder("DeltaUI/Agent") end
-    local od = wasaiGetOutputDir()
+    local od = AgentGetOutputDir()
     if not isfolder(od) then makefolder(od) end
 
     
     if isScript and not hasChildScripts then
-        local source, derr = wasaiTryDecompile(obj)
+        local source, derr = AgentTryDecompile(obj)
         if not source then
             return "反编译失败：" .. tostring(derr) .. "\n目标：" .. resolvedPath
         end
-        wasaiTrackToolCall()
+        AgentTrackToolCall()
         local savedPath = nil
         if writefile and makefolder and isfolder then
-            local okSave, saveOk, savePath = pcall(wasaiSaveScriptToFile, obj, od, nil)
+            local okSave, saveOk, savePath = pcall(AgentSaveScriptToFile, obj, od, nil)
             if okSave and saveOk then
                 savedPath = savePath
-                wasaiLastDecompileDir = od
+                AgentLastDecompileDir = od
             end
         end
         local msg = "已反编译 " .. resolvedPath .. "，源码共 " .. #source .. " 字节。"
@@ -1589,15 +1589,15 @@ local function wasaiDecompileSmart(targetStr)
 
     
     elseif isScript and hasChildScripts then
-        local source, derr = wasaiTryDecompile(obj)
+        local source, derr = AgentTryDecompile(obj)
         if source then
-            wasaiTrackToolCall()
+            AgentTrackToolCall()
             local savedPath = nil
             if writefile and makefolder and isfolder then
-                local okSave, saveOk, savePath = pcall(wasaiSaveScriptToFile, obj, od, nil)
+                local okSave, saveOk, savePath = pcall(AgentSaveScriptToFile, obj, od, nil)
                 if okSave and saveOk then
                     savedPath = savePath
-                    wasaiLastDecompileDir = od
+                    AgentLastDecompileDir = od
                 end
             end
             local msg = "已反编译 " .. resolvedPath .. "，源码共 " .. #source .. " 字节。"
@@ -1628,9 +1628,9 @@ local function wasaiDecompileSmart(targetStr)
         local saved = 0
         local errors = {}
         for _, sc in ipairs(childScripts) do
-            local src, serr = wasaiTryDecompile(sc)
+            local src, serr = AgentTryDecompile(sc)
             if src then
-                wasaiTrackToolCall()
+                AgentTrackToolCall()
                 local fullName = sc:GetFullName()
                 local escapedName = obj:GetFullName():gsub("([^%w])", "%%%1")
                 local relPath = fullName:gsub("^" .. escapedName .. "%.?", ""):gsub("%.", "/")
@@ -1644,12 +1644,12 @@ local function wasaiDecompileSmart(targetStr)
                     end
                 end
                 local okw = pcall(writefile, filePath, src)
-                if okw then saved = saved + 1; wasaiTrackFileOp(filePath) end
+                if okw then saved = saved + 1; AgentTrackFileOp(filePath) end
             else
                 table.insert(errors, sc:GetFullName() .. ": " .. tostring(serr))
             end
         end
-        wasaiLastDecompileDir = baseDir
+        AgentLastDecompileDir = baseDir
 
         local msg = "已反编译 " .. resolvedPath .. " 下的所有脚本，共完成 " .. saved .. " 个"
         if #errors > 0 then
@@ -1664,26 +1664,26 @@ local function wasaiDecompileSmart(targetStr)
     end
 end
 
-local function wasaiExtractContext(text, keyword)
+local function AgentExtractContext(text, keyword)
     local s, e = tostring(text or ""):find(keyword, 1, true)
     if not s then return nil end
     local after = tostring(text):sub(e + 1)
-    return wasaiTrim(after)
+    return AgentTrim(after)
 end
-local function wasaiDecompileAll(input)
+local function AgentDecompileAll(input)
     local lowerInput = string.lower(input or "")
     local function ensureDir()
         if not isfolder("DeltaUI") then makefolder("DeltaUI") end
         if not isfolder("DeltaUI/Agent") then makefolder("DeltaUI/Agent") end
-        local od = wasaiGetOutputDir()
+        local od = AgentGetOutputDir()
         if not isfolder(od) then makefolder(od) end
     end
     local function saveScript(script, baseDir, rootName)
         if not script:IsA("LuaSourceContainer") then return false, "不是脚本" end
         if not decompile then return false, "当前环境不支持反编译" end
-        local source, err = wasaiTryDecompile(script)
+        local source, err = AgentTryDecompile(script)
         if not source then return false, err end
-        wasaiTrackToolCall()
+        AgentTrackToolCall()
         local fullName = script:GetFullName()
         local relativePath = fullName:gsub("^game%.", "")
         local rootPrefix = rootName .. "."
@@ -1695,10 +1695,10 @@ local function wasaiDecompileAll(input)
         end
         local segs = {}
         for seg in relativePath:gmatch("[^%.]+") do
-            table.insert(segs, wasaiSafeSegment(seg))
+            table.insert(segs, AgentSafeSegment(seg))
         end
         local outFolder = rootName == "Players" and "PlayerScripts" or rootName
-        local safeOut = wasaiSafeSegment(outFolder)
+        local safeOut = AgentSafeSegment(outFolder)
         local joined = table.concat(segs, "/")
         local filePath = baseDir .. "/" .. safeOut .. "/" .. joined .. ".lua"
         if #filePath > 200 then
@@ -1719,16 +1719,16 @@ local function wasaiDecompileAll(input)
         end
         local okw, errw = pcall(writefile, filePath, source)
         if not okw then return false, tostring(errw) end
-        wasaiTrackFileOp(filePath)
+        AgentTrackFileOp(filePath)
         return true, filePath
     end
     local function decompileContainer(container, rootName, baseDir, cap)
         if not container then return 0, {}, 0 end
-        local scripts = wasaiGetAllScripts(container)
+        local scripts = AgentGetAllScripts(container)
         local saved = 0
         local errors = {}
         local maxN = tonumber(cap) or math.huge
-        local throttle = tonumber(wasaiLocalAIConfig.decompileAllThrottle) or 0.05
+        local throttle = tonumber(AgentLocalAIConfig.decompileAllThrottle) or 0.05
         for i, sc in ipairs(scripts) do
             if i > maxN then break end
             if i > 1 then task.wait(throttle) end
@@ -1742,13 +1742,13 @@ local function wasaiDecompileAll(input)
     if lowerInput:find("所有脚本") or lowerInput:find("全部脚本") then
         ensureDir()
         local placeId = game.PlaceId or 0
-        local baseDir = wasaiGetOutputDir() .. "/反编译_" .. placeId .. "_" .. os.time()
+        local baseDir = AgentGetOutputDir() .. "/反编译_" .. placeId .. "_" .. os.time()
         if not isfolder(baseDir) then makefolder(baseDir) end
-        wasaiLastDecompileDir = baseDir
+        AgentLastDecompileDir = baseDir
         local totalSaved = 0
         local allErrors = {}
         local results = {}
-        local globalCap = tonumber(wasaiLocalAIConfig.decompileAllMaxScripts) or 600
+        local globalCap = tonumber(AgentLocalAIConfig.decompileAllMaxScripts) or 600
         local remaining = globalCap
         local playerScripts = v7:FindFirstChild("PlayerScripts")
         if playerScripts then
@@ -1778,24 +1778,24 @@ local function wasaiDecompileAll(input)
     local tokens = {"反编译所有", "全部反编译", "整个解出来"}
     local path = nil
     for _, kw in ipairs(tokens) do
-        local ex = wasaiExtractContext(input, kw)
+        local ex = AgentExtractContext(input, kw)
         if ex and ex ~= "" then path = ex break end
     end
-    if not path then path = wasaiChatMemory.lastPath end
+    if not path then path = AgentChatMemory.lastPath end
     if not path or path == "" then return "要反编译哪个目录下的所有脚本？说清楚。" end
-    local container, err = wasaiGetInstanceFromPath(path)
+    local container, err = AgentGetInstanceFromPath(path)
     if not container then return "找不到这个容器：" .. (err or "") end
     ensureDir()
     local placeId = game.PlaceId or 0
     local folderName = path:match("([^%.]+)$") or "Unknown"
-    local baseDir = wasaiGetOutputDir() .. "/反编译_" .. placeId .. "_" .. os.time() .. "/" .. folderName
+    local baseDir = AgentGetOutputDir() .. "/反编译_" .. placeId .. "_" .. os.time() .. "/" .. folderName
     if not isfolder(baseDir) then makefolder(baseDir) end
-    wasaiLastDecompileDir = baseDir
-    local scripts = wasaiGetAllScripts(container)
+    AgentLastDecompileDir = baseDir
+    local scripts = AgentGetAllScripts(container)
     if #scripts == 0 then return path .. " 下面没找到任何脚本" end
     local saved = 0
     local errors = {}
-    local throttle = tonumber(wasaiLocalAIConfig.decompileAllThrottle) or 0.05
+    local throttle = tonumber(AgentLocalAIConfig.decompileAllThrottle) or 0.05
     for i, sc in ipairs(scripts) do
         if i > 1 then task.wait(throttle) end
         local ok, res = saveScript(sc, baseDir, folderName)
@@ -1814,7 +1814,7 @@ end
 
 
 
-local function wasaiDecompileModules(targetStr)
+local function AgentDecompileModules(targetStr)
     local decompileFn = getgenv and getgenv().decompile or decompile
     if not decompileFn then
         return "当前环境不支持反编译（decompile 函数缺失）"
@@ -1851,7 +1851,7 @@ local function wasaiDecompileModules(targetStr)
     local function ensureDir()
         if not isfolder("DeltaUI") then makefolder("DeltaUI") end
         if not isfolder("DeltaUI/Agent") then makefolder("DeltaUI/Agent") end
-        local od = wasaiGetOutputDir()
+        local od = AgentGetOutputDir()
         if not isfolder(od) then makefolder(od) end
         return od
     end
@@ -1861,7 +1861,7 @@ local function wasaiDecompileModules(targetStr)
         if not mod:IsA("ModuleScript") then return false, "不是 ModuleScript" end
         local source = safeDecompile(mod)
         if not source then return false, "反编译失败" end
-        wasaiTrackToolCall()
+        AgentTrackToolCall()
         local fullName = mod:GetFullName()
         local relativePath = fullName:gsub("^game%.", "")
         if rootName then
@@ -1875,9 +1875,9 @@ local function wasaiDecompileModules(targetStr)
         end
         local segs = {}
         for seg in relativePath:gmatch("[^%.]+") do
-            table.insert(segs, wasaiSafeSegment(seg))
+            table.insert(segs, AgentSafeSegment(seg))
         end
-        local safeOut = wasaiSafeSegment(rootName == "Players" and "PlayerScripts" or (rootName or mod.Name))
+        local safeOut = AgentSafeSegment(rootName == "Players" and "PlayerScripts" or (rootName or mod.Name))
         local joined = table.concat(segs, "/")
         local filePath = baseDir .. "/" .. safeOut .. "/" .. joined .. ".lua"
         if #filePath > 200 then
@@ -1897,7 +1897,7 @@ local function wasaiDecompileModules(targetStr)
         end
         local okw, errw = pcall(writefile, filePath, source)
         if not okw then return false, tostring(errw) end
-        wasaiTrackFileOp(filePath)
+        AgentTrackFileOp(filePath)
         return true, filePath
     end
 
@@ -1918,9 +1918,9 @@ local function wasaiDecompileModules(targetStr)
 
     
     if targetStr and tostring(targetStr):gsub("%s", "") ~= "" then
-        local obj, err = wasaiResolveDecompileTarget(tostring(targetStr))
+        local obj, err = AgentResolveDecompileTarget(tostring(targetStr))
         if not obj then
-            obj, err = wasaiGetInstanceFromPath(tostring(targetStr))
+            obj, err = AgentGetInstanceFromPath(tostring(targetStr))
         end
         if not obj then
             return "找不到目标：" .. tostring(err or "未知错误") .. "。请提供 ModuleScript 路径，例如「反编译模块 game.ReplicatedStorage.Module」"
@@ -1929,12 +1929,12 @@ local function wasaiDecompileModules(targetStr)
         local placeId = game.PlaceId or 0
         local baseDir = od .. "/模块反编译_" .. placeId .. "_" .. os.time()
         if not isfolder(baseDir) then makefolder(baseDir) end
-        wasaiLastDecompileDir = baseDir
+        AgentLastDecompileDir = baseDir
 
         if obj:IsA("ModuleScript") then
             local source = safeDecompile(obj)
             if not source then return "反编译失败：" .. obj:GetFullName() end
-            wasaiTrackToolCall()
+            AgentTrackToolCall()
             local savedPath = nil
             if writefile and makefolder and isfolder then
                 local okSave, saveOk, savePath = pcall(saveModule, obj, baseDir, nil)
@@ -1948,7 +1948,7 @@ local function wasaiDecompileModules(targetStr)
         
         local mods = collectModules(obj)
         if #mods == 0 then return obj:GetFullName() .. " 下方没有找到任何 ModuleScript" end
-        local saved, errors = decompileBatch(mods, baseDir, obj.Name, wasaiLocalAIConfig.decompileAllThrottle)
+        local saved, errors = decompileBatch(mods, baseDir, obj.Name, AgentLocalAIConfig.decompileAllThrottle)
         local msg = "已反编译 " .. obj:GetFullName() .. " 下的所有 ModuleScript，共 " .. #mods .. " 个，成功 " .. saved .. " 个。"
         if #errors > 0 then
             msg = msg .. "\n失败：" .. table.concat(errors, string.char(10))
@@ -1962,13 +1962,13 @@ local function wasaiDecompileModules(targetStr)
     local placeId = game.PlaceId or 0
     local baseDir = od .. "/模块反编译_" .. placeId .. "_" .. os.time()
     if not isfolder(baseDir) then makefolder(baseDir) end
-    wasaiLastDecompileDir = baseDir
+    AgentLastDecompileDir = baseDir
 
-    local throttle = wasaiLocalAIConfig.decompileAllThrottle
+    local throttle = AgentLocalAIConfig.decompileAllThrottle
     local totalSaved = 0
     local allErrors = {}
     local results = {}
-    local globalCap = tonumber(wasaiLocalAIConfig.decompileAllMaxScripts) or 600
+    local globalCap = tonumber(AgentLocalAIConfig.decompileAllMaxScripts) or 600
     local remaining = globalCap
 
     
@@ -2017,8 +2017,8 @@ local function wasaiDecompileModules(targetStr)
     return msg
 end
 
-local function wasaiCountOutputFiles()
-    local dir = wasaiGetOutputDir()
+local function AgentCountOutputFiles()
+    local dir = AgentGetOutputDir()
     if not isfolder(dir) then return 0 end
     local count = 0
     local function rec(p)
@@ -2031,18 +2031,18 @@ local function wasaiCountOutputFiles()
     return count
 end
 
-local function wasaiDeleteRecentFiles()
+local function AgentDeleteRecentFiles()
     local deleted = 0
     local deletedDirs = {}
-    if #wasaiRecentSavedFiles > 0 then
-        for _, fp in ipairs(wasaiRecentSavedFiles) do
+    if #AgentRecentSavedFiles > 0 then
+        for _, fp in ipairs(AgentRecentSavedFiles) do
             if isfile and isfile(fp) then
                 local ok = pcall(delfile, fp)
                 if ok then deleted = deleted + 1 end
             end
         end
     end
-    if wasaiLastDecompileDir and isfolder and isfolder(wasaiLastDecompileDir) then
+    if AgentLastDecompileDir and isfolder and isfolder(AgentLastDecompileDir) then
         local dirDeleted = 0
         local function recDir(p)
             for _, it in ipairs(listfiles(p) or {}) do
@@ -2054,13 +2054,13 @@ local function wasaiDeleteRecentFiles()
                 end
             end
         end
-        recDir(wasaiLastDecompileDir)
-        pcall(delfolder, wasaiLastDecompileDir)
+        recDir(AgentLastDecompileDir)
+        pcall(delfolder, AgentLastDecompileDir)
         deleted = deleted + dirDeleted
-        table.insert(deletedDirs, wasaiLastDecompileDir)
+        table.insert(deletedDirs, AgentLastDecompileDir)
     end
     if deleted == 0 then
-        local dir = wasaiGetOutputDir()
+        local dir = AgentGetOutputDir()
         if isfolder and isfolder(dir) then
             local function rec(p)
                 for _, it in ipairs(listfiles(p) or {}) do
@@ -2076,7 +2076,7 @@ local function wasaiDeleteRecentFiles()
         end
     end
 
-    wasaiClearSavedFilesTracking()
+    AgentClearSavedFilesTracking()
 
     if deleted == 0 then
         return false, "没有找到可删除的文件。可能反编译时未成功保存文件。"
@@ -2085,7 +2085,7 @@ local function wasaiDeleteRecentFiles()
 end
 
 
-wasaiLocalAIConfig = { -- [官方页面] 提为全局：原文件部分引用早于 local 声明
+AgentLocalAIConfig = { -- [官方页面] 提为全局：原文件部分引用早于 local 声明
     enabled = true,
     endpoint = "https://api.deepseek.com/chat/completions",
     model = "deepseek-v4-flash",
@@ -2146,31 +2146,31 @@ local WASAAI_MODELS = {
     },
 }
 
-function wasaiApplyModel(id)
+function AgentApplyModel(id)
     local m = WASAAI_MODELS[id] or WASAAI_MODELS.flash
-    wasaiLocalAIConfig.model = m.model
-    wasaiLocalAIConfig.endpoint = m.endpoint
-    wasaiLocalAIConfig.apiKey = m.apiKey
+    AgentLocalAIConfig.model = m.model
+    AgentLocalAIConfig.endpoint = m.endpoint
+    AgentLocalAIConfig.apiKey = m.apiKey
     
-    wasaiLocalAIConfig.isClaude = (id == "claude") or (m.isClaude == true)
-    wasaiLocalAIConfig.noThinking = (m.noThinking == true)
-    wasaiLocalAIConfig.bypassPoints = (m.bypassPoints == true)
-    wasaiLocalAIConfig.activeModel = id
-    if wasaiModelLabel then
+    AgentLocalAIConfig.isClaude = (id == "claude") or (m.isClaude == true)
+    AgentLocalAIConfig.noThinking = (m.noThinking == true)
+    AgentLocalAIConfig.bypassPoints = (m.bypassPoints == true)
+    AgentLocalAIConfig.activeModel = id
+    if AgentModelLabel then
         pcall(function()
-            wasaiModelLabel.Text = m.label
+            AgentModelLabel.Text = m.label
             
-            wasaiModelLabel.TextColor3 = m.isClaude and Color3.fromRGB(255, 200, 60) or theme.textDim
+            AgentModelLabel.TextColor3 = m.isClaude and Color3.fromRGB(255, 200, 60) or theme.textDim
         end)
     end
 end
 
 local _aiModelSaved = loadConfig()
 if _aiModelSaved and _aiModelSaved.activeModel and WASAAI_MODELS[_aiModelSaved.activeModel] then
-    wasaiApplyModel(_aiModelSaved.activeModel)
+    AgentApplyModel(_aiModelSaved.activeModel)
 end
 
-local wasaiLocalAIState = {
+local AgentLocalAIState = {
     available = false,
     lastError = nil,
     lastLatency = 0,
@@ -2186,14 +2186,14 @@ math.randomseed(os.time())
 
 
 _G.__DeltaAI_setThinkingMode = function(enabled)
-    wasaiLocalAIConfig.thinkingDisabled = not enabled
+    AgentLocalAIConfig.thinkingDisabled = not enabled
 end
 
 local _aiSavedCfg = loadConfig()
 if _aiSavedCfg and _aiSavedCfg.thinkingMode then
-    wasaiLocalAIConfig.thinkingDisabled = false
+    AgentLocalAIConfig.thinkingDisabled = false
 end
-_G.__DeltaAI_wasaiConfig = wasaiLocalAIConfig
+_G.__DeltaAI_AgentConfig = AgentLocalAIConfig
 
 
 
@@ -2664,18 +2664,18 @@ function showLocalModelCard(kind)
 end
 
 
-local wasaiLastUsage = nil
+local AgentLastUsage = nil
 
-local wasaiTotalTokens = 0
+local AgentTotalTokens = 0
 
 
-function wasaiSafeString(v, maxLen)
+function AgentSafeString(v, maxLen)
     local s = tostring(v or "")
     if maxLen and #s > maxLen then s = s:sub(1, maxLen) .. "…" end
     return s
 end
 
-local function wasaiNormalizeAIText(v)
+local function AgentNormalizeAIText(v)
     return tostring(v or ""):lower():gsub("%s+", ""):gsub(
         "[，。！？、,.!?：:；;“”\"'‘’（）()%[%]{}<>《》]", ""
     )
@@ -2684,15 +2684,15 @@ end
 
 
 
-local function wasaiGetRecentContext(maxCount)
+local function AgentGetRecentContext(maxCount)
     local result = {}
-    local history = wasaiChatMemory and wasaiChatMemory.conversationHistory or {}
+    local history = AgentChatMemory and AgentChatMemory.conversationHistory or {}
     local n = tonumber(maxCount) or 12
     local start = math.max(1, #history - n + 1)
     for i = start, #history do
         local m = history[i]
         if type(m) == "table" then
-            local content = wasaiSafeString(m.content or m.text or "", 900)
+            local content = AgentSafeString(m.content or m.text or "", 900)
             if content ~= "" then
                 result[#result + 1] = {
                     role = m.role == "assistant" and "assistant" or "user",
@@ -2705,7 +2705,7 @@ local function wasaiGetRecentContext(maxCount)
 end
 
 
-local function wasaiBuildSystemPrompt()
+local function AgentBuildSystemPrompt()
     return table.concat({
         "# AgentLess",
         "你是 DeltaUI 的 Roblox 智能助手，运行在 Luau 环境。",
@@ -2732,13 +2732,13 @@ local function wasaiBuildSystemPrompt()
     }, "\n")
 end
 
-local function wasaiBuildLLMMessages(input)
+local function AgentBuildLLMMessages(input)
     local context = {
-        conversation = wasaiGetRecentContext(wasaiLocalAIConfig.maxContextMessages),
-        memories = wasaiRetrieveMemory(input, wasaiLocalAIConfig.maxMemoryRecords),
+        conversation = AgentGetRecentContext(AgentLocalAIConfig.maxContextMessages),
+        memories = AgentRetrieveMemory(input, AgentLocalAIConfig.maxMemoryRecords),
     }
 
-    local messages = {{role = "system", content = wasaiBuildSystemPrompt()}}
+    local messages = {{role = "system", content = AgentBuildSystemPrompt()}}
     for _, m in ipairs(context.conversation) do
         messages[#messages + 1] = {role = m.role, content = m.content}
     end
@@ -2753,7 +2753,7 @@ local function wasaiBuildLLMMessages(input)
     end
     messages[#messages + 1] = {
         role = "user",
-        content = wasaiSafeString(userContent, wasaiLocalAIConfig.maxPromptChars),
+        content = AgentSafeString(userContent, AgentLocalAIConfig.maxPromptChars),
     }
     return messages, context
 end
@@ -2762,14 +2762,14 @@ end
 
 
 
-local function wasaiGetHttpRequestFn()
+local function AgentGetHttpRequestFn()
     local fn = (syn and syn.request) or (http and http.request) or http_request or request
     return fn
 end
 
 
-local function wasaiHttpPost(url, headers, body)
-    local req = wasaiGetHttpRequestFn()
+local function AgentHttpPost(url, headers, body)
+    local req = AgentGetHttpRequestFn()
     if req then
         local ok, resp = pcall(req, {
             Url = url,
@@ -2802,7 +2802,7 @@ local function wasaiHttpPost(url, headers, body)
     return false, 0, "", "no http request function available"
 end
 
-local WASAI_DEEPSEEK_TOOLS = {
+local AGENT_DEEPSEEK_TOOLS = {
     {type="function", ["function"]={name="list_children", description="列子对象", parameters={type="object", properties={path={type="string"}, depth={type="number"}}, required={"path"}}}},
     {type="function", ["function"]={name="decompile", description="反编译脚本", parameters={type="object", properties={path={type="string"}}, required={"path"}}}},
     {type="function", ["function"]={name="decompile_smart", description="智能反编译", parameters={type="object", properties={target={type="string"}}, required={"target"}}}},
@@ -2829,7 +2829,7 @@ local WASAI_DEEPSEEK_TOOLS = {
     {type="function", ["function"]={name="click_gui", description="模拟点击GUI按钮。参数三选一：path(实例路径)、scaleX/scaleY(0-1相对坐标)、x/y(屏幕绝对像素)。", parameters={type="object", properties={path={type="string", description="GUI元素实例路径"}, scaleX={type="number", description="相对X(0-1)"}, scaleY={type="number", description="相对Y(0-1)"}, x={type="number", description="屏幕绝对X像素"}, y={type="number", description="屏幕绝对Y像素"}}}}}
 }
 
-local function wasaiSanitizeUTF8(s)
+local function AgentSanitizeUTF8(s)
     s = tostring(s or "")
     local out = {}
     local i = 1
@@ -2877,8 +2877,8 @@ local function wasaiSanitizeUTF8(s)
     return table.concat(out)
 end
 
-local function wasaiJSONEscape(s)
-    s = wasaiSanitizeUTF8(s)
+local function AgentJSONEscape(s)
+    s = AgentSanitizeUTF8(s)
     s = s:gsub("\\", "\\\\")
     s = s:gsub('"', '\\"')
     s = s:gsub("\n", "\\n"):gsub("\r", "\\r"):gsub("\t", "\\t")
@@ -2887,7 +2887,7 @@ local function wasaiJSONEscape(s)
     return s
 end
 
-local function wasaiJSONEncode(v)
+local function AgentJSONEncode(v)
     local t = type(v)
     if v == nil then return "null" end
     if t == "boolean" then return v and "true" or "false" end
@@ -2895,7 +2895,7 @@ local function wasaiJSONEncode(v)
         if v ~= v or v == math.huge or v == -math.huge then return "null" end
         return tostring(v)
     end
-    if t == "string" then return '"' .. wasaiJSONEscape(v) .. '"' end
+    if t == "string" then return '"' .. AgentJSONEscape(v) .. '"' end
     if t == "table" then
         
         local isArray = true
@@ -2913,13 +2913,13 @@ local function wasaiJSONEncode(v)
         end
         if isArray and count > 0 then
             local parts = {}
-            for i = 1, count do parts[i] = wasaiJSONEncode(v[i]) end
+            for i = 1, count do parts[i] = AgentJSONEncode(v[i]) end
             return "[" .. table.concat(parts, ",") .. "]"
         end
         
         local parts = {}
         for k, val in pairs(v) do
-            parts[#parts + 1] = '"' .. wasaiJSONEscape(k) .. '":' .. wasaiJSONEncode(val)
+            parts[#parts + 1] = '"' .. AgentJSONEscape(k) .. '":' .. AgentJSONEncode(val)
         end
         return "{" .. table.concat(parts, ",") .. "}"
     end
@@ -2933,7 +2933,7 @@ end
 
 
 
-local function wasaiTokenizeDSML(content)
+local function AgentTokenizeDSML(content)
     local seq = {}
     
     local TAG = '<[/]?[%s|]*DSML[%s|]*(.-)>'
@@ -2953,7 +2953,7 @@ local function wasaiTokenizeDSML(content)
     return seq
 end
 
-local function wasaiParseDSMLToolCalls(content)
+local function AgentParseDSMLToolCalls(content)
     if type(content) ~= "string" then return nil end
     local calls = {}
     local currentCall = nil   
@@ -2961,7 +2961,7 @@ local function wasaiParseDSMLToolCalls(content)
     local paramVal = nil      
     local inCalls = false     
 
-    local seq = wasaiTokenizeDSML(content)
+    local seq = AgentTokenizeDSML(content)
     for _, raw in ipairs(seq) do
         local tok = raw:gsub('^%s+', ''):gsub('%s+$', '')
         if tok ~= '' then
@@ -3049,7 +3049,7 @@ local function wasaiParseDSMLToolCalls(content)
 end
 
 
-local function wasaiStripDSML(content)
+local function AgentStripDSML(content)
     if type(content) ~= "string" then return content end
     local s = content
     
@@ -3073,9 +3073,9 @@ end
 
 
 
-local function wasaiDeepSeekChat(messages, tools, opts)
+local function AgentDeepSeekChat(messages, tools, opts)
     opts = opts or {}
-    local isClaude = wasaiLocalAIConfig.isClaude
+    local isClaude = AgentLocalAIConfig.isClaude
     local body
     if isClaude then
         
@@ -3102,8 +3102,8 @@ local function wasaiDeepSeekChat(messages, tools, opts)
             end
         end
         body = {
-            model = wasaiLocalAIConfig.model,
-            max_tokens = opts.maxTokens or wasaiLocalAIConfig.maxTokens or 4096,
+            model = AgentLocalAIConfig.model,
+            max_tokens = opts.maxTokens or AgentLocalAIConfig.maxTokens or 4096,
             messages = msgs,
         }
         if sys ~= "" then body.system = sys end
@@ -3121,21 +3121,21 @@ local function wasaiDeepSeekChat(messages, tools, opts)
             body.tool_choice = { type = "auto" }
         end
         
-        if not wasaiLocalAIConfig.thinkingDisabled then
+        if not AgentLocalAIConfig.thinkingDisabled then
             body.thinking = { type = "enabled", budget_tokens = 1024 }
         end
     else
         body = {
-            model = wasaiLocalAIConfig.model,
+            model = AgentLocalAIConfig.model,
             messages = messages,
-            temperature = opts.temperature or wasaiLocalAIConfig.temperature,
+            temperature = opts.temperature or AgentLocalAIConfig.temperature,
             stream = false,
         }
         
-        if not wasaiLocalAIConfig.noThinking and wasaiLocalAIConfig.thinkingDisabled then
+        if not AgentLocalAIConfig.noThinking and AgentLocalAIConfig.thinkingDisabled then
             body.thinking = {type = "disabled"}
         end
-        local maxTok = opts.maxTokens or wasaiLocalAIConfig.maxTokens
+        local maxTok = opts.maxTokens or AgentLocalAIConfig.maxTokens
         if maxTok and maxTok > 0 then
             body.max_tokens = maxTok
         end
@@ -3145,28 +3145,28 @@ local function wasaiDeepSeekChat(messages, tools, opts)
         end
     end
 
-    local okEnc, bodyJson = pcall(wasaiJSONEncode, body)
+    local okEnc, bodyJson = pcall(AgentJSONEncode, body)
     if not okEnc or type(bodyJson) ~= "string" or bodyJson == "" then
         return nil, nil, "JSON编码失败: " .. tostring(bodyJson)
     end
 
     
-    local reqUrl = wasaiLocalAIConfig.endpoint
+    local reqUrl = AgentLocalAIConfig.endpoint
     local reqHeaders
     if isClaude then
         reqHeaders = {
             ["Content-Type"] = "application/json",
-            ["x-api-key"] = tostring(wasaiLocalAIConfig.apiKey),
+            ["x-api-key"] = tostring(AgentLocalAIConfig.apiKey),
             ["anthropic-version"] = "2023-06-01",
         }
     else
         reqHeaders = {
             ["Content-Type"] = "application/json",
-            ["Authorization"] = "Bearer " .. tostring(wasaiLocalAIConfig.apiKey),
+            ["Authorization"] = "Bearer " .. tostring(AgentLocalAIConfig.apiKey),
         }
     end
 
-    local ok, code, respBody, statusMsg = wasaiHttpPost(
+    local ok, code, respBody, statusMsg = AgentHttpPost(
         reqUrl, reqHeaders, bodyJson
     )
     if not ok then
@@ -3182,7 +3182,7 @@ local function wasaiDeepSeekChat(messages, tools, opts)
         end
         local hint = statusMsg ~= "" and statusMsg or ("HTTP " .. tostring(code))
         if respBody and respBody ~= "" then
-            hint = hint .. " " .. wasaiSafeString(respBody, 300)
+            hint = hint .. " " .. AgentSafeString(respBody, 300)
         end
         return nil, nil, hint
     end
@@ -3194,18 +3194,18 @@ local function wasaiDeepSeekChat(messages, tools, opts)
         return svc.HttpService:JSONDecode(respBody)
     end)
     if not okDec or type(data) ~= "table" then
-        return nil, nil, "响应解析失败: " .. wasaiSafeString(respBody, 200)
+        return nil, nil, "响应解析失败: " .. AgentSafeString(respBody, 200)
     end
 
     
 
     
     if type(data.usage) == "table" then
-        wasaiLastUsage = data.usage
+        AgentLastUsage = data.usage
         if isClaude then
-            wasaiTotalTokens = wasaiTotalTokens + (tonumber(data.usage.input_tokens) or 0) + (tonumber(data.usage.output_tokens) or 0)
+            AgentTotalTokens = AgentTotalTokens + (tonumber(data.usage.input_tokens) or 0) + (tonumber(data.usage.output_tokens) or 0)
         else
-            wasaiTotalTokens = wasaiTotalTokens + (tonumber(data.usage.total_tokens) or 0)
+            AgentTotalTokens = AgentTotalTokens + (tonumber(data.usage.total_tokens) or 0)
         end
     end
 
@@ -3230,9 +3230,9 @@ local function wasaiDeepSeekChat(messages, tools, opts)
             end
         end
         if reasoningBuf ~= "" then
-            wasaiLocalAIState.lastReasoning = reasoningBuf
+            AgentLocalAIState.lastReasoning = reasoningBuf
         else
-            wasaiLocalAIState.lastReasoning = nil
+            AgentLocalAIState.lastReasoning = nil
         end
         return content, toolCalls, nil
     end
@@ -3246,9 +3246,9 @@ local function wasaiDeepSeekChat(messages, tools, opts)
     
     local reasoning = tostring(msg.reasoning_content or "")
     if reasoning ~= "" and reasoning ~= "nil" then
-        wasaiLocalAIState.lastReasoning = reasoning
+        AgentLocalAIState.lastReasoning = reasoning
     else
-        wasaiLocalAIState.lastReasoning = nil
+        AgentLocalAIState.lastReasoning = nil
     end
     toolCalls = nil
 
@@ -3272,10 +3272,10 @@ local function wasaiDeepSeekChat(messages, tools, opts)
         end
     elseif content:find("<[%s|]-DSML", 1) then
         
-        local dsml = wasaiParseDSMLToolCalls(content)
+        local dsml = AgentParseDSMLToolCalls(content)
         if dsml then
             toolCalls = dsml
-            content = wasaiStripDSML(content)
+            content = AgentStripDSML(content)
         end
     end
 
@@ -3283,36 +3283,36 @@ local function wasaiDeepSeekChat(messages, tools, opts)
 end
 
 
-local function wasaiSetSessionTitle(title)
+local function AgentSetSessionTitle(title)
     if not title or title == "" then return end
-    wasaiCurrentSession.sessionTitle = tostring(title)
-    if wasaiCurrentSession.sessionFile and isfile and listfiles then
-        local dir = wasaiCurrentSession.sessionDir
+    AgentCurrentSession.sessionTitle = tostring(title)
+    if AgentCurrentSession.sessionFile and isfile and listfiles then
+        local dir = AgentCurrentSession.sessionDir
         local safeTitle = tostring(title):gsub("[/\\:*?\"<>|\r\n\t ]+", "_"):gsub("^_+", ""):gsub("_+$", "")
         if safeTitle == "" then safeTitle = "default" end
         if #safeTitle > 40 then safeTitle = safeTitle:sub(1, 40) end
         local newPath = dir .. "/" .. safeTitle .. ".chat"
-        if newPath ~= wasaiCurrentSession.sessionFile and isfile(newPath) then
+        if newPath ~= AgentCurrentSession.sessionFile and isfile(newPath) then
             newPath = dir .. "/" .. safeTitle .. "_" .. os.time() .. ".chat"
         end
-        if newPath ~= wasaiCurrentSession.sessionFile then
+        if newPath ~= AgentCurrentSession.sessionFile then
             pcall(function()
-                if isfile(wasaiCurrentSession.sessionFile) then
-                    local content = readfile(wasaiCurrentSession.sessionFile)
+                if isfile(AgentCurrentSession.sessionFile) then
+                    local content = readfile(AgentCurrentSession.sessionFile)
                     if content then writefile(newPath, content) end
-                    delfile(wasaiCurrentSession.sessionFile)
+                    delfile(AgentCurrentSession.sessionFile)
                 end
             end)
-            wasaiCurrentSession.sessionFile = newPath
-            wasaiCurrentSession.sessionKey = safeTitle
+            AgentCurrentSession.sessionFile = newPath
+            AgentCurrentSession.sessionKey = safeTitle
         end
     end
-    wasaiSaveChatHistory()
+    AgentSaveChatHistory()
 end
 
 
-local function wasaiListAllChats()
-    wasaiEnsureAgentFolders()
+local function AgentListAllChats()
+    AgentEnsureAgentFolders()
     local placeId = tostring(game.PlaceId or 0)
     local folder = "DeltaUI/Agent/Chat/对话_" .. placeId
     local list = {}
@@ -3321,7 +3321,7 @@ local function wasaiListAllChats()
     if not ok or type(files) ~= "table" then return list end
     for _, path in ipairs(files) do
         if isfile(path) and path:match("%.chat$") then
-            local data = wasaiReadChatFile(path)
+            local data = AgentReadChatFile(path)
             local name = (path:match("([^/\\]+)$") or path):gsub("%.chat$", "")
             local title = (data and data.metadata and data.metadata.title) or name
             if title == "" or title == "null" then title = name end
@@ -3347,10 +3347,10 @@ local function wasaiListAllChats()
 end
 
 
-local function wasaiCallLLM(messages)
+local function AgentCallLLM(messages)
     local started = tick()
-    if wasaiMetrics.thinkingStartTime == 0 then
-        wasaiMetrics.thinkingStartTime = started
+    if AgentMetrics.thinkingStartTime == 0 then
+        AgentMetrics.thinkingStartTime = started
     end
     local input = ""
     if type(messages) == "table" then
@@ -3362,16 +3362,16 @@ local function wasaiCallLLM(messages)
         end
     end
 
-    local content, _, apiErr = wasaiDeepSeekChat(messages, nil)
+    local content, _, apiErr = AgentDeepSeekChat(messages, nil)
     local answer
     if content and content ~= "" then
-        wasaiLocalAIState.mode = "api"
+        AgentLocalAIState.mode = "api"
         answer = content
     else
         warn("[DeltaUI][AI] API 不可用(" .. tostring(apiErr) .. ")")
-        wasaiLocalAIState.mode = "api"
-        wasaiLocalAIState.lastError = apiErr
-        wasaiLocalAIState.failures = (wasaiLocalAIState.failures or 0) + 1
+        AgentLocalAIState.mode = "api"
+        AgentLocalAIState.lastError = apiErr
+        AgentLocalAIState.failures = (AgentLocalAIState.failures or 0) + 1
         answer = "抱歉，当前无法连接到 AI 服务（" .. tostring(apiErr) .. "）。请稍后重试。"
     end
 
@@ -3381,12 +3381,12 @@ local function wasaiCallLLM(messages)
         answer = answer:gsub("^%s+", ""):gsub("%s+$", "")
     end
 
-    wasaiLocalAIState.available = true
-    wasaiLocalAIState.lastLatency = math.max(0, tick() - started)
+    AgentLocalAIState.available = true
+    AgentLocalAIState.lastLatency = math.max(0, tick() - started)
     return answer
 end
 
-local function wasaiTryParseToolCall(text)
+local function AgentTryParseToolCall(text)
     if type(text) ~= "string" then return nil end
     local trimmed = text:gsub("^%s+", ""):gsub("%s+$", "")
 
@@ -3412,7 +3412,7 @@ local function wasaiTryParseToolCall(text)
     return nil
 end
 
-local function wasaiShowConfirmDialog(code)
+local function AgentShowConfirmDialog(code)
     local confirmed = false
     local done = false
     local dialog = create("ScreenGui", {
@@ -3557,14 +3557,14 @@ local function wasaiShowConfirmDialog(code)
 end
 
 
-local wasaiToolState = {
+local AgentToolState = {
     noclip = {active = false, conn = nil},
     antiFling = {active = false, conn = nil},
 }
 
 
-local function wasaiSetNoclip(enabled)
-    local state = wasaiToolState.noclip
+local function AgentSetNoclip(enabled)
+    local state = AgentToolState.noclip
     if enabled then
         if state.active then return "穿墙已处于开启状态" end
         state.active = true
@@ -3596,8 +3596,8 @@ local function wasaiSetNoclip(enabled)
 end
 
 
-local function wasaiSetAntiFling(enabled)
-    local state = wasaiToolState.antiFling
+local function AgentSetAntiFling(enabled)
+    local state = AgentToolState.antiFling
     if enabled then
         if state.active then return "防甩飞已处于开启状态" end
         state.active = true
@@ -3630,15 +3630,15 @@ end
 
 
 
-local wasaiRemoteCapture
+local AgentRemoteCapture
 do
-    local wasaiRemoteHookInstalled = false
-    local wasaiRemoteHookOldNamecall = nil
-    local wasaiRemoteCaptureEnabled = false
-    local wasaiRemoteBuffer = {}
-    local wasaiRemoteNoise = {"ping", "fps", "heartbeat", "heart", "latency", "requestping", "updateping", "getping", "sendping", "clientheartbeat"}
+    local AgentRemoteHookInstalled = false
+    local AgentRemoteHookOldNamecall = nil
+    local AgentRemoteCaptureEnabled = false
+    local AgentRemoteBuffer = {}
+    local AgentRemoteNoise = {"ping", "fps", "heartbeat", "heart", "latency", "requestping", "updateping", "getping", "sendping", "clientheartbeat"}
 
-    local function wasaiRemoteGetInstancePath(inst)
+    local function AgentRemoteGetInstancePath(inst)
         if not inst then return "nil" end
         if not inst:IsA("Instance") then return tostring(inst) end
         local root = inst
@@ -3663,7 +3663,7 @@ do
         elseif parent == nil then
             prefix = "game"
         else
-            prefix = wasaiRemoteGetInstancePath(parent)
+            prefix = AgentRemoteGetInstancePath(parent)
         end
         local path = prefix
         for _, pname in ipairs(parts) do
@@ -3672,14 +3672,14 @@ do
         return path
     end
 
-    local function wasaiRemoteFormatArg(arg)
+    local function AgentRemoteFormatArg(arg)
         if type(arg) == "table" then
             if getmetatable(arg) and getmetatable(arg).__tostring then
                 return tostring(arg)
             end
             return "{...}"
         elseif type(arg) == "Instance" then
-            return wasaiRemoteGetInstancePath(arg)
+            return AgentRemoteGetInstancePath(arg)
         elseif type(arg) == "string" then
             return string.format("%q", arg)
         elseif type(arg) == "nil" then
@@ -3689,11 +3689,11 @@ do
         end
     end
 
-    local function wasaiRemoteFormatCall(remoteObject, methodName, args)
-        local remotePath = wasaiRemoteGetInstancePath(remoteObject)
+    local function AgentRemoteFormatCall(remoteObject, methodName, args)
+        local remotePath = AgentRemoteGetInstancePath(remoteObject)
         local argStrings = {}
         for i, v in ipairs(args) do
-            argStrings[i] = wasaiRemoteFormatArg(v)
+            argStrings[i] = AgentRemoteFormatArg(v)
         end
         local lines = {}
         lines[#lines + 1] = "local args = {"
@@ -3711,77 +3711,77 @@ do
         return table.concat(lines, "\n")
     end
 
-    local function wasaiRemoteInstallHook()
-        if wasaiRemoteHookInstalled then return true end
+    local function AgentRemoteInstallHook()
+        if AgentRemoteHookInstalled then return true end
         if not getrawmetatable or not setreadonly or not getnamecallmethod or not newcclosure then return false end
         local meta = getrawmetatable(game)
         if not meta then return false end
         local ok = pcall(function()
             setreadonly(meta, false)
-            wasaiRemoteHookOldNamecall = meta.__namecall
+            AgentRemoteHookOldNamecall = meta.__namecall
             meta.__namecall = newcclosure(function(self, ...)
                 local method = getnamecallmethod()
                 local result
-                if wasaiRemoteCaptureEnabled and (method == "FireServer" or method == "InvokeServer") then
+                if AgentRemoteCaptureEnabled and (method == "FireServer" or method == "InvokeServer") then
                     local args = {...}
                     pcall(function()
-                        local low = wasaiRemoteGetInstancePath(self):lower()
+                        local low = AgentRemoteGetInstancePath(self):lower()
                         local skip = false
-                        for _, n in ipairs(wasaiRemoteNoise) do
+                        for _, n in ipairs(AgentRemoteNoise) do
                             if low:find(n, 1, true) then skip = true break end
                         end
                         if not skip then
-                            table.insert(wasaiRemoteBuffer, {
+                            table.insert(AgentRemoteBuffer, {
                                 path = low,
                                 method = method,
-                                script = wasaiRemoteFormatCall(self, method, args),
+                                script = AgentRemoteFormatCall(self, method, args),
                                 time = os.time(),
                             })
-                            if #wasaiRemoteBuffer > 60 then table.remove(wasaiRemoteBuffer, 1) end
+                            if #AgentRemoteBuffer > 60 then table.remove(AgentRemoteBuffer, 1) end
                         end
                     end)
                 end
-                if wasaiRemoteHookOldNamecall then
-                    result = wasaiRemoteHookOldNamecall(self, ...)
+                if AgentRemoteHookOldNamecall then
+                    result = AgentRemoteHookOldNamecall(self, ...)
                 else
                     result = self[method](self, ...)
                 end
                 return result
             end)
         end)
-        if ok then wasaiRemoteHookInstalled = true end
+        if ok then AgentRemoteHookInstalled = true end
         return ok
     end
 
-    wasaiRemoteCapture = function(args)
-        if not wasaiRemoteInstallHook() then
+    AgentRemoteCapture = function(args)
+        if not AgentRemoteInstallHook() then
             return "无法安装 Remote 捕获钩子：当前执行器缺少 getrawmetatable/setreadonly/getnamecallmethod/newcclosure。"
         end
         local goal = tostring(args.goal or "")
         local timeout = tonumber(args.timeout) or 30
         if timeout < 3 then timeout = 3 elseif timeout > 120 then timeout = 120 end
 
-        wasaiRemoteBuffer = {}
-        wasaiRemoteCaptureEnabled = true
+        AgentRemoteBuffer = {}
+        AgentRemoteCaptureEnabled = true
         local waitMsg = goal ~= "" and ("等待用户交互：请在游戏内操作「" .. goal .. "」以捕获 Remote…") or "等待用户交互：请在游戏内进行操作以捕获 Remote…"
-        wasaiThinkingPhase = waitMsg
-        wasaiCustomProgressMsg = waitMsg
-        wasaiLastToolPhase = waitMsg
+        AgentThinkingPhase = waitMsg
+        AgentCustomProgressMsg = waitMsg
+        AgentLastToolPhase = waitMsg
 
         local deadline = tick() + timeout
         local captured = {}
         while tick() < deadline do
             task.wait(0.2)
-            if #wasaiRemoteBuffer > 0 then
-                captured = wasaiRemoteBuffer
-                wasaiRemoteBuffer = {}
+            if #AgentRemoteBuffer > 0 then
+                captured = AgentRemoteBuffer
+                AgentRemoteBuffer = {}
                 break
             end
         end
-        wasaiRemoteCaptureEnabled = false
+        AgentRemoteCaptureEnabled = false
 
         if #captured == 0 then
-            wasaiThinkingPhase = "未捕获到相关 Remote"
+            AgentThinkingPhase = "未捕获到相关 Remote"
             return "已等待 " .. tostring(timeout) .. " 秒，未捕获到相关 Remote（已自动忽略 ping/fps/心跳/状态检查等无用 Remote）。请让用户在游戏内执行目标操作后重试，或加长 timeout。"
         end
 
@@ -3797,7 +3797,7 @@ do
             lines[#lines + 1] = script
             lines[#lines + 1] = ""
         end
-        wasaiThinkingPhase = "已捕获 Remote，继续处理"
+        AgentThinkingPhase = "已捕获 Remote，继续处理"
         return table.concat(lines, "\n")
     end
 end
@@ -3808,13 +3808,13 @@ end
 
 
 
-local wasaiGoTo
+local AgentGoTo
 do
-    local function wasaiResolveTarget(args)
+    local function AgentResolveTarget(args)
         args = args or {}
         local path = tostring(args.path or "")
         if path ~= "" then
-            local obj, err = wasaiGetInstanceFromPath(path)
+            local obj, err = AgentGetInstanceFromPath(path)
             if obj then
                 local cframe = obj.CFrame
                 if cframe then return cframe.Position end
@@ -3840,7 +3840,7 @@ do
         return nil, "未提供有效目标（path 或 position{x,y,z} 或 x/y/z）"
     end
 
-    local function wasaiSmoothTo(root, targetPos, step, waitTime)
+    local function AgentSmoothTo(root, targetPos, step, waitTime)
         local start = root.Position
         local dist = (targetPos - start).Magnitude
         if dist < 0.5 then
@@ -3858,7 +3858,7 @@ do
         return (root.Position - targetPos).Magnitude < 5
     end
 
-    local function wasaiPathwalk(humanoid, root, targetPos, timeout)
+    local function AgentPathwalk(humanoid, root, targetPos, timeout)
         humanoid:MoveTo(targetPos)
         local reached = false
         local conn = humanoid.MoveToFinished:Connect(function(ok) if ok then reached = true end end)
@@ -3872,8 +3872,8 @@ do
         return (root.Position - targetPos).Magnitude < 6
     end
 
-    wasaiGoTo = function(args)
-        local targetPos, err = wasaiResolveTarget(args)
+    AgentGoTo = function(args)
+        local targetPos, err = AgentResolveTarget(args)
         if not targetPos then return "无法解析目标位置: " .. tostring(err) end
 
         local lp = svc.Players and svc.Players.LocalPlayer
@@ -3884,8 +3884,8 @@ do
         local humanoid = char:FindFirstChildOfClass("Humanoid")
         if not root or not humanoid then return "找不到 HumanoidRootPart 或 Humanoid" end
 
-        wasaiThinkingPhase = "正在移动玩家到目标位置…"
-        wasaiLastToolPhase = "正在移动玩家到目标位置…"
+        AgentThinkingPhase = "正在移动玩家到目标位置…"
+        AgentLastToolPhase = "正在移动玩家到目标位置…"
         local targetStr = string.format("(%.1f, %.1f, %.1f)", targetPos.X, targetPos.Y, targetPos.Z)
         local report = {}
         local orig = root.Position
@@ -3894,31 +3894,31 @@ do
         pcall(function() root.CFrame = CFrame.new(targetPos) end)
         task.wait(0.35)
         if (root.Position - targetPos).Magnitude < 5 then
-            wasaiThinkingPhase = "已直接传送到目标"
+            AgentThinkingPhase = "已直接传送到目标"
             return "已直接传送到 " .. targetStr .. "。"
         end
         table.insert(report, "直接传送被拉回（当前距目标 " .. string.format("%.1f", (root.Position - targetPos).Magnitude) .. "），改用平滑传送…")
 
         
-        local okSmooth = pcall(wasaiSmoothTo, root, targetPos, 3, 0.05)
+        local okSmooth = pcall(AgentSmoothTo, root, targetPos, 3, 0.05)
         if okSmooth then
-            wasaiThinkingPhase = "已平滑传送到目标"
+            AgentThinkingPhase = "已平滑传送到目标"
             return "已通过平滑传送到达 " .. targetStr .. "。"
         end
         table.insert(report, "平滑传送仍被拉回，改用更慢的平滑传送…")
 
         
-        local okSlow = pcall(wasaiSmoothTo, root, targetPos, 1, 0.1)
+        local okSlow = pcall(AgentSmoothTo, root, targetPos, 1, 0.1)
         if okSlow then
-            wasaiThinkingPhase = "已慢速传送到目标"
+            AgentThinkingPhase = "已慢速传送到目标"
             return "已通过慢速平滑传送到达 " .. targetStr .. "。"
         end
         table.insert(report, "慢速传送仍被拉回，改用自动寻路步行…")
 
         
-        local okWalk = pcall(wasaiPathwalk, humanoid, root, targetPos, 15)
+        local okWalk = pcall(AgentPathwalk, humanoid, root, targetPos, 15)
         if okWalk then
-            wasaiThinkingPhase = "已步行到达目标"
+            AgentThinkingPhase = "已步行到达目标"
             return "已通过自动寻路步行到达 " .. targetStr .. "。"
         end
 
@@ -3931,9 +3931,9 @@ end
 
 
 
-local wasaiClickGui
+local AgentClickGui
 do
-    local function wasaiClickAt(x, y)
+    local function AgentClickAt(x, y)
         local ok = pcall(function()
             local vim = game:GetService("VirtualInputManager")
             vim:SendMouseButtonEvent(x, y, 0, true, game, 1)
@@ -3943,13 +3943,13 @@ do
         return ok
     end
 
-    local function wasaiResolveAbs(args)
+    local function AgentResolveAbs(args)
         args = args or {}
         local x = tonumber(args.x)
         local y = tonumber(args.y)
         local path = tostring(args.path or "")
         if path ~= "" then
-            local obj, err = wasaiGetInstanceFromPath(path)
+            local obj, err = AgentGetInstanceFromPath(path)
             if obj then
                 local absPos, absSize = obj.AbsolutePosition, obj.AbsoluteSize
                 if absPos and absSize and absSize.X > 0 and absSize.Y > 0 then
@@ -3977,11 +3977,11 @@ do
         return nil, nil, "未提供目标（path 或 scaleX/scaleY 或 x/y）"
     end
 
-    wasaiClickGui = function(args)
-        local ax, ay, desc = wasaiResolveAbs(args)
+    AgentClickGui = function(args)
+        local ax, ay, desc = AgentResolveAbs(args)
         if not ax then return desc end
-        wasaiThinkingPhase = "正在点击界面元素…"
-        wasaiLastToolPhase = "正在点击界面元素…"
+        AgentThinkingPhase = "正在点击界面元素…"
+        AgentLastToolPhase = "正在点击界面元素…"
 
         
         
@@ -3991,7 +3991,7 @@ do
         if wasOrbVisible then orbFrame.Visible = false end
         task.wait() 
 
-        local clicked = wasaiClickAt(ax, ay)
+        local clicked = AgentClickAt(ax, ay)
 
         
         if wasMainVisible then main.Visible = true end
@@ -4018,9 +4018,9 @@ end
 --    backup      默认 true：改动前留备份（edit_file → .bak，del_file → 回收站）
 --  所有工具统一以 [OK] / [ERR] / [WARN] 开头返回，便于模型判断结果。
 -- ============================================================================
-WASAI_FILE_TOOLS_MAX_CHARS = 12000   -- read_file 单次返回字符上限
+AGENT_FILE_TOOLS_MAX_CHARS = 12000   -- read_file 单次返回字符上限
 
-local function wasaiFileSplitLines(text)
+local function AgentFileSplitLines(text)
     local out = {}
     text = tostring(text or "")
     local pos = 1
@@ -4037,33 +4037,33 @@ local function wasaiFileSplitLines(text)
     return out
 end
 
-local function wasaiFileJoinLines(lines)
+local function AgentFileJoinLines(lines)
     return table.concat(lines, "\n")
 end
 
 -- 文本内容切成行数组；若以换行结尾，去掉尾部多出的空元素（避免多插一个空行）
-local function wasaiFileContentToLines(content)
+local function AgentFileContentToLines(content)
     content = tostring(content or "")
-    local lines = wasaiFileSplitLines(content)
+    local lines = AgentFileSplitLines(content)
     if #lines > 1 and lines[#lines] == "" and content:sub(-1) == "\n" then
         table.remove(lines)
     end
     return lines
 end
 
-local function wasaiFileLineCount(text)
+local function AgentFileLineCount(text)
     return select(2, tostring(text or ""):gsub("\n", "")) + 1
 end
 
-local function wasaiFileCheckFs()
+local function AgentFileCheckFs()
     if type(isfile) ~= "function" or type(readfile) ~= "function" or type(writefile) ~= "function" then
         return false, "当前执行器不支持文件读写接口（isfile/readfile/writefile）"
     end
     return true
 end
 
-local function wasaiFileReadRaw(path)
-    local okFs, fsErr = wasaiFileCheckFs()
+local function AgentFileReadRaw(path)
+    local okFs, fsErr = AgentFileCheckFs()
     if not okFs then return nil, fsErr end
     if not isfile(path) then return nil, "文件不存在: " .. tostring(path) end
     local ok, content = pcall(readfile, path)
@@ -4073,7 +4073,7 @@ local function wasaiFileReadRaw(path)
     return content
 end
 
-local function wasaiFileEnsureParent(path)
+local function AgentFileEnsureParent(path)
     if type(isfolder) ~= "function" or type(makefolder) ~= "function" then return end
     local folder = tostring(path):match("^(.*)[/\\][^/\\]+$")
     if folder and folder ~= "" and not isfolder(folder) then
@@ -4081,20 +4081,20 @@ local function wasaiFileEnsureParent(path)
     end
 end
 
-local function wasaiEscapeLuaPattern(s)
+local function AgentEscapeLuaPattern(s)
     return (tostring(s or ""):gsub("([%^%$%(%)%%%.%[%]%*%+%-%?])", "%%%1"))
 end
 
 -- ---------------------------------------------------------------- read_file
-local function wasaiToolReadFile(args)
+local function AgentToolReadFile(args)
     args = args or {}
     local path = tostring(args.path or "")
     if path == "" then return "[ERR] read_file: 缺少参数 path" end
 
-    local content, err = wasaiFileReadRaw(path)
+    local content, err = AgentFileReadRaw(path)
     if not content then return "[ERR] read_file: " .. tostring(err) end
 
-    local lines = wasaiFileSplitLines(content)
+    local lines = AgentFileSplitLines(content)
     local total = #lines
 
     local startLine = math.floor(tonumber(args.start_line) or tonumber(args.start) or 1)
@@ -4114,7 +4114,7 @@ local function wasaiToolReadFile(args)
     local numbered = args.number
     if numbered == nil then numbered = true end
 
-    local maxChars = tonumber(args.max_chars) or WASAI_FILE_TOOLS_MAX_CHARS
+    local maxChars = tonumber(args.max_chars) or AGENT_FILE_TOOLS_MAX_CHARS
     local buf = {}
     local used = 0
     local truncated = false
@@ -4138,7 +4138,7 @@ local function wasaiToolReadFile(args)
 end
 
 -- ---------------------------------------------------------------- edit_file
-local function wasaiToolEditFile(args)
+local function AgentToolEditFile(args)
     args = args or {}
     if type(isfile) ~= "function" or type(writefile) ~= "function" then
         return "[ERR] edit_file: 当前执行器不支持文件读写接口"
@@ -4149,7 +4149,7 @@ local function wasaiToolEditFile(args)
     local exists = isfile(path)
     local original = ""
     if exists then
-        local content, err = wasaiFileReadRaw(path)
+        local content, err = AgentFileReadRaw(path)
         if not content then return "[ERR] edit_file: " .. tostring(err) end
         original = content
     end
@@ -4170,21 +4170,21 @@ local function wasaiToolEditFile(args)
         return "[ERR] edit_file: 文件不存在，新建请用 mode=\"create\": " .. path
     end
 
-    local beforeLines = wasaiFileLineCount(original)
+    local beforeLines = AgentFileLineCount(original)
     local newContent = original
     local detail = ""
     local wrote = true
 
     if mode == "create" or mode == "overwrite" then
         newContent = tostring(args.content or "")
-        detail = "整文件写入 " .. wasaiFileLineCount(newContent) .. " 行"
+        detail = "整文件写入 " .. AgentFileLineCount(newContent) .. " 行"
 
     elseif mode == "append" then
         local add = tostring(args.content or "")
         if add == "" then return "[ERR] edit_file: append 需要 content" end
         if original ~= "" and original:sub(-1) ~= "\n" then original = original .. "\n" end
         newContent = original .. add
-        detail = "末尾追加 " .. wasaiFileLineCount(add) .. " 行"
+        detail = "末尾追加 " .. AgentFileLineCount(add) .. " 行"
 
     elseif mode == "prepend" then
         local add = tostring(args.content or "")
@@ -4195,20 +4195,20 @@ local function wasaiToolEditFile(args)
     elseif mode == "insert" then
         local add = tostring(args.content or "")
         if add == "" then return "[ERR] edit_file: insert 需要 content" end
-        local lines = wasaiFileSplitLines(original)
+        local lines = AgentFileSplitLines(original)
         local at = math.floor(tonumber(args.start_line) or tonumber(args.after_line) or 0)
         if at < 0 then at = 0 end
         if at > #lines then at = #lines end
-        local addLines = wasaiFileContentToLines(add)
+        local addLines = AgentFileContentToLines(add)
         local merged = {}
         for i = 1, at do merged[#merged + 1] = lines[i] end
         for _, l in ipairs(addLines) do merged[#merged + 1] = l end
         for i = at + 1, #lines do merged[#merged + 1] = lines[i] end
-        newContent = wasaiFileJoinLines(merged)
+        newContent = AgentFileJoinLines(merged)
         detail = string.format("在第 %d 行后插入 %d 行", at, #addLines)
 
     elseif mode == "replace_range" then
-        local lines = wasaiFileSplitLines(original)
+        local lines = AgentFileSplitLines(original)
         local s = math.floor(tonumber(args.start_line) or tonumber(args.from_line) or 1)
         local e = tonumber(args.end_line)
         if not e then
@@ -4220,19 +4220,19 @@ local function wasaiToolEditFile(args)
         if s > #lines then s = #lines end
         if e < s then e = s end
         if e > #lines then e = #lines end
-        local newLines = wasaiFileContentToLines(tostring(args.content or ""))
+        local newLines = AgentFileContentToLines(tostring(args.content or ""))
         local merged = {}
         for i = 1, s - 1 do merged[#merged + 1] = lines[i] end
         for _, l in ipairs(newLines) do merged[#merged + 1] = l end
         for i = e + 1, #lines do merged[#merged + 1] = lines[i] end
-        newContent = wasaiFileJoinLines(merged)
+        newContent = AgentFileJoinLines(merged)
         detail = string.format("替换第 %d-%d 行 → %d 行", s, e, #newLines)
 
     elseif mode == "replace_text" then
         local old = tostring(args.old or "")
         if old == "" then return "[ERR] edit_file: replace_text 需要参数 old" end
         local new = tostring(args.new or args.content or "")
-        local pat = wasaiEscapeLuaPattern(old)
+        local pat = AgentEscapeLuaPattern(old)
         local limit = tonumber(args.count) or 1
         local replaced = 0
         if limit <= 0 then
@@ -4259,7 +4259,7 @@ local function wasaiToolEditFile(args)
         return "[WARN] edit_file: 内容无变化（" .. detail .. "）"
     end
 
-    wasaiFileEnsureParent(path)
+    AgentFileEnsureParent(path)
 
     local backupPath = nil
     if exists and args.backup ~= false then
@@ -4273,15 +4273,15 @@ local function wasaiToolEditFile(args)
         return "[ERR] edit_file 写入失败: " .. tostring(werr)
     end
 
-    wasaiTrackFileOp(path)
-    local afterLines = wasaiFileLineCount(newContent)
+    AgentTrackFileOp(path)
+    local afterLines = AgentFileLineCount(newContent)
     return string.format("[OK] edit_file %s | %s | 行数 %d → %d%s",
         path, detail, beforeLines, afterLines,
         backupPath and (" | 备份: " .. backupPath) or "")
 end
 
 -- ---------------------------------------------------------------- del_file
-local function wasaiToolDelFile(args)
+local function AgentToolDelFile(args)
     args = args or {}
     local path = tostring(args.path or "")
     if path == "" then return "[ERR] del_file: 缺少参数 path" end
@@ -4322,21 +4322,21 @@ local function wasaiToolDelFile(args)
     end
     local okD, derr = pcall(delfile, path)
     if not okD then return "[ERR] del_file 删除失败: " .. tostring(derr) end
-    wasaiTrackFileOp(path)
+    AgentTrackFileOp(path)
     return "[OK] del_file 已删除: " .. path .. (trashed and (" | 回收站: " .. trashed) or "")
 end
 
-local function wasaiExecuteToolCall(tool, args)
-    wasaiTrackToolCall()
+local function AgentExecuteToolCall(tool, args)
+    AgentTrackToolCall()
     local ok, result = pcall(function()
         if tool == "list_children" then
             local path = tostring(args.path or "")
-            local obj, err = wasaiGetInstanceFromPath(path)
+            local obj, err = AgentGetInstanceFromPath(path)
             if not obj then return "路径不可达: " .. tostring(err) end
-            wasaiChatMemory.lastPath = path
+            AgentChatMemory.lastPath = path
             local depth = tonumber(args.depth) or 1
             if depth < 1 then depth = 1 elseif depth > 3 then depth = 3 end
-            local rows = wasaiListChildrenDepth(obj, depth)
+            local rows = AgentListChildrenDepth(obj, depth)
             local shown = {}
             for i = 1, math.min(#rows, 80) do shown[i] = rows[i] end
             local text = table.concat(shown, "\n")
@@ -4345,17 +4345,17 @@ local function wasaiExecuteToolCall(tool, args)
 
         elseif tool == "decompile" then
             local path = tostring(args.path or "")
-            local obj, err = wasaiGetInstanceFromPath(path)
+            local obj, err = AgentGetInstanceFromPath(path)
             if not obj then return "路径不可达: " .. tostring(err) end
-            wasaiChatMemory.lastPath = path
-            local source, derr = wasaiTryDecompile(obj)
+            AgentChatMemory.lastPath = path
+            local source, derr = AgentTryDecompile(obj)
             if not source then return "反编译失败: " .. tostring(derr) end
             local savedPath = nil
             if writefile and makefolder and isfolder then
-                local okSave, saveOk, savePath = pcall(wasaiSaveScriptToFile, obj, wasaiGetOutputDir(), nil)
+                local okSave, saveOk, savePath = pcall(AgentSaveScriptToFile, obj, AgentGetOutputDir(), nil)
                 if okSave and saveOk then
                     savedPath = savePath
-                    wasaiLastDecompileDir = wasaiGetOutputDir()
+                    AgentLastDecompileDir = AgentGetOutputDir()
                 end
             end
             local summary = "反编译成功，源码共 " .. #source .. " 字节。"
@@ -4363,20 +4363,20 @@ local function wasaiExecuteToolCall(tool, args)
             return summary .. "\n源码开头预览:\n" .. source:sub(1, 2500)
 
         elseif tool == "decompile_all" then
-            return tostring(wasaiDecompileAll("反编译所有脚本"))
+            return tostring(AgentDecompileAll("反编译所有脚本"))
 
         elseif tool == "decompile_smart" then
             local target = tostring(args.target or "")
-            wasaiChatMemory.lastPath = target
-            return tostring(wasaiDecompileSmart(target))
+            AgentChatMemory.lastPath = target
+            return tostring(AgentDecompileSmart(target))
 
         elseif tool == "decompile_modules" then
             local target = tostring(args.target or "")
-            if target ~= "" then wasaiChatMemory.lastPath = target end
-            return tostring(wasaiDecompileModules(target))
+            if target ~= "" then AgentChatMemory.lastPath = target end
+            return tostring(AgentDecompileModules(target))
 
         elseif tool == "get_property" then
-            local obj, err = wasaiGetInstanceFromPath(tostring(args.path or ""))
+            local obj, err = AgentGetInstanceFromPath(tostring(args.path or ""))
             if not obj then return "路径不可达: " .. tostring(err) end
             local prop = tostring(args.property or "")
             local okRead, value = pcall(function() return obj[prop] end)
@@ -4384,9 +4384,9 @@ local function wasaiExecuteToolCall(tool, args)
             return prop .. " = " .. tostring(value)
 
         elseif tool == "list_properties" then
-            local obj, err = wasaiGetInstanceFromPath(tostring(args.path or ""))
+            local obj, err = AgentGetInstanceFromPath(tostring(args.path or ""))
             if not obj then return "路径不可达: " .. tostring(err) end
-            local props = wasaiListAllProperties(obj)
+            local props = AgentListAllProperties(obj)
             local shown = {}
             for i = 1, math.min(#props, 60) do shown[i] = props[i] end
             local text = table.concat(shown, "\n")
@@ -4398,22 +4398,22 @@ local function wasaiExecuteToolCall(tool, args)
             if code == "" then return "未提供要执行的代码" end
             local cfg = loadConfig()
             if not cfg.autoAcceptExec then
-                if not wasaiShowConfirmDialog(code) then
+                if not AgentShowConfirmDialog(code) then
                     return "__PERMISSION_DENIED__"
                 end
             else
-                wasaiThinkingPhase = "正在执行 Lua 代码"
-                wasaiLastToolPhase = "正在执行 Lua 代码"
+                AgentThinkingPhase = "正在执行 Lua 代码"
+                AgentLastToolPhase = "正在执行 Lua 代码"
                 task.wait()
             end
-            local out, cerr = wasaiExecuteLuaCode(code)
+            local out, cerr = AgentExecuteLuaCode(code)
             if not out then return "执行失败: " .. tostring(cerr) end
             return "执行成功: " .. out
 
         elseif tool == "find_objects" then
             local name = tostring(args.name or "")
             if name == "" then return "未提供搜索名称" end
-            local matches = wasaiFindObjectsByName(name, game)
+            local matches = AgentFindObjectsByName(name, game)
             if #matches == 0 then return "没有找到名称包含 " .. name .. " 的对象" end
             local shown = {}
             for i = 1, math.min(#matches, 40) do shown[i] = matches[i] end
@@ -4433,7 +4433,7 @@ local function wasaiExecuteToolCall(tool, args)
             table.insert(searchRoots, {obj = game:GetService("ServerScriptService"), name = "ServerScriptService"})
             local allMatches = {}
             for _, root in ipairs(searchRoots) do
-                local found = wasaiFindObjectsByName(name, root.obj)
+                local found = AgentFindObjectsByName(name, root.obj)
                 for _, m in ipairs(found) do
                     table.insert(allMatches, m)
                 end
@@ -4452,10 +4452,10 @@ local function wasaiExecuteToolCall(tool, args)
             return "在 Workspace、PlayerScripts、ReplicatedStorage、ServerScriptService 中搜索「" .. name .. "」，共找到 " .. #allMatches .. " 个匹配对象：\n" .. table.concat(allMatches, "\n")
 
         elseif tool == "count_output_files" then
-            return "输出目录共有 " .. tostring(wasaiCountOutputFiles()) .. " 个文件"
+            return "输出目录共有 " .. tostring(AgentCountOutputFiles()) .. " 个文件"
 
         elseif tool == "list_output_files" then
-            local dir = wasaiGetOutputDir()
+            local dir = AgentGetOutputDir()
             local files = {}
             if isfolder and listfiles and isfile and isfolder(dir) then
                 local function rec(p)
@@ -4472,41 +4472,41 @@ local function wasaiExecuteToolCall(tool, args)
             return "共 " .. #files .. " 个文件:\n" .. table.concat(shown, "\n")
 
         elseif tool == "delete_recent_files" then
-            local okDel, deleted = wasaiDeleteRecentFiles()
+            local okDel, deleted = AgentDeleteRecentFiles()
             if okDel then return "已删除最近生成的文件，共清理 " .. tostring(deleted) .. " 个" end
             return "删除失败: " .. tostring(deleted)
 
         elseif tool == "noclip" then
-            return wasaiSetNoclip(args.enabled ~= false)
+            return AgentSetNoclip(args.enabled ~= false)
 
         elseif tool == "anti_fling" then
-            return wasaiSetAntiFling(args.enabled ~= false)
+            return AgentSetAntiFling(args.enabled ~= false)
 
         elseif tool == "read_file" then
-            return wasaiToolReadFile(args)
+            return AgentToolReadFile(args)
 
         elseif tool == "edit_file" then
-            return wasaiToolEditFile(args)
+            return AgentToolEditFile(args)
 
         elseif tool == "del_file" or tool == "delete_file" or tool == "remove_file" then
-            return wasaiToolDelFile(args)
+            return AgentToolDelFile(args)
 
         elseif tool == "report_progress" then
-            local msg = wasaiSafeString(tostring(args.message or ""), 80)
+            local msg = AgentSafeString(tostring(args.message or ""), 80)
             if msg ~= "" then
-                wasaiThinkingPhase = msg
-                wasaiCustomProgressMsg = msg
+                AgentThinkingPhase = msg
+                AgentCustomProgressMsg = msg
             end
             return "已向用户汇报进度: " .. msg
 
         elseif tool == "GotRemote" or tool == "gotremote" then
-            return wasaiRemoteCapture(args)
+            return AgentRemoteCapture(args)
 
         elseif tool == "go_to" or tool == "teleport" or tool == "move" then
-            return wasaiGoTo(args)
+            return AgentGoTo(args)
 
         elseif tool == "click_gui" or tool == "click" then
-            return wasaiClickGui(args)
+            return AgentClickGui(args)
         end
 
         return "未知工具: " .. tostring(tool)
@@ -4516,7 +4516,7 @@ local function wasaiExecuteToolCall(tool, args)
 end
 
 
-local function wasaiLooksIntermediate(content, toolCount)
+local function AgentLooksIntermediate(content, toolCount)
     content = tostring(content or "")
     local compact = content:gsub("%s+", "")
     if #compact == 0 then return false end
@@ -4557,7 +4557,7 @@ local function wasaiLooksIntermediate(content, toolCount)
     return false
 end
 
-local function wasaiGenerateResponseCore(input, authToken)
+local function AgentGenerateResponseCore(input, authToken)
     
     
     local _aWAuthZx9K7 = "Dlt" .. "7kZq" .. "W2m9vR4x" .. "Q9n"
@@ -4574,7 +4574,7 @@ local function wasaiGenerateResponseCore(input, authToken)
 
     local messages, context
     local okBuild, buildErr = pcall(function()
-        messages, context = wasaiBuildLLMMessages(safeInput)
+        messages, context = AgentBuildLLMMessages(safeInput)
     end)
     if not okBuild then
         return "处理时遇到了内部异常，请重试一下。", {{phase = "error", output = tostring(buildErr)}}
@@ -4585,7 +4585,7 @@ local function wasaiGenerateResponseCore(input, authToken)
     
     
     
-    local maxIter = math.max(1, tonumber(wasaiLocalAIConfig.maxToolIterations) or 6)
+    local maxIter = math.max(1, tonumber(AgentLocalAIConfig.maxToolIterations) or 6)
     local finalAnswer = nil
     local toolCount = 0
     local apiFailed = false
@@ -4595,21 +4595,21 @@ local function wasaiGenerateResponseCore(input, authToken)
     local stallWarned = false    
 
     for iter = 1, maxIter do
-        if wasaiCustomProgressMsg ~= "" then
-            wasaiThinkingPhase = wasaiCustomProgressMsg
-        elseif wasaiLastToolPhase ~= "" then
-            wasaiThinkingPhase = wasaiLastToolPhase
+        if AgentCustomProgressMsg ~= "" then
+            AgentThinkingPhase = AgentCustomProgressMsg
+        elseif AgentLastToolPhase ~= "" then
+            AgentThinkingPhase = AgentLastToolPhase
         else
-            wasaiThinkingPhase = "正在请求模型"
+            AgentThinkingPhase = "正在请求模型"
         end
-        local content, toolCalls, apiErr = wasaiDeepSeekChat(messages, WASAI_DEEPSEEK_TOOLS)
+        local content, toolCalls, apiErr = AgentDeepSeekChat(messages, AGENT_DEEPSEEK_TOOLS)
         if apiErr then
             apiFailed = true
             apiError = apiErr
             break
         end
 
-        wasaiLocalAIState.mode = "api"
+        AgentLocalAIState.mode = "api"
 
         if toolCalls and #toolCalls > 0 then
             
@@ -4647,9 +4647,9 @@ local function wasaiGenerateResponseCore(input, authToken)
                 local toolArgs = tc.args or {}
 
                 table.insert(steps, {phase = "tool", output = "模型自主决策调用工具: " .. toolName})
-                wasaiThinkingPhase = "正在调用工具: " .. toolName
-                wasaiLastToolName = toolName
-                wasaiLastToolPhase = "正在调用工具: " .. toolName
+                AgentThinkingPhase = "正在调用工具: " .. toolName
+                AgentLastToolName = toolName
+                AgentLastToolPhase = "正在调用工具: " .. toolName
                 -- 文件类工具结果更大，单独放宽上限（read_file 默认最多返回 12000 字符）
                 local resultCap = 2500
                 if toolName == "read_file" then
@@ -4657,7 +4657,7 @@ local function wasaiGenerateResponseCore(input, authToken)
                 elseif toolName == "list_output_files" or toolName == "edit_file" then
                     resultCap = 4000
                 end
-                local toolResult = wasaiSafeString(wasaiExecuteToolCall(toolName, toolArgs), resultCap)
+                local toolResult = AgentSafeString(AgentExecuteToolCall(toolName, toolArgs), resultCap)
 
                 
                 local sig = toolName
@@ -4669,14 +4669,14 @@ local function wasaiGenerateResponseCore(input, authToken)
                 callHist[sig] = (callHist[sig] or 0) + 1
                 if callHist[sig] > maxRepeats then
                     table.insert(steps, {phase = "execute", output = "检测到重复工具调用(" .. toolName .. ")，已终止循环"})
-                    wasaiLocalAIState.lastToolCalls = toolCount
-                    wasaiLocalAIState.lastLatency = math.max(0, tick() - started)
+                    AgentLocalAIState.lastToolCalls = toolCount
+                    AgentLocalAIState.lastLatency = math.max(0, tick() - started)
                     return "检测到重复的工具调用，为避免继续消耗积分已停止。请换一个更具体或不同的指令再试。", steps
                 end
 
-                wasaiLastToolOp.name = toolName
-                wasaiLastToolOp.result = wasaiSafeString(toolResult, 500)
-                wasaiLastToolOp.time = os.time()
+                AgentLastToolOp.name = toolName
+                AgentLastToolOp.result = AgentSafeString(toolResult, 500)
+                AgentLastToolOp.time = os.time()
 
                 if toolResult == "__PERMISSION_DENIED__" then
                     local denyReplies = {
@@ -4686,9 +4686,9 @@ local function wasaiGenerateResponseCore(input, authToken)
                     }
                     local denyReply = denyReplies[math.random(#denyReplies)]
                     table.insert(steps, {phase = "execute", output = "用户拒绝了代码执行权限"})
-                    pcall(function() wasaiSaveMemory(safeInput, denyReply) end)
-                    wasaiLocalAIState.lastToolCalls = toolCount
-                    wasaiLocalAIState.lastLatency = math.max(0, tick() - started)
+                    pcall(function() AgentSaveMemory(safeInput, denyReply) end)
+                    AgentLocalAIState.lastToolCalls = toolCount
+                    AgentLocalAIState.lastLatency = math.max(0, tick() - started)
                     return denyReply, steps
                 end
 
@@ -4703,8 +4703,8 @@ local function wasaiGenerateResponseCore(input, authToken)
             end
             
             -- 一轮工具调用结束：收尾当前「深度思考」卡片并开启新一轮
-            if wasaiEndThinkingRound then pcall(wasaiEndThinkingRound) end
-            if wasaiStartThinkingRound then pcall(wasaiStartThinkingRound) end
+            if AgentEndThinkingRound then pcall(AgentEndThinkingRound) end
+            if AgentStartThinkingRound then pcall(AgentStartThinkingRound) end
 
             if not stallWarned and toolCount >= 5 then
                 stallWarned = true
@@ -4716,9 +4716,9 @@ local function wasaiGenerateResponseCore(input, authToken)
             
         else
             
-            if wasaiLooksIntermediate(content, toolCount) then
+            if AgentLooksIntermediate(content, toolCount) then
                 table.insert(messages, {role = "assistant", content = content or ""})
-                wasaiThinkingPhase = "继续处理中"
+                AgentThinkingPhase = "继续处理中"
             else
                 finalAnswer = (content and content ~= "") and content or "好的，我知道了。"
                 break
@@ -4727,22 +4727,22 @@ local function wasaiGenerateResponseCore(input, authToken)
     end
 
     if apiFailed then
-        wasaiThinkingPhase = "API 不可用，正在重试"
+        AgentThinkingPhase = "API 不可用，正在重试"
         warn("[DeltaUI][AI] DeepSeek API 调用失败: " .. tostring(apiError))
-        wasaiLocalAIState.lastError = apiError
-        wasaiLocalAIState.failures = (wasaiLocalAIState.failures or 0) + 1
-        wasaiLocalAIState.mode = "local"
+        AgentLocalAIState.lastError = apiError
+        AgentLocalAIState.failures = (AgentLocalAIState.failures or 0) + 1
+        AgentLocalAIState.mode = "local"
         finalAnswer = "抱歉，当前无法连接到 AI 服务（" .. tostring(apiError) .. "）。请稍后重试。"
         table.insert(steps, {phase = "fallback", output = "API 不可用，已返回错误提示（" .. tostring(apiError) .. "）"})
     elseif not finalAnswer then
-        wasaiThinkingPhase = "Agent正在输入…"
-        wasaiLocalAIState.lastError = nil
-        wasaiLocalAIState.failures = 0
-        wasaiLocalAIState.mode = "api"
+        AgentThinkingPhase = "Agent正在输入…"
+        AgentLocalAIState.lastError = nil
+        AgentLocalAIState.failures = 0
+        AgentLocalAIState.mode = "api"
         local finalMessages = {}
         for _, m in ipairs(messages) do table.insert(finalMessages, m) end
         table.insert(finalMessages, {role = "user", content = "请基于以上所有工具执行结果，直接给出最终总结回答。不要再描述你接下来要做什么，直接输出结论。"})
-        local content2, _, apiErr2 = wasaiDeepSeekChat(finalMessages, nil)
+        local content2, _, apiErr2 = AgentDeepSeekChat(finalMessages, nil)
         if content2 and content2 ~= "" then
             finalAnswer = content2
         elseif toolCount > 0 then
@@ -4752,12 +4752,12 @@ local function wasaiGenerateResponseCore(input, authToken)
         end
         table.insert(steps, {phase = "generate", output = "工具循环后追加一次无工具请求以获取最终回复（" .. tostring(apiErr2 or "ok") .. "）"})
     else
-        wasaiLocalAIState.lastError = nil
-        wasaiLocalAIState.failures = 0
+        AgentLocalAIState.lastError = nil
+        AgentLocalAIState.failures = 0
     end
     if type(finalAnswer) == "string" then
         if finalAnswer:match("^%s*{") then
-            local _t, _a = wasaiTryParseToolCall(finalAnswer)
+            local _t, _a = AgentTryParseToolCall(finalAnswer)
             if _t then
                 finalAnswer = "好的，已处理你的请求。" .. (toolCount > 0 and ("（调用了 " .. toolCount .. " 次工具）") or "")
             end
@@ -4765,7 +4765,7 @@ local function wasaiGenerateResponseCore(input, authToken)
         
         if finalAnswer:find("<[%s|]-DSML", 1) or finalAnswer:find('invoke%s+name="', 1)
            or finalAnswer:find('parameter%s+name="', 1) then
-            local stripped = wasaiStripDSML(finalAnswer)
+            local stripped = AgentStripDSML(finalAnswer)
             
             stripped = stripped:gsub('<[^>]*DSML[^>]*>', '')
             stripped = stripped:gsub('%s*tool_calls', '')
@@ -4782,41 +4782,41 @@ local function wasaiGenerateResponseCore(input, authToken)
         end
     end
 
-    wasaiLocalAIState.lastToolCalls = toolCount
-    wasaiLocalAIState.available = true
-    wasaiLocalAIState.lastLatency = math.max(0, tick() - started)
-    table.insert(steps, {phase = "generate", output = "DeepSeek API 生成回复（共调用 " .. toolCount .. " 次工具，模式: " .. wasaiLocalAIState.mode .. "）"})
+    AgentLocalAIState.lastToolCalls = toolCount
+    AgentLocalAIState.available = true
+    AgentLocalAIState.lastLatency = math.max(0, tick() - started)
+    table.insert(steps, {phase = "generate", output = "DeepSeek API 生成回复（共调用 " .. toolCount .. " 次工具，模式: " .. AgentLocalAIState.mode .. "）"})
 
-    pcall(function() wasaiSaveMemory(safeInput, finalAnswer) end)
+    pcall(function() AgentSaveMemory(safeInput, finalAnswer) end)
     return finalAnswer, steps
 end
 
-local wasaiMainFrame = create("Frame", {
+local AgentMainFrame = create("Frame", {
     Name = "MainFrame",
     Size = UDim2.new(1, 0, 1, 0),
     Position = UDim2.new(0, 0, 0, 0),
     BackgroundTransparency = 1,
     BorderSizePixel = 0,
     Visible = true,
-    Parent = wasaiPage,
+    Parent = AgentPage,
     ZIndex = 3
 })
-wasaiResumeParent = wasaiMainFrame
+AgentResumeParent = AgentMainFrame
 
-local wasaiTitleBar = create("Frame", {
+local AgentTitleBar = create("Frame", {
     Name = "TitleBar",
     Size = UDim2.new(1, 0, 0, 32),
     Position = UDim2.new(0, 0, 0, 0),
     BackgroundColor3 = theme.surfaceLight,
     BackgroundTransparency = 0.5,
     BorderSizePixel = 0,
-    Parent = wasaiMainFrame,
+    Parent = AgentMainFrame,
     ZIndex = 4
 })
-corner(theme.radius, wasaiTitleBar)
-stroke(theme.border, 1, wasaiTitleBar)
+corner(theme.radius, AgentTitleBar)
+stroke(theme.border, 1, AgentTitleBar)
 
-local wasaiTitleLabel = create("TextLabel", {
+local AgentTitleLabel = create("TextLabel", {
     Name = "TitleLabel",
     Size = UDim2.new(1, -60, 1, 0),
     Position = UDim2.new(0, 12, 0, 0),
@@ -4827,12 +4827,12 @@ local wasaiTitleLabel = create("TextLabel", {
     TextSize = 12,
     TextXAlignment = Enum.TextXAlignment.Left,
     TextYAlignment = Enum.TextYAlignment.Center,
-    Parent = wasaiTitleBar,
+    Parent = AgentTitleBar,
     ZIndex = 5
 })
 
 
-wasaiModelLabel = create("TextLabel", {
+AgentModelLabel = create("TextLabel", {
     Name = "ModelLabel",
     Size = UDim2.new(0, 96, 0, 20),
     Position = UDim2.new(1, -230, 0.5, -10),
@@ -4843,14 +4843,14 @@ wasaiModelLabel = create("TextLabel", {
     TextSize = 11,
     TextXAlignment = Enum.TextXAlignment.Right,
     TextYAlignment = Enum.TextYAlignment.Center,
-    Parent = wasaiTitleBar,
+    Parent = AgentTitleBar,
     ZIndex = 5
 })
 do
-    local _m = WASAAI_MODELS[wasaiLocalAIConfig.activeModel or "flash"]
+    local _m = WASAAI_MODELS[AgentLocalAIConfig.activeModel or "flash"]
     if _m then
-        wasaiModelLabel.Text = _m.label
-        wasaiModelLabel.TextColor3 = _m.isClaude and Color3.fromRGB(255, 200, 60) or theme.textDim
+        AgentModelLabel.Text = _m.label
+        AgentModelLabel.TextColor3 = _m.isClaude and Color3.fromRGB(255, 200, 60) or theme.textDim
     end
 end
 
@@ -4859,8 +4859,8 @@ if type(updateExternalApiUI) == "function" then
 end
 
 
-local wasaiManageMode = false   -- 对话管理面板保留，暂时不开放入口
-local wasaiSettingsButton = create("TextButton", {
+local AgentManageMode = false   -- 对话管理面板保留，暂时不开放入口
+local AgentSettingsButton = create("TextButton", {
     Name = "SettingsButton",
     Size = UDim2.new(0, 24, 0, 24),
     Position = UDim2.new(1, -30, 0.5, -12),
@@ -4868,18 +4868,18 @@ local wasaiSettingsButton = create("TextButton", {
     BackgroundTransparency = 0.4,
     BorderSizePixel = 0,
     Text = "",
-    Parent = wasaiTitleBar,
+    Parent = AgentTitleBar,
     ZIndex = 6
 })
-corner(6, wasaiSettingsButton)
-local wasaiSettingsIcon = GetIcon("settings", UDim2.new(0, 15, 0, 15), theme.textDim)
-if wasaiSettingsIcon then
-    wasaiSettingsIcon.AnchorPoint = Vector2.new(0.5, 0.5)
-    wasaiSettingsIcon.Position = UDim2.new(0.5, 0, 0.5, 0)
-    wasaiSettingsIcon.Parent = wasaiSettingsButton
+corner(6, AgentSettingsButton)
+local AgentSettingsIcon = GetIcon("settings", UDim2.new(0, 15, 0, 15), theme.textDim)
+if AgentSettingsIcon then
+    AgentSettingsIcon.AnchorPoint = Vector2.new(0.5, 0.5)
+    AgentSettingsIcon.Position = UDim2.new(0.5, 0, 0.5, 0)
+    AgentSettingsIcon.Parent = AgentSettingsButton
 end
 
-local wasaiStatsButton = create("TextButton", {
+local AgentStatsButton = create("TextButton", {
     Name = "StatsButton",
     Size = UDim2.new(0, 24, 0, 24),
     Position = UDim2.new(1, -58, 0.5, -12),
@@ -4887,15 +4887,15 @@ local wasaiStatsButton = create("TextButton", {
     BackgroundTransparency = 0.4,
     BorderSizePixel = 0,
     Text = "",
-    Parent = wasaiTitleBar,
+    Parent = AgentTitleBar,
     ZIndex = 6
 })
-corner(6, wasaiStatsButton)
-local wasaiStatsIcon = GetIcon("chart-pie", UDim2.new(0, 15, 0, 15), theme.textDim)
-if wasaiStatsIcon then
-    wasaiStatsIcon.AnchorPoint = Vector2.new(0.5, 0.5)
-    wasaiStatsIcon.Position = UDim2.new(0.5, 0, 0.5, 0)
-    wasaiStatsIcon.Parent = wasaiStatsButton
+corner(6, AgentStatsButton)
+local AgentStatsIcon = GetIcon("chart-pie", UDim2.new(0, 15, 0, 15), theme.textDim)
+if AgentStatsIcon then
+    AgentStatsIcon.AnchorPoint = Vector2.new(0.5, 0.5)
+    AgentStatsIcon.Position = UDim2.new(0.5, 0, 0.5, 0)
+    AgentStatsIcon.Parent = AgentStatsButton
 else
     create("TextLabel", {
         Size = UDim2.new(1, 0, 1, 0),
@@ -4906,15 +4906,15 @@ else
         TextSize = 13,
         TextXAlignment = Enum.TextXAlignment.Center,
         TextYAlignment = Enum.TextYAlignment.Center,
-        Parent = wasaiStatsButton,
+        Parent = AgentStatsButton,
     })
 end
 
 
-local wasaiSettingsOpen = false
-local wasaiSettingsUi = nil
+local AgentSettingsOpen = false
+local AgentSettingsUi = nil
 
-local function wasaiTween(obj, props, dur)
+local function AgentTween(obj, props, dur)
     local ts = svc and svc.TweenService
     if not ts then
         pcall(function() for k, v in pairs(props) do obj[k] = v end end)
@@ -4926,7 +4926,7 @@ local function wasaiTween(obj, props, dur)
     if ok and t then pcall(function() t:Play() end) end
 end
 
-local function wasaiMakeCard(parent, title)
+local function AgentMakeCard(parent, title)
     local card = create("Frame", {
         Name = "Card_" .. tostring(title),
         Size = UDim2.new(1, 0, 0, 0),
@@ -4964,7 +4964,7 @@ local function wasaiMakeCard(parent, title)
     return card
 end
 
-local function wasaiMakeToggleRow(parent, label, getVal, setVal)
+local function AgentMakeToggleRow(parent, label, getVal, setVal)
     local row = create("Frame", {
         Size = UDim2.new(1, 0, 0, 32),
         BackgroundTransparency = 1,
@@ -5000,7 +5000,7 @@ local function wasaiMakeToggleRow(parent, label, getVal, setVal)
     local function paint()
         on = not not getVal()
         track.BackgroundColor3 = on and (theme.accent or Color3.fromRGB(56, 189, 248)) or (theme.surfaceLight or Color3.fromRGB(30, 36, 52))
-        wasaiTween(knob, { Position = on and UDim2.new(0, 24, 0.5, -9) or UDim2.new(0, 2, 0.5, -9) }, 0.2)
+        AgentTween(knob, { Position = on and UDim2.new(0, 24, 0.5, -9) or UDim2.new(0, 2, 0.5, -9) }, 0.2)
     end
     paint()
     local btn = create("TextButton", {
@@ -5018,20 +5018,20 @@ local function wasaiMakeToggleRow(parent, label, getVal, setVal)
     return row
 end
 
-local function wasaiReadCfg()
+local function AgentReadCfg()
     local ok, c = pcall(loadConfig)
     if ok and type(c) == "table" then return c end
     return {}
 end
-local function wasaiWriteCfg(k, v)
-    local c = wasaiReadCfg()
+local function AgentWriteCfg(k, v)
+    local c = AgentReadCfg()
     c[k] = v
     pcall(saveConfig, c)
 end
 
-local function wasaiBuildProviderSection(panel)
-    local card = wasaiMakeCard(panel, "AI 服务商管理")
-    local cur = (wasaiLocalAIConfig and wasaiLocalAIConfig.activeModel) or "flash"
+local function AgentBuildProviderSection(panel)
+    local card = AgentMakeCard(panel, "AI 服务商管理")
+    local cur = (AgentLocalAIConfig and AgentLocalAIConfig.activeModel) or "flash"
     local info = create("TextLabel", {
         Size = UDim2.new(1, 0, 0, 18),
         BackgroundTransparency = 1,
@@ -5069,7 +5069,7 @@ local function wasaiBuildProviderSection(panel)
         corner(8, b)
         b.MouseButton1Click:Connect(function()
             pcall(function()
-                wasaiApplyModel(id)
+                AgentApplyModel(id)
                 for _, child in ipairs(grid:GetChildren()) do
                     if child:IsA("TextButton") then
                         child.BackgroundColor3 = theme.surfaceLight or Color3.fromRGB(30, 36, 52)
@@ -5084,14 +5084,14 @@ local function wasaiBuildProviderSection(panel)
             end)
         end)
     end
-    wasaiMakeToggleRow(card, "启用外部 API", function() return wasaiReadCfg().useExternalApi == true end,
-        function(v) wasaiWriteCfg("useExternalApi", v); pcall(updateExternalApiUI, v) end)
+    AgentMakeToggleRow(card, "启用外部 API", function() return AgentReadCfg().useExternalApi == true end,
+        function(v) AgentWriteCfg("useExternalApi", v); pcall(updateExternalApiUI, v) end)
     return card
 end
 
-local function wasaiBuildMemorySection(panel)
-    local card = wasaiMakeCard(panel, "全局记忆管理")
-    local okDb, db = pcall(wasaiLoadMemoryDB)
+local function AgentBuildMemorySection(panel)
+    local card = AgentMakeCard(panel, "全局记忆管理")
+    local okDb, db = pcall(AgentLoadMemoryDB)
     db = (okDb and type(db) == "table") and db or {}
     local count = #db
     local cats = {}
@@ -5133,9 +5133,9 @@ local function wasaiBuildMemorySection(panel)
                 return
             end
             confirming = false
-            wasaiMemoryCache = {}
-            wasaiMemoryDirty = true
-            pcall(wasaiSaveMemoryDB)
+            AgentMemoryCache = {}
+            AgentMemoryDirty = true
+            pcall(AgentSaveMemoryDB)
             clearBtn.Text = "已清空"
             stat.Text = "已存储记忆：0 条    分类：0 类\n全局记忆用于让 AI 记住你的偏好与上下文"
             pcall(ShowNotification, "已清空全局记忆", 2)
@@ -5145,12 +5145,12 @@ local function wasaiBuildMemorySection(panel)
     return card
 end
 
-local function wasaiBuildGeneralSection(panel)
-    local card = wasaiMakeCard(panel, "通用")
-    wasaiMakeToggleRow(card, "思考模式", function() return wasaiReadCfg().thinking_mode == true end,
-        function(v) wasaiWriteCfg("thinking_mode", v) end)
-    wasaiMakeToggleRow(card, "训练数据上传", function() return wasaiReadCfg().training_upload == true end,
-        function(v) wasaiWriteCfg("training_upload", v) end)
+local function AgentBuildGeneralSection(panel)
+    local card = AgentMakeCard(panel, "通用")
+    AgentMakeToggleRow(card, "思考模式", function() return AgentReadCfg().thinking_mode == true end,
+        function(v) AgentWriteCfg("thinking_mode", v) end)
+    AgentMakeToggleRow(card, "训练数据上传", function() return AgentReadCfg().training_upload == true end,
+        function(v) AgentWriteCfg("training_upload", v) end)
     create("TextLabel", {
         Size = UDim2.new(1, 0, 0, 28),
         BackgroundTransparency = 1,
@@ -5164,8 +5164,8 @@ local function wasaiBuildGeneralSection(panel)
     return card
 end
 
-local function wasaiEnsureSettingsUI()
-    if wasaiSettingsUi then return end
+local function AgentEnsureSettingsUI()
+    if AgentSettingsUi then return end
     local scrim = create("Frame", {
         Name = "SettingsScrim",
         Size = UDim2.new(1, 0, 1, -52),
@@ -5173,7 +5173,7 @@ local function wasaiEnsureSettingsUI()
         BackgroundColor3 = theme.bg or Color3.fromRGB(7, 9, 15),
         BackgroundTransparency = 1,
         BorderSizePixel = 0,
-        Parent = wasaiMainFrame,
+        Parent = AgentMainFrame,
         ZIndex = 8,
         Visible = false,
     })
@@ -5188,7 +5188,7 @@ local function wasaiEnsureSettingsUI()
         ScrollBarImageColor3 = theme.textDim or Color3.fromRGB(150, 160, 184),
         AutomaticCanvasSize = Enum.AutomaticSize.Y,
         CanvasSize = UDim2.new(0, 0, 0, 0),
-        Parent = wasaiMainFrame,
+        Parent = AgentMainFrame,
         ZIndex = 9,
         Visible = false,
     })
@@ -5204,53 +5204,53 @@ local function wasaiEnsureSettingsUI()
         PaddingTop = UDim.new(0, 12), PaddingBottom = UDim.new(0, 12),
         Parent = panel,
     })
-    pcall(wasaiBuildProviderSection, panel)
-    pcall(wasaiBuildMemorySection, panel)
-    pcall(wasaiBuildGeneralSection, panel)
-    wasaiSettingsUi = { scrim = scrim, panel = panel }
+    pcall(AgentBuildProviderSection, panel)
+    pcall(AgentBuildMemorySection, panel)
+    pcall(AgentBuildGeneralSection, panel)
+    AgentSettingsUi = { scrim = scrim, panel = panel }
 end
 
-local function wasaiOpenSettings()
-    if wasaiSettingsOpen then wasaiCloseSettings(); return end
-    wasaiEnsureSettingsUI()
-    wasaiSettingsOpen = true
-    pcall(function() wasaiTitleLabel.Text = "设置" end)
-    pcall(function() wasaiSettingsUi.scrim.Visible = true end)
-    pcall(function() wasaiSettingsUi.panel.Visible = true end)
-    wasaiTween(wasaiSettingsUi.scrim, { BackgroundTransparency = 0.6 }, 0.3)
-    wasaiTween(wasaiSettingsUi.panel, { BackgroundTransparency = 0 }, 0.3)
-    pcall(function() wasaiMessageFrame.Visible = false end)
-    pcall(function() wasaiInputFrame.Visible = false end)
-    pcall(function() wasaiDivider.Visible = false end)
+local function AgentOpenSettings()
+    if AgentSettingsOpen then AgentCloseSettings(); return end
+    AgentEnsureSettingsUI()
+    AgentSettingsOpen = true
+    pcall(function() AgentTitleLabel.Text = "设置" end)
+    pcall(function() AgentSettingsUi.scrim.Visible = true end)
+    pcall(function() AgentSettingsUi.panel.Visible = true end)
+    AgentTween(AgentSettingsUi.scrim, { BackgroundTransparency = 0.6 }, 0.3)
+    AgentTween(AgentSettingsUi.panel, { BackgroundTransparency = 0 }, 0.3)
+    pcall(function() AgentMessageFrame.Visible = false end)
+    pcall(function() AgentInputFrame.Visible = false end)
+    pcall(function() AgentDivider.Visible = false end)
 end
 
-local function wasaiCloseSettings()
-    wasaiSettingsOpen = false
-    pcall(function() wasaiTitleLabel.Text = "AgentLess" end)
-    if wasaiSettingsUi then
-        wasaiTween(wasaiSettingsUi.scrim, { BackgroundTransparency = 1 }, 0.25)
-        wasaiTween(wasaiSettingsUi.panel, { BackgroundTransparency = 1 }, 0.25)
+local function AgentCloseSettings()
+    AgentSettingsOpen = false
+    pcall(function() AgentTitleLabel.Text = "AgentLess" end)
+    if AgentSettingsUi then
+        AgentTween(AgentSettingsUi.scrim, { BackgroundTransparency = 1 }, 0.25)
+        AgentTween(AgentSettingsUi.panel, { BackgroundTransparency = 1 }, 0.25)
     end
-    pcall(function() wasaiMessageFrame.Visible = true end)
-    pcall(function() wasaiInputFrame.Visible = true end)
-    pcall(function() wasaiDivider.Visible = true end)
+    pcall(function() AgentMessageFrame.Visible = true end)
+    pcall(function() AgentInputFrame.Visible = true end)
+    pcall(function() AgentDivider.Visible = true end)
     task.delay(0.3, function()
         pcall(function()
-            if (not wasaiSettingsOpen) and wasaiSettingsUi then
-                wasaiSettingsUi.scrim.Visible = false
-                wasaiSettingsUi.panel.Visible = false
+            if (not AgentSettingsOpen) and AgentSettingsUi then
+                AgentSettingsUi.scrim.Visible = false
+                AgentSettingsUi.panel.Visible = false
             end
         end)
     end)
 end
 
 pcall(function()
-local wasaiTaskStartTime = tick()
-local wasaiStatsUi = nil
-local wasaiStatsOpen = false
+local AgentTaskStartTime = tick()
+local AgentStatsUi = nil
+local AgentStatsOpen = false
 
-local function wasaiComputeContext()
-    local hist = wasaiChatMemory and wasaiChatMemory.conversationHistory
+local function AgentComputeContext()
+    local hist = AgentChatMemory and AgentChatMemory.conversationHistory
     local msgs, chars = 0, 0
     if type(hist) == "table" then
         for _, m in ipairs(hist) do
@@ -5272,7 +5272,7 @@ local function wasaiComputeContext()
     return msgs, chars
 end
 
-local function wasaiFormatDuration(sec)
+local function AgentFormatDuration(sec)
     sec = math.max(0, math.floor(sec or 0))
     local h = math.floor(sec / 3600)
     local m = math.floor((sec % 3600) / 60)
@@ -5282,7 +5282,7 @@ local function wasaiFormatDuration(sec)
     return string.format("%d秒", s)
 end
 
-local function wasaiMakeStatRow(parent, label, valueText)
+local function AgentMakeStatRow(parent, label, valueText)
     local row = create("Frame", {
         Size = UDim2.new(1, 0, 0, 42),
         BackgroundColor3 = theme.surfaceLight or Color3.fromRGB(30, 36, 52),
@@ -5316,8 +5316,8 @@ local function wasaiMakeStatRow(parent, label, valueText)
     return row, val
 end
 
-local function wasaiEnsureStatsUI()
-    if wasaiStatsUi then return end
+local function AgentEnsureStatsUI()
+    if AgentStatsUi then return end
     local panelW = 300
     local scrim = create("TextButton", {
         Name = "StatsScrim",
@@ -5327,7 +5327,7 @@ local function wasaiEnsureStatsUI()
         BackgroundTransparency = 1,
         BorderSizePixel = 0,
         Text = "",
-        Parent = wasaiMainFrame,
+        Parent = AgentMainFrame,
         ZIndex = 10,
         Visible = false,
     })
@@ -5339,7 +5339,7 @@ local function wasaiEnsureStatsUI()
         BackgroundTransparency = 1,
         BorderSizePixel = 0,
         ClipsDescendants = true,
-        Parent = wasaiMainFrame,
+        Parent = AgentMainFrame,
         ZIndex = 11,
     })
     corner(theme.radius or 14, panel)
@@ -5392,79 +5392,79 @@ local function wasaiEnsureStatsUI()
         Parent = list,
     })
     local rows = {}
-    rows.tokens, rows.tokensVal = wasaiMakeStatRow(list, "消耗的 Token", "0")
-    rows.commands, rows.commandsVal = wasaiMakeStatRow(list, "执行的命令（次数）", "0")
-    rows.files, rows.filesVal = wasaiMakeStatRow(list, "创建/写入文件（数量）", "0")
-    rows.time, rows.timeVal = wasaiMakeStatRow(list, "任务总耗时", "0")
-    rows.context, rows.contextVal = wasaiMakeStatRow(list, "对话上下文长度", "0")
-    wasaiStatsUi = { scrim = scrim, panel = panel, closeBtn = closeBtn, rows = rows, panelW = panelW }
+    rows.tokens, rows.tokensVal = AgentMakeStatRow(list, "消耗的 Token", "0")
+    rows.commands, rows.commandsVal = AgentMakeStatRow(list, "执行的命令（次数）", "0")
+    rows.files, rows.filesVal = AgentMakeStatRow(list, "创建/写入文件（数量）", "0")
+    rows.time, rows.timeVal = AgentMakeStatRow(list, "任务总耗时", "0")
+    rows.context, rows.contextVal = AgentMakeStatRow(list, "对话上下文长度", "0")
+    AgentStatsUi = { scrim = scrim, panel = panel, closeBtn = closeBtn, rows = rows, panelW = panelW }
 end
 
-local function wasaiRefreshStats()
-    if not wasaiStatsUi then return end
-    local r = wasaiStatsUi.rows
-    pcall(function() r.tokensVal.Text = tostring(math.floor(wasaiTotalTokens or 0)) end)
-    pcall(function() r.commandsVal.Text = tostring(wasaiMetrics and wasaiMetrics.toolCalls or 0) end)
-    pcall(function() r.filesVal.Text = tostring(wasaiMetrics and wasaiMetrics.fileOperations or 0) end)
-    pcall(function() r.timeVal.Text = wasaiFormatDuration(tick() - wasaiTaskStartTime) end)
+local function AgentRefreshStats()
+    if not AgentStatsUi then return end
+    local r = AgentStatsUi.rows
+    pcall(function() r.tokensVal.Text = tostring(math.floor(AgentTotalTokens or 0)) end)
+    pcall(function() r.commandsVal.Text = tostring(AgentMetrics and AgentMetrics.toolCalls or 0) end)
+    pcall(function() r.filesVal.Text = tostring(AgentMetrics and AgentMetrics.fileOperations or 0) end)
+    pcall(function() r.timeVal.Text = AgentFormatDuration(tick() - AgentTaskStartTime) end)
     pcall(function()
-        local msgs, chars = wasaiComputeContext()
+        local msgs, chars = AgentComputeContext()
         r.contextVal.Text = tostring(chars) .. " 字符 / " .. tostring(msgs) .. " 条"
     end)
 end
 
-local function wasaiOpenStats()
-    if wasaiStatsOpen then wasaiCloseStats(); return end
-    wasaiEnsureStatsUI()
-    wasaiStatsOpen = true
-    pcall(wasaiRefreshStats)
-    pcall(function() wasaiStatsUi.scrim.Visible = true end)
-    wasaiTween(wasaiStatsUi.scrim, { BackgroundTransparency = 0.5 }, 0.3)
-    wasaiTween(wasaiStatsUi.panel, { BackgroundTransparency = 0 }, 0.3)
-    wasaiTween(wasaiStatsUi.panel, { Position = UDim2.new(1, -wasaiStatsUi.panelW, 0, 0) }, 0.3)
+local function AgentOpenStats()
+    if AgentStatsOpen then AgentCloseStats(); return end
+    AgentEnsureStatsUI()
+    AgentStatsOpen = true
+    pcall(AgentRefreshStats)
+    pcall(function() AgentStatsUi.scrim.Visible = true end)
+    AgentTween(AgentStatsUi.scrim, { BackgroundTransparency = 0.5 }, 0.3)
+    AgentTween(AgentStatsUi.panel, { BackgroundTransparency = 0 }, 0.3)
+    AgentTween(AgentStatsUi.panel, { Position = UDim2.new(1, -AgentStatsUi.panelW, 0, 0) }, 0.3)
 end
 
-local function wasaiCloseStats()
-    wasaiStatsOpen = false
-    if wasaiStatsUi then
-        wasaiTween(wasaiStatsUi.scrim, { BackgroundTransparency = 1 }, 0.28)
-        wasaiTween(wasaiStatsUi.panel, { Position = UDim2.new(1, 0, 0, 0) }, 0.28)
-        wasaiTween(wasaiStatsUi.panel, { BackgroundTransparency = 1 }, 0.28)
+local function AgentCloseStats()
+    AgentStatsOpen = false
+    if AgentStatsUi then
+        AgentTween(AgentStatsUi.scrim, { BackgroundTransparency = 1 }, 0.28)
+        AgentTween(AgentStatsUi.panel, { Position = UDim2.new(1, 0, 0, 0) }, 0.28)
+        AgentTween(AgentStatsUi.panel, { BackgroundTransparency = 1 }, 0.28)
     end
     task.delay(0.3, function()
         pcall(function()
-            if (not wasaiStatsOpen) and wasaiStatsUi then
-                wasaiStatsUi.scrim.Visible = false
+            if (not AgentStatsOpen) and AgentStatsUi then
+                AgentStatsUi.scrim.Visible = false
             end
         end)
     end)
 end
 
 pcall(function()
-    if wasaiStatsButton then
-        wasaiStatsButton.MouseButton1Click:Connect(function()
-            pcall(wasaiOpenStats)
+    if AgentStatsButton then
+        AgentStatsButton.MouseButton1Click:Connect(function()
+            pcall(AgentOpenStats)
         end)
     end
 end)
 pcall(function()
-    if wasaiStatsUi and wasaiStatsUi.scrim then
-        wasaiStatsUi.scrim.MouseButton1Click:Connect(function()
-            pcall(wasaiCloseStats)
+    if AgentStatsUi and AgentStatsUi.scrim then
+        AgentStatsUi.scrim.MouseButton1Click:Connect(function()
+            pcall(AgentCloseStats)
         end)
     end
 end)
 pcall(function()
-    if wasaiStatsUi and wasaiStatsUi.closeBtn then
-        wasaiStatsUi.closeBtn.MouseButton1Click:Connect(function()
-            pcall(wasaiCloseStats)
+    if AgentStatsUi and AgentStatsUi.closeBtn then
+        AgentStatsUi.closeBtn.MouseButton1Click:Connect(function()
+            pcall(AgentCloseStats)
         end)
     end
 end)
 
 
-    wasaiSettingsButton.MouseButton1Click:Connect(function()
-        pcall(wasaiOpenSettings)
+    AgentSettingsButton.MouseButton1Click:Connect(function()
+        pcall(AgentOpenSettings)
     end)
 end)
 
@@ -5477,17 +5477,17 @@ task.spawn(function()
     if type(loader) == "function" then pcall(loader) end
 end)
 
-local wasaiDivider = create("Frame", {
+local AgentDivider = create("Frame", {
     Size = UDim2.new(1, -32, 0, 1),
     Position = UDim2.new(0, 16, 0, 30),
     BackgroundColor3 = theme.border,
     BackgroundTransparency = 0.4,
     BorderSizePixel = 0,
-    Parent = wasaiMainFrame,
+    Parent = AgentMainFrame,
     ZIndex = 4
 })
 
-wasaiMessageFrame = create("ScrollingFrame", {
+AgentMessageFrame = create("ScrollingFrame", {
     Name = "MessageFrame",
     Size = UDim2.new(1, -20, 1, -48 - 56 - 8),
     Position = UDim2.new(0, 10, 0, 52),
@@ -5497,45 +5497,45 @@ wasaiMessageFrame = create("ScrollingFrame", {
     ScrollBarImageColor3 = theme.textDim,
     AutomaticCanvasSize = Enum.AutomaticSize.Y,
     CanvasSize = UDim2.new(0, 0, 0, 0),
-    Parent = wasaiMainFrame,
+    Parent = AgentMainFrame,
     ZIndex = 3
 })
 
-local wasaiMessageListLayout = create("UIListLayout", {
+local AgentMessageListLayout = create("UIListLayout", {
     FillDirection = Enum.FillDirection.Vertical,
     HorizontalAlignment = Enum.HorizontalAlignment.Left,
     VerticalAlignment = Enum.VerticalAlignment.Top,
     Padding = UDim.new(0, 6),
-    Parent = wasaiMessageFrame
+    Parent = AgentMessageFrame
 })
 
-local wasaiMessagePadding = create("UIPadding", {
+local AgentMessagePadding = create("UIPadding", {
     PaddingLeft = UDim.new(0, 6),
     PaddingRight = UDim.new(0, 6),
     PaddingTop = UDim.new(0, 6),
     PaddingBottom = UDim.new(0, 6),
-    Parent = wasaiMessageFrame
+    Parent = AgentMessageFrame
 })
 
-wasaiMessageListLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
-    if wasaiMessageFrame and wasaiMessageFrame.Parent then
-        wasaiMessageFrame.CanvasSize = UDim2.new(0, 0, 0, wasaiMessageListLayout.AbsoluteContentSize.Y + 12)
+AgentMessageListLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+    if AgentMessageFrame and AgentMessageFrame.Parent then
+        AgentMessageFrame.CanvasSize = UDim2.new(0, 0, 0, AgentMessageListLayout.AbsoluteContentSize.Y + 12)
     end
 end)
 
-local wasaiInputFrame = create("Frame", {
+local AgentInputFrame = create("Frame", {
     Name = "InputFrame",
     Size = UDim2.new(1, -20, 0, 44),
     Position = UDim2.new(0, 10, 1, -54),
     BackgroundColor3 = theme.surface,
     BackgroundTransparency = 0.15,
     BorderSizePixel = 0,
-    Parent = wasaiMainFrame,
+    Parent = AgentMainFrame,
     ZIndex = 4
 })
-corner(12, wasaiInputFrame)
+corner(12, AgentInputFrame)
 
-wasaiInputBox = create("TextBox", {
+AgentInputBox = create("TextBox", {
     Name = "InputBox",
     Size = UDim2.new(1, -70, 1, -8),
     Position = UDim2.new(0, 8, 0, 4),
@@ -5550,23 +5550,23 @@ wasaiInputBox = create("TextBox", {
     TextSize = 14,
     ClearTextOnFocus = false,
     Text = "",
-    Parent = wasaiInputFrame,
+    Parent = AgentInputFrame,
     ZIndex = 5
 })
-corner(20, wasaiInputBox)
-create("UIPadding", {PaddingLeft = UDim.new(0, 12)}).Parent = wasaiInputBox
-wasaiInputBox.Focused:Connect(function()
-    if wasaiInputBox.Text == "" then
-        wasaiInputBox.PlaceholderText = "输入问题、指令或闲聊..."
+corner(20, AgentInputBox)
+create("UIPadding", {PaddingLeft = UDim.new(0, 12)}).Parent = AgentInputBox
+AgentInputBox.Focused:Connect(function()
+    if AgentInputBox.Text == "" then
+        AgentInputBox.PlaceholderText = "输入问题、指令或闲聊..."
     end
 end)
-wasaiInputBox.FocusLost:Connect(function()
-    if wasaiInputBox.Text == "" then
-        wasaiInputBox.PlaceholderText = "输入问题、指令或闲聊..."
+AgentInputBox.FocusLost:Connect(function()
+    if AgentInputBox.Text == "" then
+        AgentInputBox.PlaceholderText = "输入问题、指令或闲聊..."
     end
 end)
 
-wasaiSendButton = create("TextButton", {
+AgentSendButton = create("TextButton", {
     Name = "SendButton",
     Size = UDim2.new(0, 52, 0, 32),
     Position = UDim2.new(1, -58, 0.5, -16),
@@ -5576,17 +5576,17 @@ wasaiSendButton = create("TextButton", {
     TextSize = 13,
     Font = Enum.Font.SourceSansBold,
     BorderSizePixel = 0,
-    Parent = wasaiInputFrame,
+    Parent = AgentInputFrame,
     ZIndex = 5
 })
-applyGradient(wasaiSendButton, theme.accent, theme.accent2, 120)
-corner(16, wasaiSendButton)
+applyGradient(AgentSendButton, theme.accent, theme.accent2, 120)
+corner(16, AgentSendButton)
 
 
 -- ===== 深度思考开关（胶囊按钮，位于输入框栏上方最左侧）=====
-wasaiDeepThinkingEnabled = not wasaiLocalAIConfig.thinkingDisabled
+AgentDeepThinkingEnabled = not AgentLocalAIConfig.thinkingDisabled
 
-local wasaiThinkPill = create("TextButton", {
+local AgentThinkPill = create("TextButton", {
     Name = "DeepThinkingPill",
     Size = UDim2.new(0, 106, 0, 26),
     Position = UDim2.new(0, 10, 1, -86),
@@ -5595,22 +5595,22 @@ local wasaiThinkPill = create("TextButton", {
     BorderSizePixel = 0,
     Text = "",
     AutoButtonColor = false,
-    Parent = wasaiMainFrame,
+    Parent = AgentMainFrame,
     ZIndex = 6
 })
-corner(13, wasaiThinkPill)   -- 13 = 高度一半，胶囊形
+corner(13, AgentThinkPill)   -- 13 = 高度一半，胶囊形
 
-local wasaiThinkStroke = stroke(theme.border, 1, wasaiThinkPill)
-local wasaiThinkGradient = applyGradient(wasaiThinkPill, theme.accent, theme.accent2, 120)
-if wasaiThinkGradient then wasaiThinkGradient.Enabled = false end
+local AgentThinkStroke = stroke(theme.border, 1, AgentThinkPill)
+local AgentThinkGradient = applyGradient(AgentThinkPill, theme.accent, theme.accent2, 120)
+if AgentThinkGradient then AgentThinkGradient.Enabled = false end
 
-local wasaiThinkIcon = GetIcon("atom", UDim2.new(0, 14, 0, 14), theme.textDim)
-if wasaiThinkIcon then
-    wasaiThinkIcon.Position = UDim2.new(0, 10, 0.5, -7)
-    wasaiThinkIcon.Parent = wasaiThinkPill
+local AgentThinkIcon = GetIcon("atom", UDim2.new(0, 14, 0, 14), theme.textDim)
+if AgentThinkIcon then
+    AgentThinkIcon.Position = UDim2.new(0, 10, 0.5, -7)
+    AgentThinkIcon.Parent = AgentThinkPill
 end
 
-local wasaiThinkText = create("TextLabel", {
+local AgentThinkText = create("TextLabel", {
     Position = UDim2.new(0, 29, 0, 0),
     Size = UDim2.new(1, -34, 1, 0),
     BackgroundTransparency = 1,
@@ -5620,34 +5620,34 @@ local wasaiThinkText = create("TextLabel", {
     TextSize = 12,
     TextXAlignment = Enum.TextXAlignment.Left,
     TextYAlignment = Enum.TextYAlignment.Center,
-    Parent = wasaiThinkPill,
+    Parent = AgentThinkPill,
     ZIndex = 7
 })
 
-wasaiApplyThinkPill = function(state)
-    wasaiDeepThinkingEnabled = state and true or false
-    if wasaiThinkGradient then wasaiThinkGradient.Enabled = wasaiDeepThinkingEnabled end
-    wasaiThinkPill.BackgroundColor3 = wasaiDeepThinkingEnabled and Color3.fromRGB(255, 255, 255) or theme.surfaceLight
-    wasaiThinkPill.BackgroundTransparency = wasaiDeepThinkingEnabled and 0 or 0.45
-    if wasaiThinkStroke then
-        wasaiThinkStroke.Color = wasaiDeepThinkingEnabled and theme.accent or theme.border
-        wasaiThinkStroke.Transparency = wasaiDeepThinkingEnabled and 0.1 or 0.4
+AgentApplyThinkPill = function(state)
+    AgentDeepThinkingEnabled = state and true or false
+    if AgentThinkGradient then AgentThinkGradient.Enabled = AgentDeepThinkingEnabled end
+    AgentThinkPill.BackgroundColor3 = AgentDeepThinkingEnabled and Color3.fromRGB(255, 255, 255) or theme.surfaceLight
+    AgentThinkPill.BackgroundTransparency = AgentDeepThinkingEnabled and 0 or 0.45
+    if AgentThinkStroke then
+        AgentThinkStroke.Color = AgentDeepThinkingEnabled and theme.accent or theme.border
+        AgentThinkStroke.Transparency = AgentDeepThinkingEnabled and 0.1 or 0.4
     end
-    if wasaiThinkIcon then
-        wasaiThinkIcon.ImageColor3 = wasaiDeepThinkingEnabled and Color3.fromRGB(255, 255, 255) or theme.textDim
+    if AgentThinkIcon then
+        AgentThinkIcon.ImageColor3 = AgentDeepThinkingEnabled and Color3.fromRGB(255, 255, 255) or theme.textDim
     end
-    wasaiThinkText.TextColor3 = wasaiDeepThinkingEnabled and Color3.fromRGB(255, 255, 255) or theme.textDim
-    return wasaiDeepThinkingEnabled
+    AgentThinkText.TextColor3 = AgentDeepThinkingEnabled and Color3.fromRGB(255, 255, 255) or theme.textDim
+    return AgentDeepThinkingEnabled
 end
 
-wasaiApplyThinkPill(wasaiDeepThinkingEnabled)
+AgentApplyThinkPill(AgentDeepThinkingEnabled)
 
 -- 供设置卡等外部开关同步胶囊状态
-_G.__DeltaAI_updateThinkPill = wasaiApplyThinkPill
+_G.__DeltaAI_updateThinkPill = AgentApplyThinkPill
 
-wasaiThinkPill.MouseButton1Click:Connect(function()
-    local nextState = not wasaiDeepThinkingEnabled
-    wasaiApplyThinkPill(nextState)
+AgentThinkPill.MouseButton1Click:Connect(function()
+    local nextState = not AgentDeepThinkingEnabled
+    AgentApplyThinkPill(nextState)
 
     local setter = _G.__DeltaAI_setThinkingMode
     if type(setter) == "function" then pcall(setter, nextState) end
@@ -5666,7 +5666,7 @@ wasaiThinkPill.MouseButton1Click:Connect(function()
 end)
 
 
-local wasaiManageFrame = create("ScrollingFrame", {
+local AgentManageFrame = create("ScrollingFrame", {
     Name = "ManageFrame",
     Size = UDim2.new(1, -20, 1, -44),
     Position = UDim2.new(0, 10, 0, 34),
@@ -5677,61 +5677,61 @@ local wasaiManageFrame = create("ScrollingFrame", {
     AutomaticCanvasSize = Enum.AutomaticSize.Y,
     CanvasSize = UDim2.new(0, 0, 0, 0),
     Visible = false,
-    Parent = wasaiMainFrame,
+    Parent = AgentMainFrame,
     ZIndex = 3
 })
-local wasaiManageLayout = create("UIListLayout", {
+local AgentManageLayout = create("UIListLayout", {
     FillDirection = Enum.FillDirection.Vertical,
     HorizontalAlignment = Enum.HorizontalAlignment.Center,
     VerticalAlignment = Enum.VerticalAlignment.Top,
     Padding = UDim.new(0, 8),
-    Parent = wasaiManageFrame
+    Parent = AgentManageFrame
 })
 create("UIPadding", {
     PaddingLeft = UDim.new(0, 6),
     PaddingRight = UDim.new(0, 6),
     PaddingTop = UDim.new(0, 6),
     PaddingBottom = UDim.new(0, 6),
-    Parent = wasaiManageFrame
+    Parent = AgentManageFrame
 })
-wasaiManageLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
-    if wasaiManageFrame and wasaiManageFrame.Parent then
-        wasaiManageFrame.CanvasSize = UDim2.new(0, 0, 0, wasaiManageLayout.AbsoluteContentSize.Y + 12)
+AgentManageLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+    if AgentManageFrame and AgentManageFrame.Parent then
+        AgentManageFrame.CanvasSize = UDim2.new(0, 0, 0, AgentManageLayout.AbsoluteContentSize.Y + 12)
     end
 end)
 
 
-local wasaiRefreshConversationList
-local wasaiSetManageMode
+local AgentRefreshConversationList
+local AgentSetManageMode
 
 
-local function wasaiLoadConversationEntry(entry)
-    local ok = wasaiLoadChatHistory({path = entry.path, chatFile = entry.file, name = entry.name})
+local function AgentLoadConversationEntry(entry)
+    local ok = AgentLoadChatHistory({path = entry.path, chatFile = entry.file, name = entry.name})
     if not ok then return end
-    wasaiCurrentSession.isFirstRound = false
-    for _, child in ipairs(wasaiMessageFrame:GetChildren()) do
+    AgentCurrentSession.isFirstRound = false
+    for _, child in ipairs(AgentMessageFrame:GetChildren()) do
         if child:IsA("Frame") and child.Name == "MessageContainer" then child:Destroy() end
     end
-    local history = wasaiChatMemory.conversationHistory or {}
+    local history = AgentChatMemory.conversationHistory or {}
     for _, msg in ipairs(history) do
-        wasaiAddMessage(msg.content, msg.role == "user")
+        AgentAddMessage(msg.content, msg.role == "user")
         task.wait(0.04)
     end
 end
 
 
-wasaiRefreshConversationList = function()
-    for _, child in ipairs(wasaiManageFrame:GetChildren()) do
+AgentRefreshConversationList = function()
+    for _, child in ipairs(AgentManageFrame:GetChildren()) do
         if child:IsA("Frame") then child:Destroy() end
     end
-    local entries = wasaiListAllChats()
+    local entries = AgentListAllChats()
     if #entries == 0 then
         local empty = create("Frame", {
             Name = "EmptyRow",
             Size = UDim2.new(1, -16, 0, 90),
             BackgroundTransparency = 1,
             BorderSizePixel = 0,
-            Parent = wasaiManageFrame
+            Parent = AgentManageFrame
         })
         create("TextLabel", {
             Size = UDim2.new(1, 0, 1, 0),
@@ -5753,7 +5753,7 @@ wasaiRefreshConversationList = function()
             BackgroundColor3 = theme.surface,
             BackgroundTransparency = 0.08,
             BorderSizePixel = 0,
-            Parent = wasaiManageFrame
+            Parent = AgentManageFrame
         })
         corner(10, row)
         stroke(theme.border, 1, row)
@@ -5767,7 +5767,7 @@ wasaiRefreshConversationList = function()
             Size = UDim2.new(1, -140, 0, 22),
             Position = UDim2.new(0, 50, 0, 14),
             BackgroundTransparency = 1,
-            Text = wasaiSafeString(e.title, 26),
+            Text = AgentSafeString(e.title, 26),
             TextColor3 = theme.text,
             TextSize = 14,
             Font = Enum.Font.SourceSansBold,
@@ -5816,7 +5816,7 @@ wasaiRefreshConversationList = function()
         if delIcon then delIcon.AnchorPoint = Vector2.new(0.5, 0.5); delIcon.Position = UDim2.new(0.5, 0, 0.5, 0); delIcon.Parent = deleteBtn end
         deleteBtn.MouseButton1Click:Connect(function()
             pcall(delfile, e.file)
-            wasaiRefreshConversationList()
+            AgentRefreshConversationList()
         end)
 
         local loadBtn = create("TextButton", {
@@ -5834,35 +5834,35 @@ wasaiRefreshConversationList = function()
         local loadIcon = GetIcon("database-arrow-down", UDim2.new(0, 16, 0, 16))
         if loadIcon then loadIcon.AnchorPoint = Vector2.new(0.5, 0.5); loadIcon.Position = UDim2.new(0.5, 0, 0.5, 0); loadIcon.Parent = loadBtn end
         loadBtn.MouseButton1Click:Connect(function()
-            wasaiLoadConversationEntry(e)
-            wasaiSetManageMode(false)
+            AgentLoadConversationEntry(e)
+            AgentSetManageMode(false)
         end)
     end
 end
 
 
-wasaiSetManageMode = function(on)
-    wasaiManageMode = on
-    wasaiManageFrame.Visible = on
-    wasaiMessageFrame.Visible = not on
-    wasaiInputFrame.Visible = not on
-    if wasaiThinkPill then wasaiThinkPill.Visible = not on end
-    if wasaiSettingsButton then
-        wasaiSettingsButton.BackgroundColor3 = on and theme.accent or theme.surfaceLight
+AgentSetManageMode = function(on)
+    AgentManageMode = on
+    AgentManageFrame.Visible = on
+    AgentMessageFrame.Visible = not on
+    AgentInputFrame.Visible = not on
+    if AgentThinkPill then AgentThinkPill.Visible = not on end
+    if AgentSettingsButton then
+        AgentSettingsButton.BackgroundColor3 = on and theme.accent or theme.surfaceLight
     end
-    wasaiTitleLabel.Text = on and "对话管理" or "AgentLess"
-    if on then wasaiRefreshConversationList() end
+    AgentTitleLabel.Text = on and "对话管理" or "AgentLess"
+    if on then AgentRefreshConversationList() end
 end
 
 -- 对话管理入口已移除（右上角改为设置按钮，暂不绑定事件）
 
-wasaiFinalizeMessage = function(container, isUser)
+AgentFinalizeMessage = function(container, isUser)
     local avatar = container:FindFirstChild("Avatar")
     local bubble = container:FindFirstChild("Bubble")
     if not bubble then return end
     local noAvatar = (avatar == nil)
     task.defer(function()
-        local frameW = wasaiMessageFrame.AbsoluteSize.X
+        local frameW = AgentMessageFrame.AbsoluteSize.X
         local maxWidth = math.min(400, math.max(160, frameW * 0.7))
         if bubble.AbsoluteSize.X > maxWidth then
             local label = bubble:FindFirstChild("TextLabel")
@@ -5885,13 +5885,13 @@ wasaiFinalizeMessage = function(container, isUser)
             bubble.Position = UDim2.new(0, 52, 0, 0)
         end
         task.defer(function()
-            wasaiMessageFrame.CanvasPosition = Vector2.new(0, wasaiMessageFrame.CanvasSize.Y.Offset)
+            AgentMessageFrame.CanvasPosition = Vector2.new(0, AgentMessageFrame.CanvasSize.Y.Offset)
         end)
     end)
 end
 
 
-local function wasaiEscapeRich(s)
+local function AgentEscapeRich(s)
     s = tostring(s or "")
     s = s:gsub("&", "&amp;")
     s = s:gsub("<", "&lt;")
@@ -5900,7 +5900,7 @@ local function wasaiEscapeRich(s)
 end
 
 -- DeepSeek 标准围栏语言名 -> 统一短标签（卡片右上角显示）
-WASAI_LANG_TAGS = {
+AGENT_LANG_TAGS = {
     lua = "lua", luau = "luau", lua_u = "lua", roblox = "lua", rbx = "lua",
     js = "js", javascript = "js", ts = "ts", typescript = "ts", jsx = "jsx", tsx = "tsx",
     py = "py", python = "py", rb = "rb", ruby = "rb",
@@ -5913,29 +5913,29 @@ WASAI_LANG_TAGS = {
     md = "md", markdown = "md", txt = "txt", text = "text", plain = "text", plaintext = "text",
 }
 
-function wasaiNormalizeLang(lang)
+function AgentNormalizeLang(lang)
     if type(lang) ~= "string" then return "text" end
     lang = lang:lower():gsub("^%s+", ""):gsub("%s+$", "")
     if lang == "" then return "text" end
-    if WASAI_LANG_TAGS[lang] then return WASAI_LANG_TAGS[lang] end
+    if AGENT_LANG_TAGS[lang] then return AGENT_LANG_TAGS[lang] end
     if #lang <= 12 and lang:match("^[%w_%+%-%.#]+$") then return lang end
     return "text"
 end
 
 -- 语言标签在卡片标题里的显示名
-WASAI_LANG_TITLES = {
+AGENT_LANG_TITLES = {
     lua = "Lua 代码", luau = "Luau 代码", text = "代码",
     json = "JSON", yaml = "YAML", html = "HTML", css = "CSS", sql = "SQL",
     sh = "Shell", bash = "Shell", js = "JavaScript", ts = "TypeScript", py = "Python",
 }
 
-function wasaiLangTitle(lang)
-    return WASAI_LANG_TITLES[lang] or (string.upper(tostring(lang)) .. " 代码")
+function AgentLangTitle(lang)
+    return AGENT_LANG_TITLES[lang] or (string.upper(tostring(lang)) .. " 代码")
 end
 
 -- 行内 Markdown -> RichText（正文部分）
-local function wasaiRenderAI(text)
-    local s = wasaiEscapeRich(text):gsub("^\r?\n", "")
+local function AgentRenderAI(text)
+    local s = AgentEscapeRich(text):gsub("^\r?\n", "")
     -- 前后补换行：Lua 模式没有分组选择，用 \n 锚定才能匹配「行首」
     s = "\n" .. s .. "\n"
 
@@ -5961,7 +5961,7 @@ local function wasaiRenderAI(text)
 end
 
 -- 解析回复：标准 ```lang 围栏（兼容旧版 ##code## 单行/多行）
-function wasaiIsLegacyCodeStart(reply, pos)
+function AgentIsLegacyCodeStart(reply, pos)
     local nxt = reply:sub(pos + 2, pos + 2)
     if nxt == "" or nxt == " " or nxt == "#" or nxt == "\n" or nxt == "\r" then return false end
     local close = reply:find("##", pos + 2, true)
@@ -5971,7 +5971,7 @@ function wasaiIsLegacyCodeStart(reply, pos)
     return body:find("[\n%(%=:]") ~= nil or body:find("print") ~= nil or body:find("local") ~= nil
 end
 
-function wasaiSplitReply(reply)
+function AgentSplitReply(reply)
     local parts = {}
     local hasCode = false
     local pos = 1
@@ -5991,7 +5991,7 @@ function wasaiSplitReply(reply)
             break
         end
 
-        local legacyHeading = (mode == "hash") and not wasaiIsLegacyCodeStart(reply, start)
+        local legacyHeading = (mode == "hash") and not AgentIsLegacyCodeStart(reply, start)
 
         if legacyHeading then
             -- 普通 Markdown 标题里的 ## ，当正文处理
@@ -6036,7 +6036,7 @@ function wasaiSplitReply(reply)
                             tag = "text"
                         end
                     end
-                    parts[#parts + 1] = {type = "code", text = body, lang = wasaiNormalizeLang(tag)}
+                    parts[#parts + 1] = {type = "code", text = body, lang = AgentNormalizeLang(tag)}
                 end
                 pos = nextPos
             else
@@ -6057,12 +6057,12 @@ function wasaiSplitReply(reply)
     return parts, hasCode
 end
 
-function wasaiAddMessage(text, isUser, stats, noAvatar)
-    local container, bubble = wasaiCreateMessageContainer(text, isUser, nil, noAvatar)
+function AgentAddMessage(text, isUser, stats, noAvatar)
+    local container, bubble = AgentCreateMessageContainer(text, isUser, nil, noAvatar)
     local label = create("TextLabel", {
         Name = "TextLabel",
         BackgroundTransparency = 1,
-        Text = isUser and text or wasaiRenderAI(text),
+        Text = isUser and text or AgentRenderAI(text),
         TextColor3 = isUser and Color3.new(1, 1, 1) or theme.text,
         Font = Enum.Font.SourceSans,
         TextSize = 14,
@@ -6110,13 +6110,13 @@ function wasaiAddMessage(text, isUser, stats, noAvatar)
         })
     end
 
-    wasaiFinalizeMessage(container, isUser)
+    AgentFinalizeMessage(container, isUser)
     return container
 end
 
-wasaiTypewriteMessage = function(text, isUser, stats)
-    if isUser then return wasaiAddMessage(text, true) end
-    local container, bubble = wasaiCreateMessageContainer("", false)
+AgentTypewriteMessage = function(text, isUser, stats)
+    if isUser then return AgentAddMessage(text, true) end
+    local container, bubble = AgentCreateMessageContainer("", false)
 
     local label = create("TextLabel", {
         Name = "TextLabel",
@@ -6157,7 +6157,7 @@ wasaiTypewriteMessage = function(text, isUser, stats)
     corner(1, cursor)
 
         
-        local fullText = wasaiEscapeRich(text)
+        local fullText = AgentEscapeRich(text)
     local displayedText = ""
     local charIndex = 1
     local totalChars = #fullText
@@ -6308,22 +6308,22 @@ wasaiTypewriteMessage = function(text, isUser, stats)
             task.wait(delay)
         end
         task.defer(function()
-            wasaiMessageFrame.CanvasPosition = Vector2.new(0, wasaiMessageFrame.CanvasSize.Y.Offset)
+            AgentMessageFrame.CanvasPosition = Vector2.new(0, AgentMessageFrame.CanvasSize.Y.Offset)
         end)
     end
     stopCursorBlink()
 
     
     pcall(function()
-        label.Text = wasaiRenderAI(text)
+        label.Text = AgentRenderAI(text)
     end)
 
-    wasaiFinalizeMessage(container, false)
+    AgentFinalizeMessage(container, false)
     return container
 end
 
-local function wasaiShowDecompileResult(fullPath, source)
-    local container, bubble = wasaiCreateMessageContainer("", false, theme.surfaceLight)
+local function AgentShowDecompileResult(fullPath, source)
+    local container, bubble = AgentCreateMessageContainer("", false, theme.surfaceLight)
     local displayName = fullPath:match("([^/]+)$") or fullPath
     local button = create("TextButton", {
         Name = "CopyButton",
@@ -6391,7 +6391,7 @@ local function wasaiShowDecompileResult(fullPath, source)
         end
     end)
 
-    wasaiFinalizeMessage(container, false)
+    AgentFinalizeMessage(container, false)
     return container
 end
 
@@ -6400,7 +6400,7 @@ end
 
 local _aWAuthZx9K7 = "Dlt" .. "7kZq" .. "W2m9vR4x" .. "Q9n"
 
-local function wasaiGenerateResponse(userInput, authToken)
+local function AgentGenerateResponse(userInput, authToken)
     
     if authToken ~= _aWAuthZx9K7 then
         return "该接口仅允许 UI 内部调用，外部调用已被拒绝。", {
@@ -6410,7 +6410,7 @@ local function wasaiGenerateResponse(userInput, authToken)
     local input = tostring(userInput or "")
     if input:match("^%s*$") then return nil end
 
-    if wasaiCheckSensitive(input) then
+    if AgentCheckSensitive(input) then
         return "针对这个问题我无法为你提供相应解答。你可以尝试提供其他话题，我会尽力为你提供支持和解答。", {
             {phase = "safety", output = "检测到敏感内容，已拒绝并引导到其他话题"}
         }
@@ -6428,7 +6428,7 @@ local function wasaiGenerateResponse(userInput, authToken)
         }
     end
 
-    local ok, reply, steps = pcall(wasaiGenerateResponseCore, input, _aWAuthZx9K7)
+    local ok, reply, steps = pcall(AgentGenerateResponseCore, input, _aWAuthZx9K7)
     if ok and reply and tostring(reply) ~= "" then
         return reply, steps or {}
     end
@@ -6449,8 +6449,8 @@ local function wasaiGenerateResponse(userInput, authToken)
     }
 end
 
-local wasaiShowThinkingBubble
-local wasaiRemoveThinkingBubble
+local AgentShowThinkingBubble
+local AgentRemoveThinkingBubble
 
 -- ============================================================================
 --  深度思考卡片（workbuddy / DeepSeek 风格）
@@ -6469,11 +6469,11 @@ do
     local currentThinkingLastText = ""
     local currentThinkingExpanded = true
 
-    local function wasaiThinkBodyHeight(text)
+    local function AgentThinkBodyHeight(text)
         local frameW = 320
         pcall(function()
-            if wasaiMessageFrame and wasaiMessageFrame.AbsoluteSize.X > 0 then
-                frameW = wasaiMessageFrame.AbsoluteSize.X
+            if AgentMessageFrame and AgentMessageFrame.AbsoluteSize.X > 0 then
+                frameW = AgentMessageFrame.AbsoluteSize.X
             end
         end)
         local availW = math.max(120, frameW - 120)
@@ -6485,18 +6485,18 @@ do
         return math.clamp(textH + 18, 26, 280)
     end
 
-    local function wasaiThinkSetBody(text)
+    local function AgentThinkSetBody(text)
         if not currentThinkingBody or not currentThinkingLabel then return end
         text = tostring(text or "")
         if text == currentThinkingLastText then return end
         currentThinkingLastText = text
         pcall(function()
             currentThinkingLabel.Text = text
-            currentThinkingBody.Size = UDim2.new(1, -20, 0, wasaiThinkBodyHeight(text))
+            currentThinkingBody.Size = UDim2.new(1, -20, 0, AgentThinkBodyHeight(text))
         end)
     end
 
-    local function wasaiThinkSetExpanded(expanded)
+    local function AgentThinkSetExpanded(expanded)
         currentThinkingExpanded = expanded and true or false
         if currentThinkingBody then currentThinkingBody.Visible = currentThinkingExpanded end
         if currentThinkingChevron then
@@ -6504,15 +6504,15 @@ do
         end
     end
 
-    wasaiThinkingSetExpanded = wasaiThinkSetExpanded
+    AgentThinkingSetExpanded = AgentThinkSetExpanded
 
-    wasaiShowThinkingBubble = function()
+    AgentShowThinkingBubble = function()
         -- 上一张还在进行中的卡片先收尾
         if currentThinkingContainer then
-            pcall(wasaiRemoveThinkingBubble)
+            pcall(AgentRemoveThinkingBubble)
         end
 
-        local container, bubble = wasaiCreateMessageContainer("", false, nil, true)
+        local container, bubble = AgentCreateMessageContainer("", false, nil, true)
         currentThinkingContainer = container
         currentThinkingLastText = ""
         currentThinkingExpanded = true
@@ -6631,11 +6631,11 @@ do
             ZIndex = 5
         })
 
-        wasaiThinkSetExpanded(true)
-        wasaiFinalizeMessage(container, false)
+        AgentThinkSetExpanded(true)
+        AgentFinalizeMessage(container, false)
 
         header.MouseButton1Click:Connect(function()
-            wasaiThinkSetExpanded(not currentThinkingExpanded)
+            AgentThinkSetExpanded(not currentThinkingExpanded)
         end)
 
         -- 运行中：刷新计时 / 阶段文字 / 流式推理
@@ -6643,13 +6643,13 @@ do
         currentThinkingThread = task.spawn(function()
             while currentThinkingContainer == container do
                 local elapsed = tick() - startTime
-                local phase = wasaiThinkingPhase or ""
-                local reasoning = tostring(wasaiLocalAIState and wasaiLocalAIState.lastReasoning or "")
+                local phase = AgentThinkingPhase or ""
+                local reasoning = tostring(AgentLocalAIState and AgentLocalAIState.lastReasoning or "")
 
                 if reasoning ~= "" then
-                    wasaiThinkSetBody(reasoning)
+                    AgentThinkSetBody(reasoning)
                 elseif phase ~= "" then
-                    wasaiThinkSetBody(phase .. "…")
+                    AgentThinkSetBody(phase .. "…")
                 end
 
                 if currentThinkingStatus then
@@ -6660,7 +6660,7 @@ do
                     if not ok then break end
                 end
                 pcall(function()
-                    wasaiMessageFrame.CanvasPosition = Vector2.new(0, wasaiMessageFrame.CanvasSize.Y.Offset)
+                    AgentMessageFrame.CanvasPosition = Vector2.new(0, AgentMessageFrame.CanvasSize.Y.Offset)
                 end)
                 task.wait(0.1)
             end
@@ -6669,11 +6669,11 @@ do
         return container
     end
 
-    wasaiRemoveThinkingBubble = function()
-        wasaiThinkingPhase = ""
-        wasaiCustomProgressMsg = ""
-        wasaiLastToolName = ""
-        wasaiLastToolPhase = ""
+    AgentRemoveThinkingBubble = function()
+        AgentThinkingPhase = ""
+        AgentCustomProgressMsg = ""
+        AgentLastToolName = ""
+        AgentLastToolPhase = ""
 
         if currentThinkingThread then
             pcall(function() task.cancel(currentThinkingThread) end)
@@ -6689,7 +6689,7 @@ do
         -- 固化的正文：优先推理内容，其次最后的阶段文字
         local finalText = ""
         pcall(function()
-            local reasoning = tostring(wasaiLocalAIState and wasaiLocalAIState.lastReasoning or "")
+            local reasoning = tostring(AgentLocalAIState and AgentLocalAIState.lastReasoning or "")
             if reasoning ~= "" then
                 finalText = reasoning
             elseif currentThinkingLastText ~= "" then
@@ -6697,9 +6697,9 @@ do
             end
         end)
         if finalText ~= "" then
-            pcall(wasaiThinkSetBody, finalText)
+            pcall(AgentThinkSetBody, finalText)
         else
-            pcall(wasaiThinkSetBody, "（本轮没有返回思考内容）")
+            pcall(AgentThinkSetBody, "（本轮没有返回思考内容）")
         end
 
         if currentThinkingStatus then
@@ -6709,20 +6709,20 @@ do
         end
 
         -- 完成后自动收起，卡片留在对话里
-        pcall(wasaiThinkSetExpanded, false)
+        pcall(AgentThinkSetExpanded, false)
     end
 
     -- 供工具循环使用：每完成一轮工具调用就收尾当前卡片、开启新一轮「深度思考」
-    wasaiStartThinkingRound = function()
-        return wasaiShowThinkingBubble()
+    AgentStartThinkingRound = function()
+        return AgentShowThinkingBubble()
     end
-    wasaiEndThinkingRound = function()
-        return wasaiRemoveThinkingBubble()
+    AgentEndThinkingRound = function()
+        return AgentRemoveThinkingBubble()
     end
 end
 
 
-local function wasaiSafeSpawn(fn, ...)
+local function AgentSafeSpawn(fn, ...)
     local args = {...}
     return task.spawn(function()
         local ok, err = pcall(fn, unpack(args))
@@ -6737,13 +6737,13 @@ local trainingUploadRemoteName = "DeltaUITrainingUpload"
 local trainingUploadQueue = {}
 local trainingUploadBusy = false
 
-local function wasaiTrainingConsent()
+local function AgentTrainingConsent()
     local cfg = loadConfig()
     return cfg and cfg.trainingUploadConsent == true
 end
 
-local function wasaiQueueTrainingPair(userText, assistantText)
-    if not wasaiTrainingConsent() then return end
+local function AgentQueueTrainingPair(userText, assistantText)
+    if not AgentTrainingConsent() then return end
     local u = tostring(userText or "")
     local a = tostring(assistantText or "")
     if u == "" or a == "" then return end
@@ -6758,7 +6758,7 @@ local function wasaiQueueTrainingPair(userText, assistantText)
     trainingUploadBusy = true
     task.spawn(function()
         while #trainingUploadQueue > 0 do
-            if not wasaiTrainingConsent() then
+            if not AgentTrainingConsent() then
                 table.clear(trainingUploadQueue)
                 break
             end
@@ -6788,12 +6788,12 @@ local function wasaiQueueTrainingPair(userText, assistantText)
     end)
 end
 
-local function wasaiTrainingQueueStatus()
+local function AgentTrainingQueueStatus()
     return #trainingUploadQueue
 end
 
-local function wasaiSaveLastScript()
-    local history = wasaiChatMemory.conversationHistory or {}
+local function AgentSaveLastScript()
+    local history = AgentChatMemory.conversationHistory or {}
     if #history == 0 then
         return false, "没有找到对话历史，无法保存脚本。"
     end
@@ -6834,7 +6834,7 @@ local function wasaiSaveLastScript()
 
     
     local placeId = tostring(game.PlaceId or 0)
-    local sessionTitle = wasaiCurrentSession.sessionTitle or "新对话"
+    local sessionTitle = AgentCurrentSession.sessionTitle or "新对话"
     local safeTitle = tostring(sessionTitle):gsub("[/\\:*?\"<>|\r\n\t ]+", "_"):gsub("^_+", ""):gsub("_+$", "")
     if safeTitle == "" then safeTitle = "default" end
     if #safeTitle > 40 then safeTitle = safeTitle:sub(1, 40) end
@@ -6868,8 +6868,8 @@ local function wasaiSaveLastScript()
     end
 end
 
-wasaiSendMessage = function()
-    local text = wasaiInputBox.Text
+AgentSendMessage = function()
+    local text = AgentInputBox.Text
     if not text or text:match("^%s*$") then return end
 
     
@@ -6877,8 +6877,8 @@ wasaiSendMessage = function()
     local cfgSendUseApi = loadConfig()
     if not cfgSendUseApi.useExternalApi then
         if not localModelInstalled() then
-            wasaiInputBox.Text = ""
-            wasaiAddMessage(text, true)
+            AgentInputBox.Text = ""
+            AgentAddMessage(text, true)
             showLocalModelCard("install")
             return
         elseif localModelNeedsUpdate() and not _G.__DeltaUI_modelUpdateNotified then
@@ -6899,49 +6899,49 @@ wasaiSendMessage = function()
     end
 
     if isSaveRequest then
-        wasaiInputBox.Text = ""
-        wasaiAddMessage(text, true)
-        wasaiSafeSpawn(function()
+        AgentInputBox.Text = ""
+        AgentAddMessage(text, true)
+        AgentSafeSpawn(function()
             task.wait(0.2)
-            local ok, result = wasaiSaveLastScript()
+            local ok, result = AgentSaveLastScript()
             if ok then
-                wasaiAddMessage("✅ 脚本已保存到本地\n路径: " .. result, false)
+                AgentAddMessage("✅ 脚本已保存到本地\n路径: " .. result, false)
             else
-                wasaiAddMessage("❌ " .. result, false)
+                AgentAddMessage("❌ " .. result, false)
             end
         end)
         return
     end
 
-        if text:match("^[加恢][载复]") and (wasaiCurrentSession.isFirstRound or not wasaiChatMemory.conversationHistory or #wasaiChatMemory.conversationHistory == 0) then
-        local latest = wasaiFindLatestChat()
-        if latest and wasaiLoadChatHistory(latest) then
-            wasaiInputBox.Text = ""
-            wasaiAddMessage("加载", true)
-                        for _, child in ipairs(wasaiMessageFrame:GetChildren()) do
+        if text:match("^[加恢][载复]") and (AgentCurrentSession.isFirstRound or not AgentChatMemory.conversationHistory or #AgentChatMemory.conversationHistory == 0) then
+        local latest = AgentFindLatestChat()
+        if latest and AgentLoadChatHistory(latest) then
+            AgentInputBox.Text = ""
+            AgentAddMessage("加载", true)
+                        for _, child in ipairs(AgentMessageFrame:GetChildren()) do
                 if child:IsA("Frame") and child.Name == "MessageContainer" then
                     child:Destroy()
                 end
             end
-                        wasaiSafeSpawn(function()
-                wasaiAddMessage("已恢复上次对话", false)
-                if wasaiChatMemory.conversationHistory then
-                    for i, msg in ipairs(wasaiChatMemory.conversationHistory) do
-                        if i <= 20 then wasaiAddMessage(msg.content, msg.role == "user")
+                        AgentSafeSpawn(function()
+                AgentAddMessage("已恢复上次对话", false)
+                if AgentChatMemory.conversationHistory then
+                    for i, msg in ipairs(AgentChatMemory.conversationHistory) do
+                        if i <= 20 then AgentAddMessage(msg.content, msg.role == "user")
                         end
                     end
                 end
                 task.wait(0.5)
                 local title = latest.name:gsub("^对话_", "")
-                wasaiAddMessage("对话已加载: " .. title, false)
+                AgentAddMessage("对话已加载: " .. title, false)
             end)
             return
         else
-            wasaiInputBox.Text = ""
-            wasaiAddMessage(text, true)
-            wasaiSafeSpawn(function()
+            AgentInputBox.Text = ""
+            AgentAddMessage(text, true)
+            AgentSafeSpawn(function()
                 task.wait(0.3)
-                wasaiAddMessage("没有找到可恢复的历史对话", false)
+                AgentAddMessage("没有找到可恢复的历史对话", false)
             end)
             return
         end
@@ -6949,40 +6949,40 @@ wasaiSendMessage = function()
 
     
 
-        wasaiResetMetrics()
-    wasaiStartTiming()
-    wasaiTotalTokens = 0  
+        AgentResetMetrics()
+    AgentStartTiming()
+    AgentTotalTokens = 0  
 
-    wasaiInputBox.Text = ""
-    wasaiAddMessage(text, true)
+    AgentInputBox.Text = ""
+    AgentAddMessage(text, true)
 
-        if wasaiCurrentSession.isFirstRound then
-        local title = wasaiGenerateTitle(text)
-        wasaiCurrentSession.sessionTitle = title
-                wasaiInitSessionDir()
-        wasaiRenameSessionDir(title)
-        wasaiCurrentSession.isFirstRound = false
+        if AgentCurrentSession.isFirstRound then
+        local title = AgentGenerateTitle(text)
+        AgentCurrentSession.sessionTitle = title
+                AgentInitSessionDir()
+        AgentRenameSessionDir(title)
+        AgentCurrentSession.isFirstRound = false
     end
 
-        if not wasaiChatMemory.conversationHistory then
-        wasaiChatMemory.conversationHistory = {}
+        if not AgentChatMemory.conversationHistory then
+        AgentChatMemory.conversationHistory = {}
     end
-    table.insert(wasaiChatMemory.conversationHistory, {
+    table.insert(AgentChatMemory.conversationHistory, {
         role = "user",
         content = text,
         timestamp = os.time()
     })
 
-        local maxHist = tonumber(wasaiLocalAIConfig.maxHistoryMessages) or 20
-        if #wasaiChatMemory.conversationHistory > maxHist then
-            table.remove(wasaiChatMemory.conversationHistory, 1)
+        local maxHist = tonumber(AgentLocalAIConfig.maxHistoryMessages) or 20
+        if #AgentChatMemory.conversationHistory > maxHist then
+            table.remove(AgentChatMemory.conversationHistory, 1)
         end
 
-    wasaiSafeSpawn(function()
+    AgentSafeSpawn(function()
 
-        wasaiShowThinkingBubble()
+        AgentShowThinkingBubble()
 
-        local okReply, reply = pcall(wasaiGenerateResponse, text, _aWAuthZx9K7)
+        local okReply, reply = pcall(AgentGenerateResponse, text, _aWAuthZx9K7)
         if not okReply or not reply or reply == "" then
             local errFallbacks = {
                 "抱歉，处理时出现了问题，请稍后重试。",
@@ -6993,46 +6993,46 @@ wasaiSendMessage = function()
         end
 
         if reply then
-                            table.insert(wasaiChatMemory.conversationHistory, {
+                            table.insert(AgentChatMemory.conversationHistory, {
                 role = "assistant",
                 content = tostring(reply),
-                model = wasaiLocalAIConfig.activeModel,
-                modelLabel = (WASAAI_MODELS[wasaiLocalAIConfig.activeModel] and WASAAI_MODELS[wasaiLocalAIConfig.activeModel].label) or wasaiLocalAIConfig.model,
+                model = AgentLocalAIConfig.activeModel,
+                modelLabel = (WASAAI_MODELS[AgentLocalAIConfig.activeModel] and WASAAI_MODELS[AgentLocalAIConfig.activeModel].label) or AgentLocalAIConfig.model,
                 timestamp = os.time()
             })
-            wasaiQueueTrainingPair(text, tostring(reply))
+            AgentQueueTrainingPair(text, tostring(reply))
 
             
-            local elapsed = wasaiMetrics.thinkingStartTime > 0 and (tick() - wasaiMetrics.thinkingStartTime) or 0
-            local complexity = wasaiMetrics.toolCalls * 0.8 + wasaiMetrics.fileOperations * 0.4
+            local elapsed = AgentMetrics.thinkingStartTime > 0 and (tick() - AgentMetrics.thinkingStartTime) or 0
+            local complexity = AgentMetrics.toolCalls * 0.8 + AgentMetrics.fileOperations * 0.4
             local target = math.max(1.5, 1.5 + math.min(complexity, 3.0))
             if elapsed < target then
                 task.wait(target - elapsed)
             end
 
-            wasaiRemoveThinkingBubble()
+            AgentRemoveThinkingBubble()
 
             
             -- 思考内容已由「深度思考」卡片承载，不再单独发一条消息
-            wasaiLocalAIState.lastReasoning = nil
+            AgentLocalAIState.lastReasoning = nil
 
-            local statsText = wasaiGenerateStatsText(true)
+            local statsText = AgentGenerateStatsText(true)
 
-                            wasaiSaveChatHistory()
-            wasaiSaveMemory(text, tostring(reply))
+                            AgentSaveChatHistory()
+            AgentSaveMemory(text, tostring(reply))
 
             
 
             if type(reply) == "table" and reply.__type == "decompile" then
-                wasaiShowDecompileResult(reply.filename, reply.source)
+                AgentShowDecompileResult(reply.filename, reply.source)
             elseif type(reply) == "table" and reply.__type == "script" then
-                wasaiShowScriptResult(reply.title, reply.source)
+                AgentShowScriptResult(reply.title, reply.source)
             else
                 local replyStr = tostring(reply)
                 
-                local usedCode = wasaiRenderMessageWithCode(replyStr, statsText)
+                local usedCode = AgentRenderMessageWithCode(replyStr, statsText)
                 if not usedCode then
-                    wasaiTypewriteMessage(replyStr, false, statsText)
+                    AgentTypewriteMessage(replyStr, false, statsText)
                 end
             end
         end
@@ -7040,21 +7040,21 @@ wasaiSendMessage = function()
 end
 end
 
-wasaiSendButton.MouseButton1Click:Connect(wasaiSendMessage)
-wasaiInputBox.FocusLost:Connect(function(enterPressed)
-    if enterPressed then wasaiSendMessage() end
+AgentSendButton.MouseButton1Click:Connect(AgentSendMessage)
+AgentInputBox.FocusLost:Connect(function(enterPressed)
+    if enterPressed then AgentSendMessage() end
 end)
 
-wasaiShowScriptResult = function(title, source, lang, noAvatar)
+AgentShowScriptResult = function(title, source, lang, noAvatar)
     source = tostring(source or "")
     lang = tostring(lang or "lua")
     local lineCount = select(2, source:gsub("\n", "")) + 1
-    local cardTitle = wasaiLangTitle(lang)
+    local cardTitle = AgentLangTitle(lang)
     if type(title) == "string" and title ~= "" and title ~= "代码" then
         cardTitle = title
     end
 
-    local container, bubble = wasaiCreateMessageContainer("", false, nil, noAvatar)
+    local container, bubble = AgentCreateMessageContainer("", false, nil, noAvatar)
     local card = create("Frame", {
         Size = UDim2.new(0, 420, 0, 0),
         AutomaticSize = Enum.AutomaticSize.Y,
@@ -7165,16 +7165,16 @@ wasaiShowScriptResult = function(title, source, lang, noAvatar)
         end
     end)
 
-    wasaiFinalizeMessage(container, false)
+    AgentFinalizeMessage(container, false)
     return container
 end
 
 
 -- 渲染整条回复：文本走气泡，围栏代码走代码卡（DeepSeek 标准排版）
-wasaiRenderMessageWithCode = function(reply, stats)
+AgentRenderMessageWithCode = function(reply, stats)
     if type(reply) ~= "string" or reply == "" then return nil end
 
-    local parts, hasCode = wasaiSplitReply(reply)
+    local parts, hasCode = AgentSplitReply(reply)
     if not hasCode then return nil end
 
     local blocks = {}
@@ -7206,28 +7206,28 @@ wasaiRenderMessageWithCode = function(reply, stats)
         local isFirst = (rendered == 0)
         if block.type == "text" then
             local st = (not statsShown) and stats or nil
-            wasaiAddMessage(block.text, false, st, not isFirst)
+            AgentAddMessage(block.text, false, st, not isFirst)
             if st then statsShown = true end
         else
             local title = (block.lang == "lua" or block.lang == "luau") and "脚本" or "代码"
-            wasaiShowScriptResult(title, block.text, block.lang, not isFirst)
+            AgentShowScriptResult(title, block.text, block.lang, not isFirst)
         end
         rendered = rendered + 1
     end
 
     if not statsShown and stats then
-        wasaiAddMessage("", false, stats, true)
+        AgentAddMessage("", false, stats, true)
     end
     return true
 end
 
-function wasaiCreateMessageContainer(text, isUser, customBubbleColor, noAvatar)
+function AgentCreateMessageContainer(text, isUser, customBubbleColor, noAvatar)
     local container = create("Frame", {
         Name = "MessageContainer",
         Size = UDim2.new(1, 0, 0, 0),
         BackgroundTransparency = 1,
         AutomaticSize = Enum.AutomaticSize.Y,
-        Parent = wasaiMessageFrame,
+        Parent = AgentMessageFrame,
         ZIndex = 3
     })
 
@@ -7366,7 +7366,7 @@ local function buildAgentLessSettings(env, G)
     if rowTraining then rowTraining.Parent = card end
 
     local function applyModelLabelVisible(state)
-        local lbl = env.wasaiModelLabel
+        local lbl = env.AgentModelLabel
         if lbl then pcall(function() lbl.Visible = state end) end
     end
 
@@ -7404,8 +7404,8 @@ local function buildAgentLessSettings(env, G)
             for i = 1, #modelOptions do
                 if modelOptions[i] == val then
                     writeCfg("activeModel", modelIds[i])
-                    if type(env.wasaiApplyModel) == "function" then
-                        pcall(env.wasaiApplyModel, modelIds[i])
+                    if type(env.AgentApplyModel) == "function" then
+                        pcall(env.AgentApplyModel, modelIds[i])
                     end
                     break
                 end
@@ -7500,8 +7500,8 @@ local function buildAgentLessEnv(frame, helpers)
                 if type(cfg) == "table" then enabled = cfg.useExternalApi == true end
             end
         end
-        if env.wasaiModelLabel then
-            pcall(function() env.wasaiModelLabel.Visible = enabled end)
+        if env.AgentModelLabel then
+            pcall(function() env.AgentModelLabel.Visible = enabled end)
         end
         return enabled
     end

@@ -51,15 +51,153 @@ local function getGlobalEnv()
         local ok, env = pcall(getgenv)
         if ok and type(env) == "table" then g = env end
     end
-    return g or _G or {}
+    if type(g) ~= "table" then
+        local ok, env = pcall(function() return _G end)
+        if ok and type(env) == "table" then g = env end
+    end
+    return g or {}
 end
 
--- 页面依赖的宿主符号：优先读全局，其次读 _G.__DeltaUI_* 导出
-local function hostSymbol(G, name, exported)
-    local v = G[name]
-    if v == nil and exported then v = G["__DeltaUI_" .. exported] end
-    if v == nil then v = G["__DeltaUI_" .. name] end
-    return v
+-- -------------------------------------------------------------------------
+--  [修复] 宿主符号解析
+--  宿主主 UI 可能运行在**独立的脚本环境**里（执行器给脚本单独的 env）：
+--  此时 getgenv() 只有 Roblox/执行器全局，拿不到宿主脚本自己定义的全局函数
+--  （loadConfig / saveConfig / applyGradient / create …），
+--  页面 env 只查 getgenv() 就会在第一次裸调用时报
+--      "attempt to call a nil value"（AgentLess 第 1974 行就是 loadConfig()）。
+--  所以这里依次在下面这些环境里查找（含宿主写入的 __DeltaUI_<name> 导出），
+--  最后再回退到宿主通过 helpers 直接传进来的函数：
+--      本文件（页面）chunk 环境(getfenv) → getgenv() → _G → helpers
+-- -------------------------------------------------------------------------
+-- 取“本文件 chunk 自己的环境”：
+--   注意不能用 pcall(getfenv)（取到的是 pcall 自己的环境 = 真实全局表），
+--   要用 getfenv(函数) 这种传函数的形式，拿到的才是该函数所在 chunk 的环境。
+--   某些执行器的 loadstring 会把调用者环境传给新 chunk（宿主环境），这时这个根命中率最高；
+--   若执行器和标准 Lua 5.1 一样给新 chunk 真实全局表，这个根就等于 _G，重复但无害。
+local function hostChunkEnv()
+    if type(getfenv) ~= "function" then return nil end
+    local probe = function() end
+    local ok, e = pcall(getfenv, probe)
+    if ok and type(e) == "table" then return e end
+    return nil
+end
+
+local HOST_ROOTS = (function()
+    local roots, seen = {}, {}
+    local function push(t)
+        if type(t) == "table" and not seen[t] then
+            seen[t] = true
+            roots[#roots + 1] = t
+        end
+    end
+    push(hostChunkEnv())
+    push(getGlobalEnv())
+    local okG, g = pcall(function() return _G end)
+    if okG then push(g) end
+    return roots
+end)()
+
+-- 在若干候选环境里按名字查找宿主符号（含 __DeltaUI_<name> 导出），最后退回 helpers
+local function hostSymbol(name, helpers)
+    if type(name) ~= "string" then return nil end
+    for _, root in ipairs(HOST_ROOTS) do
+        local v = root[name]
+        if v == nil then v = root["__DeltaUI_" .. name] end
+        if v ~= nil then return v end
+    end
+    if type(helpers) == "table" then
+        local v = helpers[name]
+        if v ~= nil then return v end
+    end
+    return nil
+end
+
+-- 页面本体（内嵌源码）用裸名字调用的宿主函数清单：
+-- 这些名字必须能在 env 里解析到，否则页面会在半路崩掉
+local HOST_BINDINGS = {
+    "create", "corner", "stroke", "applyGradient", "GetIcon",
+    "ShowNotification", "AddLog", "t", "loadConfig", "saveConfig",
+    "registerTranslation", "pages", "navButtons", "switchPage",
+}
+
+-- -------------------------------------------------------------------------
+--  宿主符号缺失时的兜底实现（保证页面不会因为一个 nil 直接崩掉）
+-- -------------------------------------------------------------------------
+local HOST_CONFIG_FILE = "DeltaUI/Config.json"
+
+local function getHttpService()
+    local ok, svc = pcall(function() return game:GetService("HttpService") end)
+    if ok and svc then return svc end
+    return nil
+end
+
+local function makeFallbackLoadConfig(G)
+    return function()
+        if type(G) == "table" and type(G.__DeltaUI_cachedConfig) == "table" then
+            return G.__DeltaUI_cachedConfig
+        end
+        local okRaw, raw = pcall(function()
+            if type(isfile) == "function" and isfile(HOST_CONFIG_FILE) then
+                return readfile(HOST_CONFIG_FILE)
+            end
+            return nil
+        end)
+        if not okRaw or type(raw) ~= "string" or raw == "" then return {} end
+        local http = getHttpService()
+        if not http then return {} end
+        local ok, data = pcall(function() return http:JSONDecode(raw) end)
+        if ok and type(data) == "table" then
+            if type(G) == "table" then pcall(function() G.__DeltaUI_cachedConfig = data end) end
+            return data
+        end
+        return {}
+    end
+end
+
+local function makeFallbackSaveConfig(G)
+    return function(data)
+        if type(data) ~= "table" then return end
+        if type(G) == "table" then pcall(function() G.__DeltaUI_cachedConfig = data end) end
+        local http = getHttpService()
+        if not http then return end
+        local ok, raw = pcall(function() return http:JSONEncode(data) end)
+        if not ok or type(raw) ~= "string" then return end
+        pcall(function()
+            if type(isfolder) == "function" and not isfolder("DeltaUI") then makefolder("DeltaUI") end
+            writefile(HOST_CONFIG_FILE, raw)
+        end)
+    end
+end
+
+local function makeFallbackApplyGradient(env)
+    return function(frame, from, to, rotation)
+        if not frame then return nil end
+        local theme = env and env.theme
+        from = from or (theme and theme.accent) or Color3.fromRGB(56, 189, 248)
+        to = to or (theme and theme.accent2) or Color3.fromRGB(139, 92, 246)
+        local g
+        local ok, inst = pcall(function()
+            local make = (env and env.create) or create
+            if type(make) == "function" then
+                return make("UIGradient", {Rotation = rotation or 45})
+            end
+            return Instance.new("UIGradient")
+        end)
+        if ok and inst then g = inst end
+        if not g then return nil end
+        pcall(function() g.Color = ColorSequence.new(from, to) end)
+        pcall(function() frame.BackgroundColor3 = Color3.fromRGB(255, 255, 255) end)
+        pcall(function() g.Parent = frame end)
+        -- 与宿主一致：登记到主题渐变色列表，主题切换时一起刷新
+        local G = env and env._G
+        if type(G) == "table" then
+            pcall(function()
+                G.__DeltaUI_gradients = G.__DeltaUI_gradients or {}
+                table.insert(G.__DeltaUI_gradients, g)
+            end)
+        end
+        return g
+    end
 end
 
 -- 宿主没有提供主题表时使用的兜底配色（与 DeltaUI 默认暗色主题一致）
@@ -7311,17 +7449,20 @@ local function buildAgentLessSettings(env, G)
     end
     if G.__DeltaUI_agentlessSettingsBuilt then return true end
 
-    local registerTranslationFn = hostSymbol(G, "registerTranslation")
+    local registerTranslationFn = hostSymbol("registerTranslation")
+    if type(registerTranslationFn) ~= "function" then
+        registerTranslationFn = env and env.registerTranslation
+    end
     if type(registerTranslationFn) == "function" then
         for key, entry in pairs(AGENTLESS_TRANSLATIONS) do
             pcall(registerTranslationFn, key, entry)
         end
     end
 
-    local loadConfigFn = hostSymbol(G, "loadConfig")
-    local saveConfigFn = hostSymbol(G, "saveConfig")
-    local notifyFn = hostSymbol(G, "ShowNotification")
-    local tFn = hostSymbol(G, "t")
+    local loadConfigFn = hostSymbol("loadConfig") or (env and env.loadConfig)
+    local saveConfigFn = hostSymbol("saveConfig") or (env and env.saveConfig)
+    local notifyFn = hostSymbol("ShowNotification")
+    local tFn = hostSymbol("t")
 
     local function tr(key)
         if type(tFn) == "function" then
@@ -7456,14 +7597,46 @@ local function buildAgentLessEnv(frame, helpers)
     }
     env.svc = services
     env.v7 = services.Players.LocalPlayer
-    env.theme = hostSymbol(G, "theme") or builtinTheme()
-    env.contentFrame = frame.Parent or hostSymbol(G, "contentFrame") or frame
+    env.theme = hostSymbol("theme", helpers) or builtinTheme()
+    env.contentFrame = frame.Parent or hostSymbol("contentFrame", helpers) or frame
+
+    -- [修复] 页面本体的 _G 必须与页面自身/宿主 看到的是同一张表
+    -- （__DeltaAI_* / __DeltaUI_* 这些跨模块符号都挂在 _G 上）
+    env._G = G
+
+    -- [修复] 页面本体是裸名字调用这些宿主函数的，这里显式绑定，
+    -- 不再只依赖 env.__index 去猜；宿主没导出时下面还有兜底实现。
+    for _, key in ipairs(HOST_BINDINGS) do
+        local v = hostSymbol(key, helpers)
+        if v ~= nil then env[key] = v end
+    end
+
+    local fallbackUsed = {}
+    if type(env.loadConfig) ~= "function" then
+        env.loadConfig = makeFallbackLoadConfig(G)
+        fallbackUsed[#fallbackUsed + 1] = "loadConfig"
+    end
+    if type(env.saveConfig) ~= "function" then
+        env.saveConfig = makeFallbackSaveConfig(G)
+        fallbackUsed[#fallbackUsed + 1] = "saveConfig"
+    end
+    if type(env.applyGradient) ~= "function" then
+        env.applyGradient = makeFallbackApplyGradient(env)
+        fallbackUsed[#fallbackUsed + 1] = "applyGradient"
+    end
+    if type(env.registerTranslation) ~= "function" then
+        env.registerTranslation = function() end
+        fallbackUsed[#fallbackUsed + 1] = "registerTranslation"
+    end
+    if #fallbackUsed > 0 then
+        warn("[AgentLess] 宿主未提供以下符号，已用页面内置兜底: " .. table.concat(fallbackUsed, ", "))
+    end
 
     -- 原 DeltaUI 里由「设置页」提供，这里补上：控制模型标签的显隐
     env.updateExternalApiUI = function(forceState)
         local enabled = forceState
         if enabled == nil then
-            local loader = hostSymbol(G, "loadConfig")
+            local loader = env.loadConfig
             if type(loader) == "function" then
                 local ok, cfg = pcall(loader)
                 cfg = ok and cfg or nil
@@ -7478,9 +7651,7 @@ local function buildAgentLessEnv(frame, helpers)
 
     setmetatable(env, {
         __index = function(_, key)
-            local v = G[key]
-            if v == nil and helpers ~= nil then v = helpers[key] end
-            return v
+            return hostSymbol(key, helpers)
         end,
     })
     return env, G
@@ -7494,8 +7665,8 @@ function pageDef.build(frame, helpers)
     local function fail(msg)
         if type(helpers.ShowNotification) == "function" then
             pcall(helpers.ShowNotification, msg, 5)
-        elseif type(hostSymbol(G, "ShowNotification")) == "function" then
-            pcall(hostSymbol(G, "ShowNotification"), msg, 5)
+        elseif type(hostSymbol("ShowNotification")) == "function" then
+            pcall(hostSymbol("ShowNotification"), msg, 5)
         else
             warn("[AgentLess] " .. msg)
         end
@@ -7524,8 +7695,8 @@ function pageDef.build(frame, helpers)
 
     pcall(buildAgentLessSettings, env, G)
 
-    if type(hostSymbol(G, "AddLog")) == "function" then
-        pcall(hostSymbol(G, "AddLog"), "[AgentLess] 官方页面已加载 v" .. tostring(pageDef.version), "info")
+    if type(hostSymbol("AddLog")) == "function" then
+        pcall(hostSymbol("AddLog"), "[AgentLess] 官方页面已加载 v" .. tostring(pageDef.version), "info")
     end
 end
 

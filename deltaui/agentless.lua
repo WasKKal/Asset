@@ -2163,9 +2163,6 @@ function wasaiApplyModel(id)
             wasaiModelLabel.TextColor3 = m.isClaude and Color3.fromRGB(255, 200, 60) or theme.textDim
         end)
     end
-    if _G.__DeltaAI_updateBadge then
-        pcall(function() _G.__DeltaAI_updateBadge() end)
-    end
 end
 
 local _aiModelSaved = loadConfig()
@@ -3168,19 +3165,6 @@ local function wasaiDeepSeekChat(messages, tools, opts)
             ["Authorization"] = "Bearer " .. tostring(wasaiLocalAIConfig.apiKey),
         }
     end
-    if _G.__DeltaUI_pointsEnabled and not wasaiLocalAIConfig.bypassPoints then
-        local precheck = _G.__DeltaUI_precheck
-        if type(precheck) == "function" then
-            local okBal, curBal, needCost, reason = precheck(messages)
-            if not okBal then
-                if reason == "sync" then
-                    warn("[DeltaUI][Points] 预检同步失败: " .. tostring(wasaiGHLastErr))
-                    return nil, nil, "积分同步失败：" .. tostring(wasaiGHLastErr)
-                end
-                return nil, nil, "积分不足，本次对话需 " .. tostring(needCost or 0) .. " 积分，当前余额 " .. tostring(curBal or 0)
-            end
-        end
-    end
 
     local ok, code, respBody, statusMsg = wasaiHttpPost(
         reqUrl, reqHeaders, bodyJson
@@ -3214,17 +3198,6 @@ local function wasaiDeepSeekChat(messages, tools, opts)
     end
 
     
-    if _G.__DeltaUI_pointsEnabled and not wasaiLocalAIConfig.bypassPoints and type(data.usage) == "table" then
-        local used
-        if isClaude then
-            used = (tonumber(data.usage.input_tokens) or 0) + (tonumber(data.usage.output_tokens) or 0)
-        else
-            used = tonumber(data.usage.total_tokens) or 1
-        end
-        if used < 1 then used = 1 end
-        local deduct = _G.__DeltaUI_deduct
-        if type(deduct) == "function" then deduct(used) end
-    end
 
     
     if type(data.usage) == "table" then
@@ -4906,6 +4879,38 @@ if wasaiSettingsIcon then
     wasaiSettingsIcon.Parent = wasaiSettingsButton
 end
 
+local wasaiStatsButton = create("TextButton", {
+    Name = "StatsButton",
+    Size = UDim2.new(0, 24, 0, 24),
+    Position = UDim2.new(1, -58, 0.5, -12),
+    BackgroundColor3 = theme.surfaceLight,
+    BackgroundTransparency = 0.4,
+    BorderSizePixel = 0,
+    Text = "",
+    Parent = wasaiTitleBar,
+    ZIndex = 6
+})
+corner(6, wasaiStatsButton)
+local wasaiStatsIcon = GetIcon("chart-pie", UDim2.new(0, 15, 0, 15), theme.textDim)
+if wasaiStatsIcon then
+    wasaiStatsIcon.AnchorPoint = Vector2.new(0.5, 0.5)
+    wasaiStatsIcon.Position = UDim2.new(0.5, 0, 0.5, 0)
+    wasaiStatsIcon.Parent = wasaiStatsButton
+else
+    create("TextLabel", {
+        Size = UDim2.new(1, 0, 1, 0),
+        BackgroundTransparency = 1,
+        Text = "📊",
+        TextColor3 = theme.textDim or Color3.fromRGB(150, 160, 184),
+        Font = Enum.Font.SourceSans,
+        TextSize = 13,
+        TextXAlignment = Enum.TextXAlignment.Center,
+        TextYAlignment = Enum.TextYAlignment.Center,
+        Parent = wasaiStatsButton,
+    })
+end
+
+
 local wasaiSettingsOpen = false
 local wasaiSettingsUi = nil
 
@@ -5240,674 +5245,230 @@ local function wasaiCloseSettings()
 end
 
 pcall(function()
+local wasaiTaskStartTime = tick()
+local wasaiStatsUi = nil
+local wasaiStatsOpen = false
+
+local function wasaiComputeContext()
+    local hist = wasaiChatMemory and wasaiChatMemory.conversationHistory
+    local msgs, chars = 0, 0
+    if type(hist) == "table" then
+        for _, m in ipairs(hist) do
+            msgs = msgs + 1
+            local c = m and m.content
+            if type(c) == "string" then
+                chars = chars + #c
+            elseif type(c) == "table" then
+                for _, part in ipairs(c) do
+                    if type(part) == "table" then
+                        chars = chars + #tostring(part.text or part.content or "")
+                    else
+                        chars = chars + #tostring(part)
+                    end
+                end
+            end
+        end
+    end
+    return msgs, chars
+end
+
+local function wasaiFormatDuration(sec)
+    sec = math.max(0, math.floor(sec or 0))
+    local h = math.floor(sec / 3600)
+    local m = math.floor((sec % 3600) / 60)
+    local s = sec % 60
+    if h > 0 then return string.format("%d时%d分%d秒", h, m, s) end
+    if m > 0 then return string.format("%d分%d秒", m, s) end
+    return string.format("%d秒", s)
+end
+
+local function wasaiMakeStatRow(parent, label, valueText)
+    local row = create("Frame", {
+        Size = UDim2.new(1, 0, 0, 42),
+        BackgroundColor3 = theme.surfaceLight or Color3.fromRGB(30, 36, 52),
+        BackgroundTransparency = 0.35,
+        BorderSizePixel = 0,
+        Parent = parent,
+    })
+    corner(8, row)
+    create("TextLabel", {
+        Size = UDim2.new(1, -24, 0, 16),
+        Position = UDim2.new(0, 12, 0, 6),
+        BackgroundTransparency = 1,
+        Text = label,
+        TextColor3 = theme.textDim or Color3.fromRGB(150, 160, 184),
+        Font = Enum.Font.SourceSans,
+        TextSize = 12,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        Parent = row,
+    })
+    local val = create("TextLabel", {
+        Size = UDim2.new(1, -24, 0, 18),
+        Position = UDim2.new(0, 12, 0, 22),
+        BackgroundTransparency = 1,
+        Text = valueText,
+        TextColor3 = theme.accent or Color3.fromRGB(56, 189, 248),
+        Font = Enum.Font.SourceSansBold,
+        TextSize = 15,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        Parent = row,
+    })
+    return row, val
+end
+
+local function wasaiEnsureStatsUI()
+    if wasaiStatsUi then return end
+    local panelW = 300
+    local scrim = create("TextButton", {
+        Name = "StatsScrim",
+        Size = UDim2.new(1, 0, 1, 0),
+        Position = UDim2.new(0, 0, 0, 0),
+        BackgroundColor3 = Color3.new(0, 0, 0),
+        BackgroundTransparency = 1,
+        BorderSizePixel = 0,
+        Text = "",
+        Parent = wasaiMainFrame,
+        ZIndex = 10,
+        Visible = false,
+    })
+    local panel = create("Frame", {
+        Name = "StatsPanel",
+        Size = UDim2.new(0, panelW, 1, 0),
+        Position = UDim2.new(1, 0, 0, 0),
+        BackgroundColor3 = theme.surface or Color3.fromRGB(18, 22, 34),
+        BackgroundTransparency = 1,
+        BorderSizePixel = 0,
+        ClipsDescendants = true,
+        Parent = wasaiMainFrame,
+        ZIndex = 11,
+    })
+    corner(theme.radius or 14, panel)
+    stroke(theme.border or Color3.fromRGB(52, 62, 88), 1, panel)
+    local header = create("Frame", {
+        Size = UDim2.new(1, 0, 0, 44),
+        BackgroundTransparency = 1,
+        Parent = panel,
+    })
+    create("TextLabel", {
+        Size = UDim2.new(1, -48, 1, 0),
+        Position = UDim2.new(0, 14, 0, 0),
+        BackgroundTransparency = 1,
+        Text = "运行数据",
+        TextColor3 = theme.text or Color3.fromRGB(242, 245, 252),
+        Font = Enum.Font.SourceSansBold,
+        TextSize = 16,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        Parent = header,
+    })
+    local closeBtn = create("TextButton", {
+        Name = "StatsCloseButton",
+        Size = UDim2.new(0, 30, 0, 30),
+        Position = UDim2.new(1, -40, 0, 7),
+        BackgroundColor3 = theme.surfaceLight or Color3.fromRGB(30, 36, 52),
+        BackgroundTransparency = 0.3,
+        BorderSizePixel = 0,
+        Text = "✕",
+        TextColor3 = theme.text or Color3.fromRGB(242, 245, 252),
+        Font = Enum.Font.SourceSansBold,
+        TextSize = 16,
+        Parent = header,
+        ZIndex = 12,
+    })
+    corner(6, closeBtn)
+    local list = create("Frame", {
+        Size = UDim2.new(1, 0, 1, -52),
+        Position = UDim2.new(0, 0, 0, 48),
+        BackgroundTransparency = 1,
+        Parent = panel,
+    })
+    create("UIListLayout", {
+        FillDirection = Enum.FillDirection.Vertical,
+        Padding = UDim.new(0, 8),
+        Parent = list,
+    })
+    create("UIPadding", {
+        PaddingLeft = UDim.new(0, 12), PaddingRight = UDim.new(0, 12),
+        PaddingTop = UDim.new(0, 8), PaddingBottom = UDim.new(0, 12),
+        Parent = list,
+    })
+    local rows = {}
+    rows.tokens, rows.tokensVal = wasaiMakeStatRow(list, "消耗的 Token", "0")
+    rows.commands, rows.commandsVal = wasaiMakeStatRow(list, "执行的命令（次数）", "0")
+    rows.files, rows.filesVal = wasaiMakeStatRow(list, "创建/写入文件（数量）", "0")
+    rows.time, rows.timeVal = wasaiMakeStatRow(list, "任务总耗时", "0")
+    rows.context, rows.contextVal = wasaiMakeStatRow(list, "对话上下文长度", "0")
+    wasaiStatsUi = { scrim = scrim, panel = panel, closeBtn = closeBtn, rows = rows, panelW = panelW }
+end
+
+local function wasaiRefreshStats()
+    if not wasaiStatsUi then return end
+    local r = wasaiStatsUi.rows
+    pcall(function() r.tokensVal.Text = tostring(math.floor(wasaiTotalTokens or 0)) end)
+    pcall(function() r.commandsVal.Text = tostring(wasaiMetrics and wasaiMetrics.toolCalls or 0) end)
+    pcall(function() r.filesVal.Text = tostring(wasaiMetrics and wasaiMetrics.fileOperations or 0) end)
+    pcall(function() r.timeVal.Text = wasaiFormatDuration(tick() - wasaiTaskStartTime) end)
+    pcall(function()
+        local msgs, chars = wasaiComputeContext()
+        r.contextVal.Text = tostring(chars) .. " 字符 / " .. tostring(msgs) .. " 条"
+    end)
+end
+
+local function wasaiOpenStats()
+    if wasaiStatsOpen then wasaiCloseStats(); return end
+    wasaiEnsureStatsUI()
+    wasaiStatsOpen = true
+    pcall(wasaiRefreshStats)
+    pcall(function() wasaiStatsUi.scrim.Visible = true end)
+    wasaiTween(wasaiStatsUi.scrim, { BackgroundTransparency = 0.5 }, 0.3)
+    wasaiTween(wasaiStatsUi.panel, { BackgroundTransparency = 0 }, 0.3)
+    wasaiTween(wasaiStatsUi.panel, { Position = UDim2.new(1, -wasaiStatsUi.panelW, 0, 0) }, 0.3)
+end
+
+local function wasaiCloseStats()
+    wasaiStatsOpen = false
+    if wasaiStatsUi then
+        wasaiTween(wasaiStatsUi.scrim, { BackgroundTransparency = 1 }, 0.28)
+        wasaiTween(wasaiStatsUi.panel, { Position = UDim2.new(1, 0, 0, 0) }, 0.28)
+        wasaiTween(wasaiStatsUi.panel, { BackgroundTransparency = 1 }, 0.28)
+    end
+    task.delay(0.3, function()
+        pcall(function()
+            if (not wasaiStatsOpen) and wasaiStatsUi then
+                wasaiStatsUi.scrim.Visible = false
+            end
+        end)
+    end)
+end
+
+pcall(function()
+    if wasaiStatsButton then
+        wasaiStatsButton.MouseButton1Click:Connect(function()
+            pcall(wasaiOpenStats)
+        end)
+    end
+end)
+pcall(function()
+    if wasaiStatsUi and wasaiStatsUi.scrim then
+        wasaiStatsUi.scrim.MouseButton1Click:Connect(function()
+            pcall(wasaiCloseStats)
+        end)
+    end
+end)
+pcall(function()
+    if wasaiStatsUi and wasaiStatsUi.closeBtn then
+        wasaiStatsUi.closeBtn.MouseButton1Click:Connect(function()
+            pcall(wasaiCloseStats)
+        end)
+    end
+end)
+
+
     wasaiSettingsButton.MouseButton1Click:Connect(function()
         pcall(wasaiOpenSettings)
     end)
 end)
 
 
-local wasaiPointsLabel
-wasaiPointsBadgeRef = nil        
-wasaiPointsBadgeStroke = nil     
-wasaiPointsBadgeGradient = nil   
-do
-    local wasaiPointsBadge = create("Frame", {
-        Name = "PointsBadge",
-        Size = UDim2.new(0, 78, 0, 24),
-        Position = UDim2.new(1, -114, 0.5, -12),  
-        BackgroundColor3 = theme.accent,
-        BackgroundTransparency = 0.78,
-        BorderSizePixel = 0,
-        Parent = wasaiTitleBar,
-        ZIndex = 6
-    })
-    wasaiPointsBadgeRef = wasaiPointsBadge
-    wasaiPointsBadgeGradient = applyGradient(wasaiPointsBadge, theme.accent, theme.accent2, 120)
-    corner(12, wasaiPointsBadge)
-    wasaiPointsBadgeStroke = stroke(theme.accent, 1, wasaiPointsBadge)
-    wasaiPointsIcon = GetIcon("sparkles", UDim2.new(0, 15, 0, 15))
-    if wasaiPointsIcon then
-        wasaiPointsIcon.AnchorPoint = Vector2.new(0, 0.5)
-        wasaiPointsIcon.Position = UDim2.new(0, 7, 0.5, 0)
-        
-        wasaiPointsIcon.ImageColor3 = wasaiLocalAIConfig.isClaude and Color3.fromRGB(255, 200, 60) or Color3.fromRGB(230, 232, 240)
-        wasaiPointsIcon.Parent = wasaiPointsBadge
-    end
-    wasaiPointsLabel = create("TextLabel", {
-        Name = "PointsLabel",
-        Size = UDim2.new(1, -26, 1, 0),
-        Position = UDim2.new(0, 20, 0, 0),
-        BackgroundTransparency = 1,
-        Text = "0",
-        TextColor3 = theme.text,
-        TextSize = 12,
-        Font = Enum.Font.SourceSansBold,
-        TextXAlignment = Enum.TextXAlignment.Center,
-        TextYAlignment = Enum.TextYAlignment.Center,
-        ZIndex = 7,
-        Parent = wasaiPointsBadge
-    })
-end
-
-
-
-local WASAI_POINTS_ENABLED = false
-local wasaiPointsBalance = 0
-local wasaiClaudeBalance = 0   
-local wasaiPointsSynced = false
-local wasaiPointsConsume
-local wasaiEstimateTokens
-
-do
-    WASAI_GITEE_OWNER   = "WasKKalWe"
-    WASAI_GITEE_REPO    = "return"
-    WASAI_GITEE_BRANCH  = "master"
-    WASAI_GITEE_TOKEN   = "ca3c508f3c95c480f903cede2cadd152"
-    WASAI_POINTS_PATH   = "points"      
-    WASAI_POINTS_ENABLED = (WASAI_GITEE_OWNER ~= "" and WASAI_GITEE_REPO ~= "" and WASAI_GITEE_TOKEN ~= "")
-    wasaiPointsHwid = nil
-    wasaiGHLastErr = ""
-    local function wasaiHttpReq(method, url, headers, body)
-        local function okResp(resp)
-            if type(resp) == "table" then
-                return true, resp.StatusCode or 200, resp.Body or "", resp.StatusMessage or ""
-            end
-            return false, 0, "", ""
-        end
-        
-        local function optsFor(timeout)
-            local o = { Url = url, Method = method, Headers = headers, Timeout = timeout }
-            if body and body ~= "" then o.Body = body end
-            return o
-        end
-        
-        local execFn = (syn and syn.request) or (http and http.request) or http_request or request
-        local channels = {}
-        if execFn then
-            channels[#channels + 1] = { run = function(o) return execFn(o) end, timeout = 20000, tag = "request" }
-        end
-        if svc.HttpService and svc.HttpService.RequestAsync then
-            channels[#channels + 1] = { run = function(o) return svc.HttpService:RequestAsync(o) end, timeout = 20, tag = "RequestAsync" }
-        end
-        
-        if #channels == 0 then
-            wasaiGHLastErr = "[no-http] 无可用 HTTP 通道"
-            return false, 0, wasaiGHLastErr, ""
-        end
-        local errs = {}
-        for attempt = 1, 3 do
-            for _, ch in ipairs(channels) do
-                local ok, resp = pcall(ch.run, optsFor(ch.timeout))
-                if ok then
-                    local good, code, rbody, smsg = okResp(resp)
-                    if good then return true, code, rbody, smsg end
-                    errs[#errs + 1] = "[" .. ch.tag .. "] " .. tostring(resp)
-                else
-                    errs[#errs + 1] = "[" .. ch.tag .. " throw] " .. tostring(resp)
-                end
-            end
-            if attempt < 3 then task.wait(0.4 * attempt) end
-        end
-        wasaiGHLastErr = table.concat(errs, " | ")
-        return false, 0, wasaiGHLastErr, ""
-    end
-
-    
-    local B64_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
-    local B64_IDX = {}
-    for _i = 1, 64 do B64_IDX[B64_CHARS:sub(_i, _i)] = _i - 1 end
-    local function wasaiBase64Encode(s)
-        s = tostring(s or "")
-        local out = {}
-        local i = 1
-        local n = #s
-        while i <= n do
-            local b1 = s:byte(i) or 0
-            local b2 = s:byte(i + 1) or 0
-            local b3 = s:byte(i + 2) or 0
-            local c1 = math.floor(b1 / 4)
-            local c2 = (b1 % 4) * 16 + math.floor(b2 / 16)
-            local c3 = (b2 % 16) * 4 + math.floor(b3 / 64)
-            local c4 = b3 % 64
-            out[#out + 1] = B64_CHARS:sub(c1 + 1, c1 + 1) .. B64_CHARS:sub(c2 + 1, c2 + 1)
-            if (i + 1) <= n then out[#out] = out[#out] .. B64_CHARS:sub(c3 + 1, c3 + 1) else out[#out] = out[#out] .. "=" end
-            if (i + 2) <= n then out[#out] = out[#out] .. B64_CHARS:sub(c4 + 1, c4 + 1) else out[#out] = out[#out] .. "=" end
-            i = i + 3
-        end
-        return table.concat(out)
-    end
-    local function wasaiBase64Decode(s)
-        s = tostring(s or ""):gsub("%s", "")
-        local out = {}
-        local i = 1
-        local n = #s
-        while i <= n do
-            local c1 = B64_IDX[s:sub(i, i)]
-            local c2 = B64_IDX[s:sub(i + 1, i + 1)]
-            local c3s = s:sub(i + 2, i + 2)
-            local c4s = s:sub(i + 3, i + 3)
-            local c3 = (c3s ~= "" and c3s ~= "=") and B64_IDX[c3s] or nil
-            local c4 = (c4s ~= "" and c4s ~= "=") and B64_IDX[c4s] or nil
-            if c1 and c2 then
-                out[#out + 1] = string.char(c1 * 4 + math.floor(c2 / 16))
-                if c3 then out[#out + 1] = string.char((c2 % 16) * 16 + math.floor(c3 / 4)) end
-                if c4 then out[#out + 1] = string.char((c3 % 4) * 64 + c4) end
-            end
-            i = i + 4
-        end
-        return table.concat(out)
-    end
-
-    local function wasaiJSONDecode(s)
-        if type(s) ~= "string" or s == "" then return nil end
-        local d
-        local ok = pcall(function() d = svc.HttpService:JSONDecode(s) end)
-        if ok then return d end
-        return nil
-    end
-
-    
-    local function wasaiGHContentsUrl(path)
-        return "https://gitee.com/api/v5/repos/" .. WASAI_GITEE_OWNER .. "/" .. WASAI_GITEE_REPO .. "/contents/" .. path
-    end
-    local function wasaiGHReadUrl(path)
-        return wasaiGHContentsUrl(path) .. "?access_token=" .. WASAI_GITEE_TOKEN .. "&ref=" .. WASAI_GITEE_BRANCH
-    end
-    local function wasaiGHHeaders()
-        return { ["Content-Type"] = "application/json" }
-    end
-    
-    local function wasaiGHReadFile(path)
-        local ok, code, respBody = wasaiHttpReq("GET", wasaiGHReadUrl(path), wasaiGHHeaders(), "")
-        if not ok then
-            wasaiGHLastErr = "read-net " .. tostring(wasaiGHLastErr)
-            return nil, nil
-        end
-        if code < 200 or code >= 300 then
-            wasaiGHLastErr = "read-http " .. tostring(code) .. " " .. tostring(wasaiSafeString(respBody, 160))
-            return nil, nil
-        end
-        local d = wasaiJSONDecode(respBody)
-        if type(d) ~= "table" or type(d.content) ~= "string" then
-            wasaiGHLastErr = "read-parse"
-            return nil, nil
-        end
-        local obj = wasaiJSONDecode(wasaiBase64Decode(d.content))
-        if type(obj) ~= "table" then
-            wasaiGHLastErr = "read-json"
-            return nil, nil
-        end
-        return obj, d.sha
-    end
-    
-    local function wasaiGHWriteFile(path, content, sha)
-        local function writeOnce(s)
-            local method = s and "PUT" or "POST"
-            local b = {
-                access_token = WASAI_GITEE_TOKEN,
-                message = "DeltaUI points update",
-                content = wasaiBase64Encode(content),
-                branch = WASAI_GITEE_BRANCH,
-            }
-            if s then b.sha = s end
-            return wasaiHttpReq(method, wasaiGHContentsUrl(path), wasaiGHHeaders(), wasaiJSONEncode(b))
-        end
-        local ok, code, respBody = writeOnce(sha)
-        if not ok then
-            wasaiGHLastErr = "write-net " .. tostring(wasaiGHLastErr)
-            return false
-        end
-        
-        if code >= 400 and code < 500 then
-            local _, s2 = wasaiGHReadFile(path)
-            if s2 then ok, code, respBody = writeOnce(s2) end
-        end
-        if not ok then
-            wasaiGHLastErr = "write-net " .. tostring(wasaiGHLastErr)
-            return false
-        end
-        if code < 200 or code >= 300 then
-            wasaiGHLastErr = "write-http " .. tostring(code) .. " " .. tostring(wasaiSafeString(respBody, 160))
-            return false
-        end
-        return true
-    end
-
-    local function wasaiPointsPath(name)
-        local base = (WASAI_POINTS_PATH == "") and "" or (WASAI_POINTS_PATH .. "/")
-        return base .. name
-    end
-
-    local wasaiPointsConfigData = nil
-    local function wasaiPointsConfigCached()
-        if wasaiPointsConfigData then return wasaiPointsConfigData end
-        local def = {
-            dailyReward = 0, newUserReward = 0, costPerToken = 0.1,
-            minCostPerRequest = 1, maxCostPerRequest = 3000, maxUserBalance = 100000000,
-            
-            claudeCostPerToken = 0.15, claudeMinCostPerRequest = 1, claudeMaxCostPerRequest = 5000,
-        }
-        local cfg = wasaiGHReadFile(wasaiPointsPath("config.json"))
-        if type(cfg) == "table" then
-            wasaiPointsConfigData = {
-                dailyReward = tonumber(cfg.dailyReward) or def.dailyReward,
-                newUserReward = tonumber(cfg.newUserReward) or def.newUserReward,
-                costPerToken = tonumber(cfg.costPerToken) or def.costPerToken,
-                minCostPerRequest = tonumber(cfg.minCostPerRequest) or def.minCostPerRequest,
-                maxCostPerRequest = tonumber(cfg.maxCostPerRequest) or def.maxCostPerRequest,
-                maxUserBalance = tonumber(cfg.maxUserBalance) or def.maxUserBalance,
-                claudeCostPerToken = tonumber(cfg.claudeCostPerToken) or def.claudeCostPerToken,
-                claudeMinCostPerRequest = tonumber(cfg.claudeMinCostPerRequest) or def.claudeMinCostPerRequest,
-                claudeMaxCostPerRequest = tonumber(cfg.claudeMaxCostPerRequest) or def.claudeMaxCostPerRequest,
-            }
-        else
-            wasaiPointsConfigData = def
-        end
-        return wasaiPointsConfigData
-    end
-
-    
-    
-    local function wasaiLoadRemoteModels()
-        local cfg = wasaiGHReadFile(wasaiPointsPath("config.json"))
-        if type(cfg) ~= "table" or type(cfg.models) ~= "table" then return end
-        for id, prof in pairs(cfg.models) do
-            local cur = WASAAI_MODELS[id]
-            if cur and type(prof) == "table" then
-                if prof.label then cur.label = tostring(prof.label) end
-                if prof.model then cur.model = tostring(prof.model) end
-                if prof.endpoint then cur.endpoint = tostring(prof.endpoint) end
-                if prof.isClaude ~= nil then cur.isClaude = (prof.isClaude == true or prof.isClaude == "true") end
-            end
-        end
-        
-        wasaiApplyModel(wasaiLocalAIConfig.activeModel or "flash")
-    end
-    _G.__DeltaAI_loadRemoteModels = wasaiLoadRemoteModels
-
-    local function wasaiPointsCalcCost(cfg, tokens, isClaude)
-        local raw
-        if isClaude then
-            raw = math.ceil(tokens * tonumber(cfg.claudeCostPerToken or cfg.costPerToken or 0))
-        else
-            raw = math.ceil(tokens * tonumber(cfg.costPerToken or 0))
-        end
-        local minc = isClaude and (tonumber(cfg.claudeMinCostPerRequest) or 1) or (tonumber(cfg.minCostPerRequest) or 1)
-        local maxc = isClaude and (tonumber(cfg.claudeMaxCostPerRequest) or 500) or (tonumber(cfg.maxCostPerRequest) or 500)
-        
-        return math.max(minc, math.min(raw, maxc))
-    end
-
-
-local function wasaiGetHwid()
-    if wasaiPointsHwid then return wasaiPointsHwid end
-    local file = "DeltaUI/hwid.dat"
-    local stored = nil
-    if isfile and readfile and isfile(file) then
-        stored = readfile(file)
-    end
-    local hwid
-    if stored and stored ~= "" then
-        
-        hwid = stored
-    else
-        
-        local real = nil
-        local getgenv_ = getgenv or function() return _G end
-        for _, fnName in ipairs({"gethwid", "get_hwid", "getdeviceid", "get_device_id"}) do
-            local fn = getgenv_()[fnName] or _G[fnName]
-            if type(fn) == "function" then
-                local ok, v = pcall(fn)
-                if ok and type(v) == "string" and v ~= "" then real = v break end
-            end
-        end
-        local seed = tostring(os.time()) .. "|" .. tostring(math.random()) .. "|" .. tostring(game.PlaceId or 0)
-        if real and real ~= "" then seed = seed .. "|hwid:" .. real end
-        local acc = 5381
-        for i = 1, #seed do acc = ((acc * 33) + seed:byte(i)) % 2147483647 end
-        hwid = "d" .. tostring(acc)
-        if writefile then
-            pcall(function()
-                if not isfolder("DeltaUI") then makefolder("DeltaUI") end
-                writefile(file, hwid)
-            end)
-        end
-    end
-    wasaiPointsHwid = hwid
-    return hwid
-end
-
-    local function wasaiPointsUserPath()
-        return wasaiPointsPath("users/" .. wasaiGetHwid() .. ".json")
-    end
-    
-    local function wasaiPointsMutateUser(mutator)
-        local path = wasaiPointsUserPath()
-        for attempt = 1, 3 do
-            local u, sha = wasaiGHReadFile(path)
-            local existed = type(u) == "table"
-            if not existed then
-                u = {
-                    deviceId = wasaiGetHwid(),
-                    balance = 0, claudeBalance = 0, totalEarned = 0, totalSpent = 0,
-                    lastLoginDate = nil, totalRequests = 0, totalTokens = 0,
-                    createdAt = os.time() * 1000, updatedAt = os.time() * 1000,
-                }
-            end
-            local result, skipWrite = mutator(u, existed)
-            u.updatedAt = os.time() * 1000
-            if skipWrite then return u, result end
-            if wasaiGHWriteFile(path, wasaiJSONEncode(u), sha) then
-                return u, result
-            end
-            task.wait(0.4)
-        end
-        return nil, nil
-    end
-
-    
-    local function wasaiPointsEnsureUser()
-        local cfg = wasaiPointsConfigCached()
-        local grantedToday = 0
-        local u = wasaiPointsMutateUser(function(user, existed)
-            local today = os.date("%Y-%m-%d")
-            if not existed then
-                user.balance = (user.balance or 0) + cfg.newUserReward
-                user.claudeBalance = (user.claudeBalance or 0) + cfg.newUserReward
-                user.totalEarned = (user.totalEarned or 0) + cfg.newUserReward
-                grantedToday = grantedToday + cfg.newUserReward
-                user.lastLoginDate = today
-            elseif (user.lastLoginDate or "") ~= today then
-                user.balance = (user.balance or 0) + cfg.dailyReward
-                user.claudeBalance = (user.claudeBalance or 0) + cfg.dailyReward
-                user.totalEarned = (user.totalEarned or 0) + cfg.dailyReward
-                grantedToday = grantedToday + cfg.dailyReward
-                user.lastLoginDate = today
-            end
-            user.balance = math.min(user.balance or 0, cfg.maxUserBalance)
-            user.claudeBalance = math.min(user.claudeBalance or 0, cfg.maxUserBalance)
-            
-            if grantedToday == 0 and existed then return grantedToday, true end
-            return grantedToday, false
-        end)
-        return u, grantedToday
-    end
-
-    
-    local function wasaiPointsDeduct(tokens)
-        local isClaude = wasaiLocalAIConfig.isClaude
-        local cfg = wasaiPointsConfigCached()
-        local cost = wasaiPointsCalcCost(cfg, tokens, isClaude)
-        local u, costApplied = wasaiPointsMutateUser(function(user, existed)
-            local bal = isClaude and (user.claudeBalance or 0) or (user.balance or 0)
-            if not existed or bal < cost then return nil, true end
-            if isClaude then
-                user.claudeBalance = user.claudeBalance - cost
-            else
-                user.balance = user.balance - cost
-            end
-            user.totalSpent = (user.totalSpent or 0) + cost
-            user.totalRequests = (user.totalRequests or 0) + 1
-            user.totalTokens = (user.totalTokens or 0) + tokens
-            return cost, false
-        end)
-        if u and costApplied then
-            wasaiPointsBalance = tonumber(u.balance) or 0
-            wasaiClaudeBalance = tonumber(u.claudeBalance) or 0
-            wasaiPointsSynced = true
-            if wasaiPointsLabel then
-                wasaiPointsLabel.Text = tostring(isClaude and wasaiClaudeBalance or wasaiPointsBalance)
-            end
-        end
-        return costApplied
-    end
-
-    
-    local function wasaiPointsRefresh()
-        if not WASAI_POINTS_ENABLED then return end
-        task.spawn(function()
-            for attempt = 1, 3 do
-                local u, grantedToday = wasaiPointsEnsureUser()
-                if type(u) == "table" then
-                    wasaiPointsBalance = tonumber(u.balance) or 0
-                    wasaiClaudeBalance = tonumber(u.claudeBalance) or 0
-                    wasaiPointsSynced = true
-                    local function applyLabel()
-                        if wasaiPointsLabel then
-                            wasaiPointsLabel.Text = tostring(wasaiLocalAIConfig.isClaude and wasaiClaudeBalance or wasaiPointsBalance)
-                        end
-                    end
-                    applyLabel()
-                    if not wasaiPointsLabel then
-                        task.delay(1, function() applyLabel() end)
-                        task.delay(3, function() applyLabel() end)
-                    end
-                    if grantedToday and grantedToday > 0 then
-                        local ndate = os.date("%Y-%m-%d")
-                        local nfile = "DeltaUI/last_daily.dat"
-                        local shown = false
-                        if isfile and readfile and isfile(nfile) then
-                            shown = (readfile(nfile) == ndate)
-                        end
-                        if not shown then
-                            ShowNotification("每日登录 +" .. tostring(grantedToday) .. " 积分", 2.5)
-                            if writefile then
-                                pcall(function()
-                                    if not isfolder("DeltaUI") then makefolder("DeltaUI") end
-                                    writefile(nfile, ndate)
-                                end)
-                            end
-                        end
-                    end
-                    return
-                end
-                task.wait(2)
-            end
-            if wasaiPointsLabel then wasaiPointsLabel.Text = "0" end
-            wasaiPointsSynced = false
-            warn("[DeltaUI][Points] 同步失败: " .. tostring(wasaiGHLastErr))
-            ShowNotification("积分同步失败：" .. tostring(wasaiGHLastErr), 4)
-        end)
-    end
-
-    
-    wasaiEstimateTokens = function(text)
-        local s = tostring(text or "")
-        local cjk = 0
-        local latin = 0
-        for _ in s:gmatch("[\228-\235][\128-\191][\128-\191]") do cjk = cjk + 1 end
-        for _ in s:gmatch("[%z\1-\127]") do latin = latin + 1 end
-        return math.max(1, cjk + math.ceil(latin / 4) + 3)
-    end
-
-    
-    task.spawn(function()
-        task.wait(1.5)
-        wasaiPointsRefresh()
-    end)
-
-    
-    _G.__DeltaUI_tryResumeChat = wasaiPromptResumeChat
-
-    
-    _G.__DeltaUI_redeemToken = function(key, statusCallback)
-        if not WASAI_POINTS_ENABLED then
-            if statusCallback then statusCallback("积分系统未启用，请先填写 GitHub 配置", false) end
-            return
-        end
-        key = tostring(key or ""):gsub("[^%w]", ""):upper()
-        if key == "" then
-            if statusCallback then statusCallback("请输入兑换码", false) end
-            return
-        end
-        task.spawn(function()
-            local ok = false
-            local msg = "兑换失败：无法连接 GitHub"
-            local granted = 0
-            for attempt = 1, 3 do
-                local tokens, sha = wasaiGHReadFile(wasaiPointsPath("tokens.json"))
-                if type(tokens) ~= "table" then break end
-                local pkgs = tokens.packages or {}
-                local pkg = pkgs[key]
-                if not pkg then msg = "兑换码无效" break end
-                if pkg.usedBy and pkg.usedBy ~= "" then msg = "兑换码已被使用" break end
-                local pointsVal = tonumber(pkg.points) or 0
-                if pointsVal <= 0 then msg = "兑换码无效" break end
-                local isClaude = (pkg.type == "claude")
-                pkgs[key] = nil
-                tokens.packages = pkgs
-                if wasaiGHWriteFile(wasaiPointsPath("tokens.json"), wasaiJSONEncode(tokens), sha) then
-                    local u, costApplied = wasaiPointsMutateUser(function(user, existed)
-                        if isClaude then
-                            
-                            if existed then
-                                user.claudeBalance = (user.claudeBalance or 0) + pointsVal
-                            else
-                                user.claudeBalance = pointsVal
-                            end
-                            user.claudeBalance = math.min(user.claudeBalance or 0, wasaiPointsConfigCached().maxUserBalance)
-                        else
-                            if existed then
-                                user.balance = (user.balance or 0) + pointsVal
-                                user.totalEarned = (user.totalEarned or 0) + pointsVal
-                            else
-                                user.balance = pointsVal
-                                user.totalEarned = pointsVal
-                            end
-                            user.balance = math.min(user.balance or 0, wasaiPointsConfigCached().maxUserBalance)
-                        end
-                        return pointsVal, false
-                    end)
-                    if u and costApplied then
-                        granted = pointsVal
-                        wasaiPointsBalance = tonumber(u.balance) or 0
-                        wasaiClaudeBalance = tonumber(u.claudeBalance) or 0
-                        wasaiPointsSynced = true
-                        if _G.__DeltaAI_updateBadge then
-                            pcall(function() _G.__DeltaAI_updateBadge() end)
-                        elseif wasaiPointsLabel then
-                            wasaiPointsLabel.Text = tostring(isClaude and wasaiClaudeBalance or wasaiPointsBalance)
-                        end
-                        ok = true
-                    else
-                        msg = "兑换失败：写入积分失败"
-                    end
-                    break
-                end
-                task.wait(0.4)
-            end
-            if statusCallback then
-                if ok then
-                    statusCallback("兑换成功 +" .. tostring(granted) .. (isClaude and " Claude积分" or " 积分"), true)
-                else statusCallback(msg, false) end
-            end
-        end)
-    end
-
-    
-    _G.__DeltaUI_pointsEnabled = WASAI_POINTS_ENABLED
-    _G.__DeltaUI_setBalance = function(b)
-        wasaiPointsBalance = b
-        wasaiPointsSynced = true
-        if wasaiPointsLabel then wasaiPointsLabel.Text = tostring(b) end
-    end
-    
-    _G.__DeltaUI_precheck = function(messages)
-        local isClaude = wasaiLocalAIConfig.isClaude
-        local estTokens = 0
-        if type(messages) == "table" then
-            for _, m in ipairs(messages) do
-                local c = (type(m) == "table") and (m.content or "") or ""
-                if type(c) == "table" then
-                    for _, part in ipairs(c) do
-                        if type(part) == "table" then c = part.text or part.content or "" end
-                    end
-                end
-                if type(c) == "string" and c ~= "" then estTokens = estTokens + wasaiEstimateTokens(c) end
-            end
-        end
-        if estTokens < 1 then estTokens = 1 end
-        local cfg = wasaiPointsConfigCached()
-        local cost = wasaiPointsCalcCost(cfg, estTokens, isClaude)
-        
-        local u = wasaiPointsEnsureUser()
-        if type(u) ~= "table" then
-            return false, 0, cost, "sync"
-        end
-        local bal = isClaude and (tonumber(u.claudeBalance) or 0) or (tonumber(u.balance) or 0)
-        if bal < cost then return false, bal, cost, "insufficient" end
-        return true, bal, cost, "ok"
-    end
-    
-    _G.__DeltaUI_deduct = function(tokens)
-        return wasaiPointsDeduct(tokens)
-    end
-    
-    _G.__DeltaUI_ensureInit = function()
-        if not WASAI_POINTS_ENABLED then return end
-        if wasaiPointsSynced then return end
-        local u = wasaiPointsEnsureUser()
-        if type(u) == "table" then
-            wasaiPointsBalance = tonumber(u.balance) or 0
-            wasaiClaudeBalance = tonumber(u.claudeBalance) or 0
-            wasaiPointsSynced = true
-            if wasaiPointsLabel then wasaiPointsLabel.Text = tostring(wasaiLocalAIConfig.isClaude and wasaiClaudeBalance or wasaiPointsBalance) end
-        end
-    end
-    
-    
-    _G.__DeltaAI_updateBadge = function()
-        local isClaude = wasaiLocalAIConfig.isClaude
-        local gold = Color3.fromRGB(255, 200, 60)
-        local m = WASAAI_MODELS[wasaiLocalAIConfig.activeModel or "flash"]
-        if wasaiModelLabel then
-            wasaiModelLabel.Text = (m and m.label) or wasaiLocalAIConfig.model
-            wasaiModelLabel.TextColor3 = isClaude and gold or theme.textDim
-        end
-        if wasaiPointsLabel then
-            wasaiPointsLabel.Text = tostring(isClaude and wasaiClaudeBalance or wasaiPointsBalance)
-            wasaiPointsLabel.TextColor3 = isClaude and gold or theme.text
-        end
-        if wasaiPointsIcon then
-            wasaiPointsIcon.ImageColor3 = isClaude and gold or Color3.fromRGB(230, 232, 240)
-        end
-        if wasaiPointsBadgeGradient then
-            local from = isClaude and gold or theme.accent
-            local to = isClaude and Color3.fromRGB(255, 230, 150) or theme.accent2
-            pcall(function()
-                wasaiPointsBadgeGradient.Color = ColorSequence.new({
-                    ColorSequenceKeypoint.new(0, from),
-                    ColorSequenceKeypoint.new(1, to),
-                })
-            end)
-        end
-        if wasaiPointsBadgeStroke then
-            wasaiPointsBadgeStroke.Color = isClaude and gold or theme.accent
-        end
-    end
-    
-    _G.__DeltaAI_updateBadge()
-    
-    
-    __lastGoldState = nil
-    task.spawn(function()
-        while true do
-            task.wait(0.4)
-            local ic = wasaiLocalAIConfig.isClaude
-            if ic ~= __lastGoldState then
-                __lastGoldState = ic
-                if _G.__DeltaAI_updateBadge then
-                    pcall(_G.__DeltaAI_updateBadge)
-                end
-            end
-        end
-    end)
-    _G.__DeltaAI_getBalance = function()
-        if wasaiLocalAIConfig.isClaude then return wasaiClaudeBalance end
-        return wasaiPointsBalance
-    end
-
-end
 
 
 task.spawn(function()
@@ -7387,16 +6948,6 @@ wasaiSendMessage = function()
     end
 
     
-    local useExtForPoints = (loadConfig()).useExternalApi == true
-    if useExtForPoints and WASAI_POINTS_ENABLED and not wasaiLocalAIConfig.bypassPoints and wasaiPointsSynced and wasaiPointsBalance <= 0 then
-        wasaiInputBox.Text = ""
-        wasaiAddMessage(text, true)
-        wasaiSafeSpawn(function()
-            task.wait(0.2)
-            wasaiAddMessage("积分不足，暂时无法继续对话。请充值积分后重试。", false)
-        end)
-        return
-    end
 
         wasaiResetMetrics()
     wasaiStartTiming()

@@ -30,7 +30,7 @@ DeltaPageInfo = {
     title = "AgentLess",
     icon = "atom",
     dataFolder = "AgentLess",
-    version = "1.1.0",
+    version = "1.0.0",
     official = true,        -- 官方页面：宿主据此跳过沙箱
     unrestricted = true,    -- 需要完整环境权限
 }

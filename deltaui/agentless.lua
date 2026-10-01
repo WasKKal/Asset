@@ -5018,6 +5018,160 @@ local function AgentMakeToggleRow(parent, label, getVal, setVal)
     return row
 end
 
+local function AgentRenderWorkPlan(plan)
+    if not AgentMessageFrame then return end
+    local wrap = create("Frame", {
+        Name = "WorkPlanCard",
+        Size = UDim2.new(1, 0, 0, 0),
+        AutomaticSize = Enum.AutomaticSize.Y,
+        BackgroundColor3 = theme.surface,
+        BackgroundTransparency = 0.1,
+        BorderSizePixel = 0,
+        ClipsDescendants = true,
+        Parent = AgentMessageFrame,
+    })
+    corner(theme.radius or 14, wrap)
+    stroke(theme.accent or Color3.fromRGB(56, 189, 248), 1, wrap)
+    create("UIPadding", {PaddingLeft = UDim.new(0, 12), PaddingRight = UDim.new(0, 12), PaddingTop = UDim.new(0, 12), PaddingBottom = UDim.new(0, 12), Parent = wrap})
+    create("UIListLayout", {FillDirection = Enum.FillDirection.Vertical, Padding = UDim.new(0, 8), Parent = wrap})
+    create("TextLabel", {Size = UDim2.new(1, 0, 0, 22), BackgroundTransparency = 1, Text = "◆ 任务计划", TextColor3 = theme.accent or Color3.fromRGB(56, 189, 248), Font = Enum.Font.SourceSansBold, TextSize = 16, TextXAlignment = Enum.TextXAlignment.Left, Parent = wrap})
+    if type(plan) ~= "table" then return end
+    local total = 0
+    local done = 0
+    for i, t in ipairs(plan) do
+        if type(t) ~= "table" then t = {title = tostring(t)} end
+        local status = tostring(t.status or "pending")
+        local prog = tonumber(t.progress) or 0
+        total = total + 1
+        if status == "done" then done = done + 1 end
+        local bc = status == "done" and Color3.fromRGB(34, 197, 94) or (status == "in_progress" and Color3.fromRGB(56, 189, 248) or Color3.fromRGB(148, 163, 184))
+        local row = create("Frame", {Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, BackgroundTransparency = 1, Parent = wrap})
+        create("UIListLayout", {FillDirection = Enum.FillDirection.Vertical, Padding = UDim.new(0, 4), Parent = row})
+        local titleRow = create("Frame", {Size = UDim2.new(1, 0, 0, 20), BackgroundTransparency = 1, Parent = row})
+        create("UIListLayout", {FillDirection = Enum.FillDirection.Horizontal, Padding = UDim.new(0, 6), Parent = titleRow})
+        local badge = create("TextLabel", {Size = UDim2.new(0, 78, 0, 18), BackgroundTransparency = 0.15, BackgroundColor3 = bc, Text = status == "done" and "已完成" or (status == "in_progress" and "进行中" or "待办"), TextColor3 = Color3.fromRGB(255, 255, 255), Font = Enum.Font.SourceSansBold, TextSize = 11, TextXAlignment = Enum.TextXAlignment.Center, Parent = titleRow})
+        corner(9, badge)
+        create("TextLabel", {Size = UDim2.new(1, -86, 0, 18), BackgroundTransparency = 1, Text = tostring(t.title or ("任务 " .. i)), TextColor3 = theme.text or Color3.fromRGB(242, 245, 252), Font = Enum.Font.SourceSansBold, TextSize = 13, TextXAlignment = Enum.TextXAlignment.Left, Parent = titleRow})
+        local barBg = create("Frame", {Size = UDim2.new(1, 0, 0, 6), BackgroundColor3 = theme.surfaceLight or Color3.fromRGB(30, 36, 52), BorderSizePixel = 0, Parent = row})
+        corner(3, barBg)
+        local bar = create("Frame", {Size = UDim2.new(math.max(0, math.min(1, prog / 100)), 0, 1, 0), BackgroundColor3 = bc, BorderSizePixel = 0, Parent = barBg})
+        corner(3, bar)
+        create("TextLabel", {Size = UDim2.new(1, 0, 0, 14), BackgroundTransparency = 1, Text = tostring(prog) .. "%", TextColor3 = theme.textDim or Color3.fromRGB(150, 160, 184), Font = Enum.Font.SourceSans, TextSize = 11, TextXAlignment = Enum.TextXAlignment.Right, Parent = row})
+        if t.description and tostring(t.description) ~= "" then
+            create("TextLabel", {Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, BackgroundTransparency = 1, Text = tostring(t.description), TextColor3 = theme.textDim or Color3.fromRGB(150, 160, 184), Font = Enum.Font.SourceSans, TextSize = 11, TextWrapped = true, TextXAlignment = Enum.TextXAlignment.Left, Parent = row})
+        end
+        if type(t.subtasks) == "table" then
+            for _, st in ipairs(t.subtasks) do
+                local sd = type(st) == "table" and st or {title = tostring(st)}
+                local stTxt = (sd.done and "[x] " or "[ ] ") .. tostring(sd.title or "")
+                create("TextLabel", {Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, BackgroundTransparency = 1, Text = "    " .. stTxt, TextColor3 = sd.done and Color3.fromRGB(34, 197, 94) or (theme.textDim or Color3.fromRGB(150, 160, 184)), Font = Enum.Font.SourceSans, TextSize = 11, TextWrapped = true, TextXAlignment = Enum.TextXAlignment.Left, Parent = row})
+            end
+        end
+    end
+    create("TextLabel", {Size = UDim2.new(1, 0, 0, 16), BackgroundTransparency = 1, Text = "进度总览：" .. done .. " / " .. total .. " 已完成", TextColor3 = theme.accent or Color3.fromRGB(56, 189, 248), Font = Enum.Font.SourceSansBold, TextSize = 12, TextXAlignment = Enum.TextXAlignment.Left, Parent = wrap})
+end
+
+local function AgentShowAskCard(question, options)
+    if not AgentMessageFrame then return end
+    local wrap = create("Frame", {
+        Name = "AskUserCard",
+        Size = UDim2.new(1, 0, 0, 0),
+        AutomaticSize = Enum.AutomaticSize.Y,
+        BackgroundColor3 = theme.surface,
+        BackgroundTransparency = 0.08,
+        BorderSizePixel = 0,
+        ClipsDescendants = true,
+        Parent = AgentMessageFrame,
+    })
+    corner(theme.radius or 14, wrap)
+    stroke(Color3.fromRGB(250, 204, 21), 1, wrap)
+    create("UIPadding", {PaddingLeft = UDim.new(0, 12), PaddingRight = UDim.new(0, 12), PaddingTop = UDim.new(0, 12), PaddingBottom = UDim.new(0, 12), Parent = wrap})
+    create("UIListLayout", {FillDirection = Enum.FillDirection.Vertical, Padding = UDim.new(0, 8), Parent = wrap})
+    create("TextLabel", {Size = UDim2.new(1, 0, 0, 18), BackgroundTransparency = 1, Text = "● AI 提问", TextColor3 = Color3.fromRGB(250, 204, 21), Font = Enum.Font.SourceSansBold, TextSize = 14, TextXAlignment = Enum.TextXAlignment.Left, Parent = wrap})
+    create("TextLabel", {Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, BackgroundTransparency = 1, Text = tostring(question or ""), TextColor3 = theme.text or Color3.fromRGB(242, 245, 252), Font = Enum.Font.SourceSans, TextSize = 14, TextWrapped = true, TextXAlignment = Enum.TextXAlignment.Left, Parent = wrap})
+    local input = create("TextBox", {Size = UDim2.new(1, 0, 0, 36), BackgroundColor3 = theme.surfaceLight or Color3.fromRGB(30, 36, 52), BackgroundTransparency = 0.3, BorderColor3 = theme.border or Color3.fromRGB(52, 62, 88), BorderSizePixel = 1, TextColor3 = theme.text or Color3.fromRGB(242, 245, 252), PlaceholderText = "在此输入你的回复…", PlaceholderColor3 = theme.textDim or Color3.fromRGB(150, 160, 184), Font = Enum.Font.SourceSans, TextSize = 13, ClearTextOnFocus = false, Text = "", Parent = wrap})
+    corner(8, input)
+    local ip = create("UIPadding", {PaddingLeft = UDim.new(0, 10)})
+    ip.Parent = input
+    local sendBtn = create("TextButton", {Size = UDim2.new(1, 0, 0, 32), BackgroundColor3 = theme.accent or Color3.fromRGB(56, 189, 248), Text = "发送回复", TextColor3 = Color3.fromRGB(255, 255, 255), TextSize = 13, Font = Enum.Font.SourceSansBold, BorderSizePixel = 0, Parent = wrap})
+    corner(10, sendBtn)
+    applyGradient(sendBtn, theme.accent, theme.accent2, 120)
+    local function doReply()
+        local reply = input.Text or ""
+        if reply == "" then return end
+        pcall(function() wrap.Visible = false end)
+        pcall(AgentAddMessage, reply, true)
+        local gen = AgentGenerateResponse
+        if type(gen) == "function" then pcall(gen, reply) end
+    end
+    sendBtn.MouseButton1Click:Connect(doReply)
+    if type(options) == "table" and #options > 0 then
+        local optWrap = create("Frame", {Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, BackgroundTransparency = 1, Parent = wrap})
+        create("UIListLayout", {FillDirection = Enum.FillDirection.Vertical, Padding = UDim.new(0, 6), Parent = optWrap})
+        for _, o in ipairs(options) do
+            local ob = create("TextButton", {Size = UDim2.new(1, 0, 0, 30), BackgroundColor3 = theme.surfaceLight or Color3.fromRGB(30, 36, 52), BackgroundTransparency = 0.3, Text = tostring(o), TextColor3 = theme.text or Color3.fromRGB(242, 245, 252), TextSize = 12, Font = Enum.Font.SourceSans, BorderSizePixel = 0, Parent = optWrap})
+            corner(8, ob)
+            ob.MouseButton1Click:Connect(function()
+                pcall(function() input.Text = tostring(o) end)
+                doReply()
+            end)
+        end
+    end
+end
+
+local function AgentShowToolPreview(toolDef)
+    if not AgentMessageFrame then return end
+    if type(toolDef) ~= "table" then return end
+    local fn = toolDef["function"] or toolDef
+    local name = tostring(fn.name or toolDef.name or "")
+    local desc = tostring(fn.description or "")
+    local params = (type(fn.parameters) == "table" and fn.parameters.properties) or nil
+    local wrap = create("Frame", {
+        Name = "ToolPreview_" .. name,
+        Size = UDim2.new(1, 0, 0, 0),
+        AutomaticSize = Enum.AutomaticSize.Y,
+        BackgroundColor3 = theme.surface,
+        BackgroundTransparency = 0.1,
+        BorderSizePixel = 0,
+        ClipsDescendants = true,
+        Parent = AgentMessageFrame,
+    })
+    corner(theme.radius or 14, wrap)
+    stroke(theme.border or Color3.fromRGB(52, 62, 88), 1, wrap)
+    create("UIPadding", {PaddingLeft = UDim.new(0, 12), PaddingRight = UDim.new(0, 12), PaddingTop = UDim.new(0, 12), PaddingBottom = UDim.new(0, 12), Parent = wrap})
+    create("UIListLayout", {FillDirection = Enum.FillDirection.Vertical, Padding = UDim.new(0, 8), Parent = wrap})
+    local head = create("Frame", {Size = UDim2.new(1, 0, 0, 22), BackgroundTransparency = 1, Parent = wrap})
+    create("UIListLayout", {FillDirection = Enum.FillDirection.Horizontal, Padding = UDim.new(0, 6), Parent = head})
+    local ic = GetIcon("terminal", UDim2.new(0, 16, 0, 16), theme.textDim)
+    if ic then ic.Parent = head end
+    create("TextLabel", {Size = UDim2.new(1, -24, 0, 20), BackgroundTransparency = 1, Text = "◆ " .. name, TextColor3 = theme.accent or Color3.fromRGB(56, 189, 248), Font = Enum.Font.SourceSansBold, TextSize = 14, TextXAlignment = Enum.TextXAlignment.Left, Parent = head})
+    if desc ~= "" then
+        create("TextLabel", {Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, BackgroundTransparency = 1, Text = desc, TextColor3 = theme.textDim or Color3.fromRGB(150, 160, 184), Font = Enum.Font.SourceSans, TextSize = 11, TextWrapped = true, TextXAlignment = Enum.TextXAlignment.Left, Parent = wrap})
+    end
+    if type(params) == "table" then
+        local plist = {}
+        for k in pairs(params) do plist[#plist + 1] = k end
+        if #plist > 0 then
+            create("TextLabel", {Size = UDim2.new(1, 0, 0, 14), BackgroundTransparency = 1, Text = "参数: " .. table.concat(plist, ", "), TextColor3 = theme.text or Color3.fromRGB(242, 245, 252), Font = Enum.Font.SourceSans, TextSize = 11, TextXAlignment = Enum.TextXAlignment.Left, Parent = wrap})
+        end
+    end
+    local sample = {name = name}
+    if type(params) == "table" then
+        for k, v in pairs(params) do
+            local t = (type(v) == "table" and v.type) or "string"
+            sample[k] = (t == "number" and 0) or (t == "boolean" and true) or "示例"
+        end
+    end
+    local sampleJson = "{}"
+    pcall(function() sampleJson = svc.HttpService:JSONEncode(sample) end)
+    local codeBg = create("Frame", {Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, BackgroundColor3 = theme.bg or Color3.fromRGB(7, 9, 15), BackgroundTransparency = 0.5, BorderSizePixel = 0, Parent = wrap})
+    corner(8, codeBg)
+    create("UIPadding", {PaddingLeft = UDim.new(0, 10), PaddingRight = UDim.new(0, 10), PaddingTop = UDim.new(0, 8), PaddingBottom = UDim.new(0, 8), Parent = codeBg})
+    create("TextLabel", {Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, BackgroundTransparency = 1, Text = "调用示例:\n" .. sampleJson, TextColor3 = Color3.fromRGB(125, 211, 252), Font = Enum.Font.SourceSans, TextSize = 11, TextXAlignment = Enum.TextXAlignment.Left, TextWrapped = true, Parent = codeBg})
+    create("TextLabel", {Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, BackgroundTransparency = 1, Text = "[模拟结果] 该工具调用后，将在此区域展示其返回数据 / 终端输出 / 文件内容等 UI。", TextColor3 = theme.textDim or Color3.fromRGB(150, 160, 184), Font = Enum.Font.SourceSans, TextSize = 11, TextWrapped = true, TextXAlignment = Enum.TextXAlignment.Left, Parent = wrap})
+end
+
+
 local function AgentReadCfg()
     local ok, c = pcall(loadConfig)
     if ok and type(c) == "table" then return c end
@@ -5028,6 +5182,47 @@ local function AgentWriteCfg(k, v)
     c[k] = v
     pcall(saveConfig, c)
 end
+local AgentDebugBar = nil
+local function AgentEnsureDebugBar()
+    if AgentDebugBar then return end
+    local bar = create("ScrollingFrame", {
+        Name = "DebugToolBar",
+        Size = UDim2.new(1, -134, 0, 26),
+        Position = UDim2.new(0, 122, 1, -86),
+        BackgroundTransparency = 1,
+        BorderSizePixel = 0,
+        ScrollBarThickness = 4,
+        ScrollingDirection = Enum.ScrollingDirection.X,
+        AutomaticCanvasSize = Enum.AutomaticSize.X,
+        CanvasSize = UDim2.new(0, 0, 0, 0),
+        VerticalScrollBarInset = Enum.ScrollBarInset.None,
+        Parent = AgentMainFrame,
+        ZIndex = 6,
+        Visible = false,
+    })
+    create("UIListLayout", {FillDirection = Enum.FillDirection.Horizontal, Padding = UDim.new(0, 6), Parent = bar})
+    local tools = AGENT_DEEPSEEK_TOOLS or {}
+    for _, td in ipairs(tools) do
+        local fn = td["function"] or td
+        local nm = tostring(fn.name or "")
+        if nm ~= "" then
+            local b = create("TextButton", {Size = UDim2.new(0, 18 + #nm * 9, 0, 22), BackgroundColor3 = theme.surfaceLight or Color3.fromRGB(30, 36, 52), BackgroundTransparency = 0.4, BorderSizePixel = 0, Text = nm, TextColor3 = theme.textDim or Color3.fromRGB(150, 160, 184), TextSize = 11, Font = Enum.Font.SourceSans, AutoButtonColor = false, Parent = bar})
+            corner(7, b)
+            b.MouseButton1Click:Connect(function()
+                pcall(AgentShowToolPreview, td)
+                pcall(function() if AgentMessageFrame and AgentMessageFrame.CanvasSize then AgentMessageFrame.CanvasPosition = Vector2.new(0, AgentMessageFrame.CanvasSize.Y.Offset) end end)
+            end)
+        end
+    end
+    AgentDebugBar = bar
+end
+
+local function AgentApplyDebugBar()
+    AgentEnsureDebugBar()
+    local on = not not AgentReadCfg().debug_mode
+    pcall(function() if AgentDebugBar then AgentDebugBar.Visible = on end end)
+end
+
 
 local function AgentBuildProviderSection(panel)
     local card = AgentMakeCard(panel, "AI 服务商管理")
@@ -5151,6 +5346,8 @@ local function AgentBuildGeneralSection(panel)
         function(v) AgentWriteCfg("thinking_mode", v) end)
     AgentMakeToggleRow(card, "训练数据上传", function() return AgentReadCfg().training_upload == true end,
         function(v) AgentWriteCfg("training_upload", v) end)
+    AgentMakeToggleRow(card, "调试模式", function() return AgentReadCfg().debug_mode == true end,
+        function(v) AgentWriteCfg("debug_mode", v); AgentApplyDebugBar() end)
     create("TextLabel", {
         Size = UDim2.new(1, 0, 0, 28),
         BackgroundTransparency = 1,
@@ -5641,6 +5838,8 @@ AgentApplyThinkPill = function(state)
 end
 
 AgentApplyThinkPill(AgentDeepThinkingEnabled)
+
+AgentApplyDebugBar()
 
 -- 供设置卡等外部开关同步胶囊状态
 _G.__DeltaAI_updateThinkPill = AgentApplyThinkPill

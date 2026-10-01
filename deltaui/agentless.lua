@@ -2826,7 +2826,10 @@ local AGENT_DEEPSEEK_TOOLS = {
     {type="function", ["function"]={name="GotRemote", description="捕获FireServer/InvokeServer调用。进入等待交互后提示用户手动操作一次，AI自动捕获并生成Lua。忽略ping/fps等无用Remote。", parameters={type="object", properties={goal={type="string", description="目标操作说明，如'出售物品'/'领取奖励'"}, timeout={type="number", description="等待秒数，默认30，最大120"}}, required={"goal"}}}},
 
 {type="function",["function"]={name="go_to",description="移动玩家到目标。策略：直接传送→平滑传送→慢速传送→步行。目标可用path、position{x,y,z}或x/y/z，三者互斥仅填其一。",parameters={type="object",properties={path={type="string",description="目标实例路径，如game.Workspace.SellPoint"},position={type="object",description="目标坐标{x,y,z}",properties={x={type="number"},y={type="number"},z={type="number"}}},x={type="number",description="x坐标，必须搭配y、z同时使用"},y={type="number",description="y坐标，必须搭配x、z同时使用"},z={type="number",description="z坐标，必须搭配x、y同时使用"}}}}},
-    {type="function", ["function"]={name="click_gui", description="模拟点击GUI按钮。参数三选一：path(实例路径)、scaleX/scaleY(0-1相对坐标)、x/y(屏幕绝对像素)。", parameters={type="object", properties={path={type="string", description="GUI元素实例路径"}, scaleX={type="number", description="相对X(0-1)"}, scaleY={type="number", description="相对Y(0-1)"}, x={type="number", description="屏幕绝对X像素"}, y={type="number", description="屏幕绝对Y像素"}}}}}
+    {type="function", ["function"]={name="click_gui", description="模拟点击GUI按钮。参数三选一：path(实例路径)、scaleX/scaleY(0-1相对坐标)、x/y(屏幕绝对像素)。", parameters={type="object", properties={path={type="string", description="GUI元素实例路径"}, scaleX={type="number", description="相对X(0-1)"}, scaleY={type="number", description="相对Y(0-1)"}, x={type="number", description="屏幕绝对X像素"}, y={type="number", description="屏幕绝对Y像素"}}}}},
+    {type="function", ["function"]={name="ask_user", description="向用户提问并等待回复。当需要用户补充信息、确认关键决策或选择方向时调用。调用后交互会暂停，等待用户在界面中输入回复后再继续。", parameters={type="object", properties={question={type="string", description="要问用户的问题"}, options={type="array", description="可选：提供的选项（字符串数组）", items={type="string"}}}, required={"question"}}}},
+    {type="function", ["function"]={name="work_plan", description="以 JSON 制定或更新任务计划与进度。请在 plan 中返回结构化任务列表，每项含 id/title/status/progress/description/subtasks。status: pending 待办 / in_progress 进行中 / done 已完成；progress: 0-100。", parameters={type="object", properties={plan={type="array", description="任务列表", items={type="object", properties={id={type="string", description="任务唯一 id"}, title={type="string", description="任务标题"}, status={type="string", description="pending 待办 / in_progress 进行中 / done 已完成"}, progress={type="number", description="进度 0-100"}, description={type="string", description="任务说明"}, subtasks={type="array", description="子任务（可选）", items={type="object", properties={title={type="string", description="子任务标题"}, done={type="boolean", description="是否完成"}}}}}}}}, required={"plan"}}}}
+
 }
 
 local function AgentSanitizeUTF8(s)
@@ -4507,6 +4510,27 @@ local function AgentExecuteToolCall(tool, args)
 
         elseif tool == "click_gui" or tool == "click" then
             return AgentClickGui(args)
+        elseif tool == "ask_user" then
+            local q = AgentSafeString(tostring(args.question or "我有个问题想问你"), 200)
+            local opts = {}
+            if type(args.options) == "table" then
+                for _, o in ipairs(args.options) do
+                    if tostring(o) ~= "" then opts[#opts + 1] = tostring(o) end
+                end
+            end
+            pcall(AgentShowAskCard, q, opts)
+            return "[ASK_USER] 已向用户弹出提问框，等待用户在界面中输入回复。请简短确认你已提问完毕，不要继续调用工具或执行操作，等待用户回复后再继续。"
+        elseif tool == "work_plan" then
+            local plan = args.plan
+            if type(plan) == "string" then
+                local okP, p = pcall(function() return svc.HttpService:JSONDecode(plan) end)
+                if okP then plan = p end
+            end
+            if type(plan) ~= "table" then
+                return "work_plan 错误：plan 参数不是有效的数组/对象"
+            end
+            pcall(AgentRenderWorkPlan, plan)
+            return "已生成任务计划，共 " .. tostring(#plan) .. " 个任务，已在界面以看板形式展示。"
         end
 
         return "未知工具: " .. tostring(tool)

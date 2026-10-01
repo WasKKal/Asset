@@ -2196,6 +2196,289 @@ local AGENT_PROVIDERS = {
     },
 }
 
+-- ===== 思考级别能力表（依据各服务商官方 API 文档整理的「思考 / 推理」能力）=====
+-- switchable = false 表示当前模型不支持「思考级别切换」，界面将显示「当前模型不支持该操作」
+-- style 决定请求体中如何注入级别参数：qwen/hunyuan 用 thinking_budget，其余用 OpenAI 风格 reasoning_effort
+-- 注：以下均为全局，避免主函数局部变量超过 Lua 5.1 的 200 上限
+AgentUI = { objects = {}, presetFrame = nil, presetStatus = nil, thinkFrame = nil, currentPresetId = nil }
+AGENT_THINKING_CAPS = {
+    flash   = {switchable = false},
+    pro     = {switchable = false},
+    claude  = {switchable = false},
+    aiagent = {switchable = false},
+    qwen    = {switchable = true, levels = {"低", "中", "高"}, style = "qwen"},
+    glm     = {switchable = false},
+    kimi    = {switchable = false},
+    minimax = {switchable = false},
+    baichuan= {switchable = false},
+    doubao  = {switchable = true, levels = {"低", "中", "高"}, style = "reasoning_effort"},
+    hunyuan = {switchable = true, levels = {"低", "中", "高"}, style = "hunyuan"},
+    custom  = {switchable = true, levels = {"低", "中", "高"}, style = "reasoning_effort"},
+    _params = {
+        budget = {["低"] = 2048, ["中"] = 4096, ["高"] = 8192},
+        effort = {["低"] = "low", ["中"] = "medium", ["高"] = "high"},
+    },
+}
+
+-- 从 chat/completions（或 messages）端点推导出 API 基址（用于拼接 /models）
+function AgentBaseFromEndpoint(endpoint)
+    endpoint = tostring(endpoint or ""):gsub("%s+", "")
+    endpoint = endpoint:gsub("/+$", "")
+    endpoint = endpoint:gsub("/chat/completions$", ""):gsub("/chat/completions", "")
+    endpoint = endpoint:gsub("/messages$", "")
+    return endpoint
+end
+
+-- 持久化某预设服务商拉取到的模型列表
+function AgentPersistPresetModels(id, list)
+    if type(list) ~= "table" then return end
+    local cfg = AgentReadCfg()
+    cfg.providerModels = cfg.providerModels or {}
+    cfg.providerModels[tostring(id)] = list
+    pcall(saveConfig, cfg)
+end
+
+-- 选中预设服务商下的某个具体模型
+function AgentApplyPresetModel(id, model)
+    pcall(AgentApplyModel, id)
+    if not model then return true end
+    if AGENT_PROVIDERS[id] then AGENT_PROVIDERS[id].model = model end
+    AgentLocalAIConfig.model = model
+    local cfg = AgentReadCfg()
+    cfg.providerSelectedModel = cfg.providerSelectedModel or {}
+    cfg.providerSelectedModel[tostring(id)] = model
+    cfg.activeModel = id
+    pcall(saveConfig, cfg)
+    pcall(function()
+        if AgentModelLabel then
+            local m = AGENT_PROVIDERS[id] or {}
+            AgentModelLabel.Text = (m.label or id) .. " · " .. tostring(model)
+            AgentModelLabel.TextColor3 = (m.isClaude == true) and Color3.fromRGB(255, 200, 60) or (theme.textDim or Color3.fromRGB(150, 160, 184))
+        end
+    end)
+    return true
+end
+
+-- 拉取某预设服务商的模型列表
+function AgentFetchPresetModels(id)
+    local m = AGENT_PROVIDERS[id]
+    if not m then return end
+    local base = AgentBaseFromEndpoint(m.endpoint)
+    local key = m.apiKey or ""
+    pcall(function()
+        if AgentUI.presetStatus then
+            AgentUI.presetStatus.Text = "正在拉取 " .. AgentProviderLabel(id) .. " 模型列表..."
+            AgentUI.presetStatus.TextColor3 = theme.textDim or Color3.fromRGB(150, 160, 184)
+        end
+    end)
+    local okF, a, b = pcall(AgentFetchModels, base, key)
+    if not okF then
+        pcall(function() if AgentUI.presetStatus then AgentUI.presetStatus.Text = "拉取异常: " .. tostring(a); AgentUI.presetStatus.TextColor3 = theme.red or Color3.fromRGB(255, 82, 104) end end)
+        return
+    end
+    if a == false then
+        pcall(function() if AgentUI.presetStatus then AgentUI.presetStatus.Text = "拉取失败: " .. tostring(b); AgentUI.presetStatus.TextColor3 = theme.red or Color3.fromRGB(255, 82, 104) end end)
+        return
+    end
+    local models = b
+    if type(models) ~= "table" or #models == 0 then
+        pcall(function() if AgentUI.presetStatus then AgentUI.presetStatus.Text = "未获取到模型"; AgentUI.presetStatus.TextColor3 = theme.red or Color3.fromRGB(255, 82, 104) end end)
+        return
+    end
+    AgentPersistPresetModels(id, models)
+    if AgentUI.currentPresetId == id then AgentRenderPresetModelList(id, models) end
+    pcall(function() if AgentUI.presetStatus then AgentUI.presetStatus.Text = "已拉取 " .. tostring(#models) .. " 个模型，点击选择"; AgentUI.presetStatus.TextColor3 = theme.accent or Color3.fromRGB(56, 189, 248) end end)
+end
+
+-- 把模型列表渲染到共享面板
+function AgentRenderPresetModelList(id, list)
+    if not AgentUI.presetFrame then return end
+    pcall(function()
+        for _, c in ipairs(AgentUI.presetFrame:GetChildren()) do
+            if c:IsA("TextButton") or c:IsA("TextLabel") then c:Destroy() end
+        end
+        local cfg = AgentReadCfg()
+        local sel = (cfg.providerSelectedModel and cfg.providerSelectedModel[tostring(id)]) or (AGENT_PROVIDERS[id] and AGENT_PROVIDERS[id].model) or ""
+        for _, mid in ipairs(list) do
+            local active = (mid == sel)
+            local mb = create("TextButton", {
+                Name = "PM_" .. tostring(mid),
+                Size = UDim2.new(1, 0, 0, 26),
+                BackgroundColor3 = active and (theme.accent or Color3.fromRGB(56, 189, 248)) or (theme.surface or Color3.fromRGB(22, 27, 40)),
+                BackgroundTransparency = active and 0 or 0.3,
+                BorderSizePixel = 0,
+                Text = tostring(mid),
+                TextColor3 = active and Color3.fromRGB(255, 255, 255) or (theme.text or Color3.fromRGB(242, 245, 252)),
+                Font = Enum.Font.SourceSans,
+                TextSize = 11,
+                TextXAlignment = Enum.TextXAlignment.Left,
+                Parent = AgentUI.presetFrame,
+            })
+            corner(6, mb)
+            create("UIPadding", { PaddingLeft = UDim.new(0, 8), Parent = mb })
+            mb.MouseButton1Click:Connect(function()
+                pcall(function()
+                    local okA, ca = pcall(AgentApplyPresetModel, id, mid)
+                    if okA and ca ~= false then
+                        pcall(function() if AgentUI.presetStatus then AgentUI.presetStatus.Text = "已应用：" .. tostring(mid); AgentUI.presetStatus.TextColor3 = theme.accent or Color3.fromRGB(56, 189, 248) end end)
+                        AgentRefreshPresetModels(id)
+                        AgentRefreshThinkingControl()
+                    end
+                end)
+            end)
+        end
+    end)
+end
+
+-- 刷新共享预设模型面板（优先缓存；无缓存且有 Key 时自动拉取）
+function AgentRefreshPresetModels(id)
+    AgentUI.currentPresetId = id
+    if not AgentUI.presetFrame then return end
+    pcall(function()
+        for _, c in ipairs(AgentUI.presetFrame:GetChildren()) do
+            if c:IsA("TextButton") or c:IsA("TextLabel") then c:Destroy() end
+        end
+        local cfg = AgentReadCfg()
+        local cached = (cfg.providerModels and type(cfg.providerModels[tostring(id)]) == "table") and cfg.providerModels[tostring(id)] or nil
+        local m = AGENT_PROVIDERS[id]
+        if cached and #cached > 0 then
+            AgentRenderPresetModelList(id, cached)
+            pcall(function() if AgentUI.presetStatus then AgentUI.presetStatus.Text = "已加载 " .. tostring(#cached) .. " 个模型（来自缓存）"; AgentUI.presetStatus.TextColor3 = theme.textDim or Color3.fromRGB(150, 160, 184) end end)
+        else
+            create("TextLabel", {
+                Size = UDim2.new(1, 0, 0, 22),
+                BackgroundTransparency = 1,
+                Text = "暂无模型：点击上方「拉取」加载（选择服务商后会自动加载）",
+                TextColor3 = theme.textDim or Color3.fromRGB(150, 160, 184),
+                Font = Enum.Font.SourceSans,
+                TextSize = 11,
+                TextXAlignment = Enum.TextXAlignment.Left,
+                Parent = AgentUI.presetFrame,
+            })
+            pcall(function() if AgentUI.presetStatus then AgentUI.presetStatus.Text = "" end end)
+            if m and m.apiKey and m.apiKey ~= "" then
+                if type(task) == "table" and type(task.spawn) == "function" then
+                    task.spawn(AgentFetchPresetModels, id)
+                else
+                    pcall(AgentFetchPresetModels, id)
+                end
+            end
+        end
+    end)
+end
+
+-- 读取当前模型的思考级别能力（自定义模型会从官方 API 读取到的能力覆盖）
+function AgentGetThinkingCaps(id)
+    id = tostring(id or AgentLocalAIConfig.activeModel or "flash")
+    local caps = AGENT_THINKING_CAPS[id] or AGENT_THINKING_CAPS.flash
+    if id == "custom" then
+        local saved = AgentReadCfg()
+        if saved and type(saved.customThinkingSwitchable) == "boolean" then
+            caps = { switchable = saved.customThinkingSwitchable, levels = AGENT_THINKING_CAPS.custom.levels, style = AGENT_THINKING_CAPS.custom.style }
+        end
+    end
+    return caps
+end
+
+-- 从官方 API 返回的原始模型对象推断其是否支持思考级别切换
+function AgentDetectCustomThinking(modelId, obj)
+    local switchable = true
+    if type(obj) == "table" then
+        if type(obj.capabilities) == "table" then
+            local hasReasoning = false
+            for _, c in ipairs(obj.capabilities) do
+                if tostring(c):lower():find("reason") then hasReasoning = true end
+            end
+            if #obj.capabilities > 0 and not hasReasoning then switchable = false end
+        end
+    end
+    return switchable
+end
+
+-- 按当前模型能力与所选级别，把思考参数注入请求体
+function AgentInjectThinkingLevel(body)
+    if type(body) ~= "table" then return end
+    local cfg = AgentReadCfg()
+    local lvl = cfg.thinkingLevel
+    local caps = AgentGetThinkingCaps(AgentLocalAIConfig.activeModel)
+    if not (caps and caps.switchable) then return end
+    if type(lvl) ~= "string" then return end
+    local thinkingOn = (AgentLocalAIConfig.thinkingDisabled == false) or (cfg.thinkingMode == true)
+    if not thinkingOn then return end
+    if caps.style == "qwen" or caps.style == "hunyuan" then
+        body.enable_thinking = true
+        body.thinking_budget = AGENT_THINKING_CAPS._params.budget[lvl] or 4096
+    else
+        body.reasoning_effort = AGENT_THINKING_CAPS._params.effort[lvl] or "medium"
+    end
+end
+
+-- 刷新「思考级别」控件（不支持时显示「当前模型不支持该操作」）
+function AgentRefreshThinkingControl()
+    if not AgentUI.thinkFrame then return end
+    pcall(function()
+        for _, c in ipairs(AgentUI.thinkFrame:GetChildren()) do c:Destroy() end
+        local id = AgentLocalAIConfig.activeModel or "flash"
+        local caps = AgentGetThinkingCaps(id)
+        create("TextLabel", {
+            Size = UDim2.new(1, 0, 0, 18),
+            BackgroundTransparency = 1,
+            Text = "当前模型：" .. AgentProviderLabel(id) .. " · " .. tostring(AgentLocalAIConfig.model or ""),
+            TextColor3 = theme.textDim or Color3.fromRGB(150, 160, 184),
+            Font = Enum.Font.SourceSans,
+            TextSize = 11,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            Parent = AgentUI.thinkFrame,
+        })
+        if not (caps and caps.switchable) then
+            create("TextLabel", {
+                Size = UDim2.new(1, 0, 0, 24),
+                BackgroundTransparency = 1,
+                Text = "当前模型不支持该操作",
+                TextColor3 = theme.red or Color3.fromRGB(255, 82, 104),
+                Font = Enum.Font.SourceSansBold,
+                TextSize = 13,
+                TextXAlignment = Enum.TextXAlignment.Left,
+                Parent = AgentUI.thinkFrame,
+            })
+            return
+        end
+        local row = create("Frame", {
+            Size = UDim2.new(1, 0, 0, 30),
+            BackgroundTransparency = 1,
+            Parent = AgentUI.thinkFrame,
+        })
+        create("UIListLayout", { FillDirection = Enum.FillDirection.Horizontal, Padding = UDim.new(0, 6), Parent = row })
+        local levels = caps.levels or {"低", "中", "高"}
+        local cur = AgentReadCfg().thinkingLevel
+        for _, lv in ipairs(levels) do
+            local active = (cur == lv)
+            local b = create("TextButton", {
+                Size = UDim2.new(0, 60, 0, 26),
+                BackgroundColor3 = active and (theme.accent or Color3.fromRGB(56, 189, 248)) or (theme.surfaceLight or Color3.fromRGB(30, 36, 52)),
+                BackgroundTransparency = active and 0 or 0.3,
+                BorderSizePixel = 0,
+                Text = tostring(lv),
+                TextColor3 = active and Color3.fromRGB(255, 255, 255) or (theme.text or Color3.fromRGB(242, 245, 252)),
+                Font = Enum.Font.SourceSans,
+                TextSize = 12,
+                Parent = row,
+            })
+            corner(8, b)
+            b.MouseButton1Click:Connect(function()
+                pcall(function()
+                    AgentWriteCfg("thinkingLevel", lv)
+                    AgentApplyThinkPill(true)
+                    local setter = _G.__DeltaAI_setThinkingMode
+                    if type(setter) == "function" then pcall(setter, true) end
+                    AgentRefreshThinkingControl()
+                    if type(ShowNotification) == "function" then ShowNotification("思考级别：" .. lv, 1.0) end
+                end)
+            end)
+        end
+    end)
+end
+
 function AgentApplyModel(id)
     local m = AGENT_PROVIDERS[id] or AGENT_PROVIDERS.flash
     AgentLocalAIConfig.model = m.model
@@ -2218,6 +2501,15 @@ end
 local _aiModelSaved = loadConfig()
 if _aiModelSaved and _aiModelSaved.activeModel and AGENT_PROVIDERS[_aiModelSaved.activeModel] then
     AgentApplyModel(_aiModelSaved.activeModel)
+    -- 恢复该服务商此前选中的具体模型
+    local selMap = _aiModelSaved.providerSelectedModel
+    if type(selMap) == "table" and type(selMap[_aiModelSaved.activeModel]) == "string" then
+        local sid = _aiModelSaved.activeModel
+        if AGENT_PROVIDERS[sid] then
+            AGENT_PROVIDERS[sid].model = selMap[sid]
+            AgentLocalAIConfig.model = selMap[sid]
+        end
+    end
 end
 
 local AgentLocalAIState = {
@@ -2915,11 +3207,14 @@ local function AgentFetchModels(baseUrl, apiKey)
         return false, "返回数据解析失败"
     end
     local list = {}
+    AgentUI.objects[baseUrl] = AgentUI.objects[baseUrl] or {}
+    local objMap = AgentUI.objects[baseUrl]
     local function ingest(t)
         if type(t) ~= "table" then return end
         for _, it in ipairs(t) do
             if type(it) == "table" and type(it.id) == "string" and it.id ~= "" then
                 list[#list + 1] = it.id
+                objMap[it.id] = it
             elseif type(it) == "string" and it ~= "" then
                 list[#list + 1] = it
             end
@@ -2984,6 +3279,14 @@ function AgentApplyCustomProvider(baseUrl, apiKey, model)
             AgentModelLabel.Text = AgentProviderLabel("custom") .. " · " .. model
             AgentModelLabel.TextColor3 = theme.textDim or Color3.fromRGB(150, 160, 184)
         end
+    end)
+    -- 从官方 API 返回的原始模型对象推断该自定义模型是否支持思考级别切换
+    pcall(function()
+        local obj = (AgentUI.objects[baseUrl] and AgentUI.objects[baseUrl][model]) or nil
+        local sw = AgentDetectCustomThinking(model, obj)
+        local cfg = AgentReadCfg()
+        cfg.customThinkingSwitchable = sw
+        pcall(saveConfig, cfg)
     end)
     return true
 end
@@ -3349,6 +3652,9 @@ local function AgentDeepSeekChat(messages, tools, opts)
             body.tool_choice = "auto"
         end
     end
+
+    -- 注入思考级别参数（按当前模型能力判定是否支持）
+    pcall(AgentInjectThinkingLevel, body)
 
     local okEnc, bodyJson = pcall(AgentJSONEncode, body)
     if not okEnc or type(bodyJson) ~= "string" or bodyJson == "" then
@@ -5510,7 +5816,7 @@ local function AgentBuildProviderSection(panel)
             Parent = listFrame,
         })
         local sel = create("TextButton", {
-            Size = UDim2.new(0, 150, 0, 26),
+            Size = UDim2.new(0, 120, 0, 26),
             Position = UDim2.new(0, 0, 0, 2),
             BackgroundColor3 = (cur == id) and (theme.accent or Color3.fromRGB(56, 189, 248)) or (theme.surfaceLight or Color3.fromRGB(30, 36, 52)),
             BackgroundTransparency = (cur == id) and 0 or 0.3,
@@ -5523,8 +5829,8 @@ local function AgentBuildProviderSection(panel)
         })
         corner(8, sel)
         local keyBox = create("TextBox", {
-            Size = UDim2.new(1, -160, 0, 26),
-            Position = UDim2.new(0, 156, 0, 2),
+            Size = UDim2.new(1, -188, 0, 26),
+            Position = UDim2.new(0, 126, 0, 2),
             BackgroundColor3 = theme.surfaceLight or Color3.fromRGB(30, 36, 52),
             BackgroundTransparency = 0.3,
             BorderColor3 = theme.border or Color3.fromRGB(52, 62, 88),
@@ -5541,6 +5847,19 @@ local function AgentBuildProviderSection(panel)
         })
         corner(6, keyBox)
         create("UIPadding", { PaddingLeft = UDim.new(0, 8), Parent = keyBox })
+        local fetchBtn = create("TextButton", {
+            Size = UDim2.new(0, 60, 0, 26),
+            Position = UDim2.new(1, -60, 0, 2),
+            BackgroundColor3 = theme.surface or Color3.fromRGB(22, 27, 40),
+            BackgroundTransparency = 0.3,
+            BorderSizePixel = 0,
+            Text = "拉取",
+            TextColor3 = theme.text or Color3.fromRGB(242, 245, 252),
+            Font = Enum.Font.SourceSans,
+            TextSize = 11,
+            Parent = row,
+        })
+        corner(6, fetchBtn)
         sel.MouseButton1Click:Connect(function()
             pcall(function()
                 AgentApplyModel(id)
@@ -5553,7 +5872,12 @@ local function AgentBuildProviderSection(panel)
                 sel.BackgroundTransparency = 0
                 sel.TextColor3 = Color3.fromRGB(255, 255, 255)
                 info.Text = "当前服务商：" .. AgentProviderLabel(id)
+                AgentRefreshPresetModels(id)
+                AgentRefreshThinkingControl()
             end)
+        end)
+        fetchBtn.MouseButton1Click:Connect(function()
+            pcall(AgentFetchPresetModels, id)
         end)
         keyBox.FocusLost:Connect(function()
             pcall(function()
@@ -5567,6 +5891,41 @@ local function AgentBuildProviderSection(panel)
         end)
         providerButtons[#providerButtons + 1] = sel
     end
+
+    -- ===== 预设服务商模型列表（选择服务商后自动加载 / 点「拉取」刷新）=====
+    create("TextLabel", {
+        Size = UDim2.new(1, 0, 0, 16),
+        BackgroundTransparency = 1,
+        Text = "预设模型列表（选择服务商后自动加载，或点右侧「拉取」）",
+        TextColor3 = theme.text or Color3.fromRGB(242, 245, 252),
+        Font = Enum.Font.SourceSans,
+        TextSize = 12,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        Parent = card,
+    })
+    AgentUI.presetStatus = create("TextLabel", {
+        Size = UDim2.new(1, 0, 0, 16),
+        BackgroundTransparency = 1,
+        Text = "",
+        TextColor3 = theme.textDim or Color3.fromRGB(150, 160, 184),
+        Font = Enum.Font.SourceSans,
+        TextSize = 11,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        Parent = card,
+    })
+    AgentUI.presetFrame = create("ScrollingFrame", {
+        Size = UDim2.new(1, 0, 0, 130),
+        BackgroundColor3 = theme.surfaceLight or Color3.fromRGB(30, 36, 52),
+        BackgroundTransparency = 0.4,
+        BorderSizePixel = 0,
+        ScrollBarThickness = 4,
+        ScrollBarImageColor3 = theme.textDim or Color3.fromRGB(150, 160, 184),
+        Parent = card,
+        Visible = true,
+    })
+    corner(8, AgentUI.presetFrame)
+    create("UIListLayout", { FillDirection = Enum.FillDirection.Vertical, Padding = UDim.new(0, 5), Parent = AgentUI.presetFrame })
+    create("UIPadding", { PaddingLeft = UDim.new(0, 8), PaddingRight = UDim.new(0, 8), PaddingTop = UDim.new(0, 8), PaddingBottom = UDim.new(0, 8), Parent = AgentUI.presetFrame })
 
     -- ===== 自定义服务商 =====
     create("TextLabel", {
@@ -5733,6 +6092,7 @@ local function AgentBuildProviderSection(panel)
                         refreshCustomHighlight()
                         statusLabel.Text = "已应用自定义模型：" .. tostring(mid)
                         statusLabel.TextColor3 = theme.accent or Color3.fromRGB(56, 189, 248)
+                        AgentRefreshThinkingControl()
                     end)
                 end)
             end
@@ -5767,14 +6127,42 @@ local function AgentBuildProviderSection(panel)
                     if okA and ca ~= false then
                         statusLabel.Text = "已应用：" .. tostring(AgentLocalAIConfig.customActiveModel)
                         statusLabel.TextColor3 = theme.accent or Color3.fromRGB(56, 189, 248)
+                        AgentRefreshThinkingControl()
                     end
                 end)
             end)
         end
     end)
 
+    -- ===== 思考级别切换 =====
+    do
+        local thinkCard = AgentMakeCard(panel, "思考级别")
+        create("TextLabel", {
+            Size = UDim2.new(1, 0, 0, 28),
+            BackgroundTransparency = 1,
+            Text = "支持的模型可切换 低 / 中 / 高 思考级别；不支持的模型将提示「当前模型不支持该操作」",
+            TextColor3 = theme.textDim or Color3.fromRGB(150, 160, 184),
+            Font = Enum.Font.SourceSans,
+            TextSize = 11,
+            TextWrapped = true,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            Parent = thinkCard,
+        })
+        AgentUI.thinkFrame = create("Frame", {
+            Size = UDim2.new(1, 0, 0, 0),
+            AutomaticSize = Enum.AutomaticSize.Y,
+            BackgroundTransparency = 1,
+            Parent = thinkCard,
+        })
+        create("UIListLayout", { FillDirection = Enum.FillDirection.Vertical, Padding = UDim.new(0, 6), Parent = AgentUI.thinkFrame })
+    end
+
     AgentMakeToggleRow(card, "启用外部 API", function() return AgentReadCfg().useExternalApi == true end,
         function(v) AgentWriteCfg("useExternalApi", v); pcall(updateExternalApiUI, v) end)
+
+    -- 初始化：恢复当前服务商的模型列表与思考级别控件
+    pcall(AgentRefreshPresetModels, cur)
+    pcall(AgentRefreshThinkingControl)
     return card
 end
 
@@ -8058,6 +8446,9 @@ local function buildAgentLessSettings(env, G)
     local rowTraining = makeSettingRow("training_upload", "training_upload_desc", 4)
     if rowTraining then rowTraining.Parent = card end
 
+    local rowThinkingLevel = makeSettingRow("thinking_level", "thinking_level_desc", 5)
+    if rowThinkingLevel then rowThinkingLevel.Parent = card end
+
     local function applyModelLabelVisible(state)
         local lbl = env.AgentModelLabel
         if lbl then pcall(function() lbl.Visible = state end) end
@@ -8072,7 +8463,48 @@ local function buildAgentLessSettings(env, G)
             rowThinking.Visible = state
             rowThinking.Size = UDim2.new(1, 0, 0, state and 54 or 0)
         end
+        if rowThinkingLevel then
+            rowThinkingLevel.Visible = state
+            rowThinkingLevel.Size = UDim2.new(1, 0, 0, state and 54 or 0)
+        end
         applyModelLabelVisible(state)
+    end
+
+    local function refreshThinkingLevelRow()
+        if not rowThinkingLevel then return end
+        pcall(function()
+            for _, c in ipairs(rowThinkingLevel:GetChildren()) do c:Destroy() end
+            local id = readCfg().activeModel or "flash"
+            local caps = AgentGetThinkingCaps(id)
+            if not (caps and caps.switchable) then
+                local note = create("TextLabel", {
+                    Size = UDim2.new(1, 0, 0, 28),
+                    BackgroundTransparency = 1,
+                    Text = "当前模型不支持该操作",
+                    TextColor3 = Color3.fromRGB(255, 82, 104),
+                    Font = Enum.Font.SourceSansBold,
+                    TextSize = 13,
+                    TextXAlignment = Enum.TextXAlignment.Left,
+                    Parent = rowThinkingLevel,
+                })
+                return
+            end
+            if type(makeDropdown) == "function" then
+                local levels = caps.levels or {"低", "中", "高"}
+                local cfgL = readCfg()
+                local cur = cfgL.thinkingLevel
+                local defaultIdx = 1
+                for i, lv in ipairs(levels) do if lv == cur then defaultIdx = i break end end
+                makeDropdown(rowThinkingLevel, levels, defaultIdx, function(val)
+                    writeCfg("thinkingLevel", val)
+                    local setter = G.__DeltaAI_setThinkingMode
+                    if type(setter) == "function" then pcall(setter, true) end
+                    local pill = G.__DeltaAI_updateThinkPill
+                    if type(pill) == "function" then pcall(pill, true) end
+                    notify("思考级别：" .. tostring(val), 1.0)
+                end)
+            end
+        end)
     end
 
     local cfg = readCfg()
@@ -8107,6 +8539,7 @@ local function buildAgentLessSettings(env, G)
                             pcall(env.AgentApplyModel, id)
                         end
                     end
+                    refreshThinkingLevelRow()
                     break
                 end
             end
@@ -8132,6 +8565,7 @@ local function buildAgentLessSettings(env, G)
     end
 
     refreshExternalRows(extEnabled)
+    refreshThinkingLevelRow()
     return true
 end
 

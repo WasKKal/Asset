@@ -2113,7 +2113,7 @@ AgentLocalAIConfig = { -- [官方页面] 提为全局：原文件部分引用早
 }
 
 
-local WASAAI_MODELS = {
+local AGENT_PROVIDERS = {
     flash = {
         label = "Deepseek-V4-Flash",
         model = "deepseek-v4-flash",
@@ -2139,15 +2139,65 @@ local WASAAI_MODELS = {
         label = "Agent-2.5-flash",
         model = "agnes-2.5-flash",
         endpoint = "https://api.agnes-ai.cn/v1/chat/completions",
-        apiKey = "sk-mkvUEEWp8sIFVTKjJt232s20BV4DO7mqzxpQPfJZMrJvoBn0",
+        apiKey = "sk-mkvUEEWp8sIFVTKJt232s20BV4DO7mqzxpQPfJZMrJvoBn0",
         isClaude = false,
         noThinking = true,
         bypassPoints = false,
     },
+    -- ===== 国内主流 AI 预设（填 API Key 即可用，OpenAI 兼容） =====
+    qwen = {
+        label = "阿里通义千问",
+        model = "qwen-plus",
+        endpoint = "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
+        apiKey = "",
+        isClaude = false,
+    },
+    glm = {
+        label = "智谱 GLM",
+        model = "glm-4-plus",
+        endpoint = "https://open.bigmodel.cn/api/paas/v4/chat/completions",
+        apiKey = "",
+        isClaude = false,
+    },
+    kimi = {
+        label = "月之暗面 Kimi",
+        model = "moonshot-v1-8k",
+        endpoint = "https://api.moonshot.cn/v1/chat/completions",
+        apiKey = "",
+        isClaude = false,
+    },
+    minimax = {
+        label = "MiniMax",
+        model = "abab6.5s-chat",
+        endpoint = "https://api.minimax.chat/v1/chat/completions",
+        apiKey = "",
+        isClaude = false,
+    },
+    baichuan = {
+        label = "百川智能",
+        model = "Baichuan4",
+        endpoint = "https://api.baichuan-ai.com/v1/chat/completions",
+        apiKey = "",
+        isClaude = false,
+    },
+    doubao = {
+        label = "火山方舟 豆包",
+        model = "doubao-seed-1.6",
+        endpoint = "https://ark.cn-beijing.volces.com/api/v3/chat/completions",
+        apiKey = "",
+        isClaude = false,
+    },
+    hunyuan = {
+        label = "腾讯混元",
+        model = "hunyuan-turbo",
+        endpoint = "https://api.hunyuan.cloud.tencent.com/v1/chat/completions",
+        apiKey = "",
+        isClaude = false,
+    },
 }
 
 function AgentApplyModel(id)
-    local m = WASAAI_MODELS[id] or WASAAI_MODELS.flash
+    local m = AGENT_PROVIDERS[id] or AGENT_PROVIDERS.flash
     AgentLocalAIConfig.model = m.model
     AgentLocalAIConfig.endpoint = m.endpoint
     AgentLocalAIConfig.apiKey = m.apiKey
@@ -2166,7 +2216,7 @@ function AgentApplyModel(id)
 end
 
 local _aiModelSaved = loadConfig()
-if _aiModelSaved and _aiModelSaved.activeModel and WASAAI_MODELS[_aiModelSaved.activeModel] then
+if _aiModelSaved and _aiModelSaved.activeModel and AGENT_PROVIDERS[_aiModelSaved.activeModel] then
     AgentApplyModel(_aiModelSaved.activeModel)
 end
 
@@ -2800,6 +2850,158 @@ local function AgentHttpPost(url, headers, body)
         return false, 0, tostring(resp), "RequestAsync error"
     end
     return false, 0, "", "no http request function available"
+end
+
+local function AgentHttpGet(url, headers)
+    headers = headers or {}
+    local req = AgentGetHttpRequestFn()
+    if req then
+        local ok, resp = pcall(req, {
+            Url = url,
+            Method = "GET",
+            Headers = headers,
+            Timeout = 8000,
+        })
+        if ok and type(resp) == "table" then
+            return true, resp.StatusCode or 200, resp.Body or "", resp.StatusMessage or ""
+        end
+        return false, 0, tostring(resp), "request error"
+    end
+    if svc.HttpService and svc.HttpService.RequestAsync then
+        local ok, resp = pcall(function()
+            return svc.HttpService:RequestAsync({
+                Url = url,
+                Method = "GET",
+                Headers = headers,
+                Timeout = 8,
+            })
+        end)
+        if ok and type(resp) == "table" then
+            return true, resp.StatusCode or 200, resp.Body or "", resp.StatusMessage or ""
+        end
+        return false, 0, tostring(resp), "RequestAsync error"
+    end
+    return false, 0, "", "no http request function available"
+end
+
+local function AgentResolveUrl(base, suffix)
+    base = tostring(base or ""):gsub("%s+", "")
+    if base == "" then return "" end
+    base = base:gsub("/+$", "")
+    suffix = tostring(suffix or ""):gsub("^/+", "")
+    if suffix == "" then return base end
+    return base .. "/" .. suffix
+end
+
+local function AgentFetchModels(baseUrl, apiKey)
+    baseUrl = AgentSafeString(tostring(baseUrl or ""), 400)
+    if baseUrl == "" then
+        return false, "请先填写 BaseURL"
+    end
+    local headers = { ["Content-Type"] = "application/json" }
+    if apiKey and tostring(apiKey) ~= "" then
+        headers["Authorization"] = "Bearer " .. tostring(apiKey)
+    end
+    local okM, codeM, bodyM = AgentHttpGet(AgentResolveUrl(baseUrl, "/models"), headers)
+    if not okM then
+        return false, "网络请求失败: " .. tostring(bodyM)
+    end
+    if codeM < 200 or codeM >= 300 then
+        return false, "拉取模型失败 (HTTP " .. tostring(codeM) .. "): " .. AgentSafeString(bodyM, 220)
+    end
+    local dec
+    local dOk = pcall(function() dec = svc.HttpService:JSONDecode(bodyM) end)
+    if not dOk or type(dec) ~= "table" then
+        return false, "返回数据解析失败"
+    end
+    local list = {}
+    local function ingest(t)
+        if type(t) ~= "table" then return end
+        for _, it in ipairs(t) do
+            if type(it) == "table" and type(it.id) == "string" and it.id ~= "" then
+                list[#list + 1] = it.id
+            elseif type(it) == "string" and it ~= "" then
+                list[#list + 1] = it
+            end
+        end
+    end
+    if type(dec.data) == "table" then
+        ingest(dec.data)
+    elseif type(dec.models) == "table" then
+        ingest(dec.models)
+    elseif type(dec) == "table" then
+        ingest(dec)
+    end
+    if #list == 0 then
+        return false, "未获取到任何模型（该服务商可能不支持 /models 列表接口）"
+    end
+    return true, list
+end
+
+local function AgentProviderLabel(id)
+    if id == "custom" then return "自定义服务商" end
+    local m = AGENT_PROVIDERS[id]
+    return (m and m.label) or tostring(id or "")
+end
+
+local function AgentPersistProviderKey(id, key)
+    if type(loadConfig) ~= "function" or type(saveConfig) ~= "function" then return end
+    pcall(function()
+        local cfg = loadConfig()
+        cfg.providerKeys = cfg.providerKeys or {}
+        cfg.providerKeys[tostring(id)] = tostring(key or "")
+        saveConfig(cfg)
+    end)
+end
+
+function AgentApplyCustomProvider(baseUrl, apiKey, model)
+    baseUrl = AgentSafeString(tostring(baseUrl or ""), 400)
+    apiKey = tostring(apiKey or "")
+    model = AgentSafeString(tostring(model or ""), 200)
+    if baseUrl == "" or model == "" then
+        return false, "BaseURL 与模型均不能为空"
+    end
+    local endpoint = AgentResolveUrl(baseUrl, "/chat/completions")
+    AgentLocalAIConfig.endpoint = endpoint
+    AgentLocalAIConfig.model = model
+    AgentLocalAIConfig.apiKey = apiKey
+    AgentLocalAIConfig.isClaude = false
+    AgentLocalAIConfig.noThinking = false
+    AgentLocalAIConfig.bypassPoints = false
+    AgentLocalAIConfig.activeModel = "custom"
+    if type(loadConfig) == "function" and type(saveConfig) == "function" then
+        pcall(function()
+            local cfg = loadConfig()
+            cfg.activeModel = "custom"
+            cfg.customBaseUrl = baseUrl
+            cfg.customApiKey = apiKey
+            cfg.customActiveModel = model
+            saveConfig(cfg)
+        end)
+    end
+    pcall(function()
+        if AgentModelLabel then
+            AgentModelLabel.Text = AgentProviderLabel("custom") .. " · " .. model
+            AgentModelLabel.TextColor3 = theme.textDim or Color3.fromRGB(150, 160, 184)
+        end
+    end)
+    return true
+end
+
+do
+    local okS, saved = pcall(loadConfig)
+    if okS and type(saved) == "table" then
+        if type(saved.providerKeys) == "table" then
+            for k, v in pairs(saved.providerKeys) do
+                if AGENT_PROVIDERS[k] then
+                    AGENT_PROVIDERS[k].apiKey = tostring(v)
+                end
+            end
+        end
+        if saved.activeModel == "custom" and saved.customBaseUrl and saved.customActiveModel then
+            pcall(AgentApplyCustomProvider, saved.customBaseUrl, saved.customApiKey, saved.customActiveModel)
+        end
+    end
 end
 
 local AGENT_DEEPSEEK_TOOLS = {
@@ -4871,7 +5073,7 @@ AgentModelLabel = create("TextLabel", {
     ZIndex = 5
 })
 do
-    local _m = WASAAI_MODELS[AgentLocalAIConfig.activeModel or "flash"]
+    local _m = AGENT_PROVIDERS[AgentLocalAIConfig.activeModel or "flash"]
     if _m then
         AgentModelLabel.Text = _m.label
         AgentModelLabel.TextColor3 = _m.isClaude and Color3.fromRGB(255, 200, 60) or theme.textDim
@@ -5254,28 +5456,62 @@ local function AgentBuildProviderSection(panel)
     local info = create("TextLabel", {
         Size = UDim2.new(1, 0, 0, 18),
         BackgroundTransparency = 1,
-        Text = "当前服务商：" .. ((WASAAI_MODELS[cur] and WASAAI_MODELS[cur].label) or tostring(cur)),
+        Text = "当前服务商：" .. AgentProviderLabel(cur),
         TextColor3 = theme.textDim or Color3.fromRGB(150, 160, 184),
         Font = Enum.Font.SourceSans,
         TextSize = 12,
         TextXAlignment = Enum.TextXAlignment.Left,
         Parent = card,
     })
-    local grid = create("Frame", {
-        Size = UDim2.new(1, 0, 0, 34),
+
+    create("TextLabel", {
+        Size = UDim2.new(1, 0, 0, 16),
         BackgroundTransparency = 1,
+        Text = "预设服务商（点击左侧选择，右侧填 API Key 即可用）",
+        TextColor3 = theme.text or Color3.fromRGB(242, 245, 252),
+        Font = Enum.Font.SourceSans,
+        TextSize = 12,
+        TextXAlignment = Enum.TextXAlignment.Left,
         Parent = card,
     })
-    create("UIListLayout", {
-        FillDirection = Enum.FillDirection.Horizontal,
-        Padding = UDim.new(0, 6),
-        Parent = grid,
+
+    local listFrame = create("ScrollingFrame", {
+        Size = UDim2.new(1, 0, 0, 190),
+        BackgroundColor3 = theme.surfaceLight or Color3.fromRGB(30, 36, 52),
+        BackgroundTransparency = 0.4,
+        BorderSizePixel = 0,
+        ScrollBarThickness = 4,
+        ScrollBarImageColor3 = theme.textDim or Color3.fromRGB(150, 160, 184),
+        Parent = card,
     })
-    local modelIds = { "flash", "pro", "claude", "aiagent" }
-    for _, id in ipairs(modelIds) do
-        local m = WASAAI_MODELS[id]
-        local b = create("TextButton", {
-            Size = UDim2.new(0.25, -5, 0, 30),
+    corner(8, listFrame)
+    create("UIListLayout", {
+        FillDirection = Enum.FillDirection.Vertical,
+        Padding = UDim.new(0, 6),
+        Parent = listFrame,
+    })
+    create("UIPadding", {
+        PaddingLeft = UDim.new(0, 8), PaddingRight = UDim.new(0, 8),
+        PaddingTop = UDim.new(0, 8), PaddingBottom = UDim.new(0, 8),
+        Parent = listFrame,
+    })
+
+    local providerIds = {}
+    for id, _ in pairs(AGENT_PROVIDERS) do
+        providerIds[#providerIds + 1] = id
+    end
+    table.sort(providerIds)
+    local providerButtons = {}
+    for _, id in ipairs(providerIds) do
+        local m = AGENT_PROVIDERS[id]
+        local row = create("Frame", {
+            Size = UDim2.new(1, 0, 0, 30),
+            BackgroundTransparency = 1,
+            Parent = listFrame,
+        })
+        local sel = create("TextButton", {
+            Size = UDim2.new(0, 150, 0, 26),
+            Position = UDim2.new(0, 0, 0, 2),
             BackgroundColor3 = (cur == id) and (theme.accent or Color3.fromRGB(56, 189, 248)) or (theme.surfaceLight or Color3.fromRGB(30, 36, 52)),
             BackgroundTransparency = (cur == id) and 0 or 0.3,
             BorderSizePixel = 0,
@@ -5283,26 +5519,260 @@ local function AgentBuildProviderSection(panel)
             TextColor3 = (cur == id) and Color3.fromRGB(255, 255, 255) or (theme.text or Color3.fromRGB(242, 245, 252)),
             Font = Enum.Font.SourceSans,
             TextSize = 11,
-            Parent = grid,
+            Parent = row,
         })
-        corner(8, b)
-        b.MouseButton1Click:Connect(function()
+        corner(8, sel)
+        local keyBox = create("TextBox", {
+            Size = UDim2.new(1, -160, 0, 26),
+            Position = UDim2.new(0, 156, 0, 2),
+            BackgroundColor3 = theme.surfaceLight or Color3.fromRGB(30, 36, 52),
+            BackgroundTransparency = 0.3,
+            BorderColor3 = theme.border or Color3.fromRGB(52, 62, 88),
+            BorderSizePixel = 1,
+            Text = (m and m.apiKey) or "",
+            PlaceholderText = "填你的 API Key",
+            PlaceholderColor3 = theme.textDim or Color3.fromRGB(150, 160, 184),
+            TextColor3 = theme.text or Color3.fromRGB(242, 245, 252),
+            Font = Enum.Font.SourceSans,
+            TextSize = 11,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            ClearTextOnFocus = false,
+            Parent = row,
+        })
+        corner(6, keyBox)
+        create("UIPadding", { PaddingLeft = UDim.new(0, 8), Parent = keyBox })
+        sel.MouseButton1Click:Connect(function()
             pcall(function()
                 AgentApplyModel(id)
-                for _, child in ipairs(grid:GetChildren()) do
-                    if child:IsA("TextButton") then
-                        child.BackgroundColor3 = theme.surfaceLight or Color3.fromRGB(30, 36, 52)
-                        child.BackgroundTransparency = 0.3
-                        child.TextColor3 = theme.text or Color3.fromRGB(242, 245, 252)
-                    end
+                for _, b in ipairs(providerButtons) do
+                    b.BackgroundColor3 = theme.surfaceLight or Color3.fromRGB(30, 36, 52)
+                    b.BackgroundTransparency = 0.3
+                    b.TextColor3 = theme.text or Color3.fromRGB(242, 245, 252)
                 end
-                b.BackgroundColor3 = theme.accent or Color3.fromRGB(56, 189, 248)
-                b.BackgroundTransparency = 0
-                b.TextColor3 = Color3.fromRGB(255, 255, 255)
-                info.Text = "当前服务商：" .. ((m and m.label) or id)
+                sel.BackgroundColor3 = theme.accent or Color3.fromRGB(56, 189, 248)
+                sel.BackgroundTransparency = 0
+                sel.TextColor3 = Color3.fromRGB(255, 255, 255)
+                info.Text = "当前服务商：" .. AgentProviderLabel(id)
             end)
         end)
+        keyBox.FocusLost:Connect(function()
+            pcall(function()
+                local key = keyBox.Text or ""
+                if AGENT_PROVIDERS[id] then AGENT_PROVIDERS[id].apiKey = key end
+                AgentPersistProviderKey(id, key)
+                if AgentLocalAIConfig.activeModel == id then
+                    AgentLocalAIConfig.apiKey = key
+                end
+            end)
+        end)
+        providerButtons[#providerButtons + 1] = sel
     end
+
+    -- ===== 自定义服务商 =====
+    create("TextLabel", {
+        Size = UDim2.new(1, 0, 0, 16),
+        BackgroundTransparency = 1,
+        Text = "自定义服务商（填 BaseURL + API Key，自动拉取模型列表）",
+        TextColor3 = theme.text or Color3.fromRGB(242, 245, 252),
+        Font = Enum.Font.SourceSans,
+        TextSize = 12,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        Parent = card,
+    })
+    local savedCfg = AgentReadCfg()
+    local baseBox = create("TextBox", {
+        Size = UDim2.new(1, 0, 0, 28),
+        BackgroundColor3 = theme.surfaceLight or Color3.fromRGB(30, 36, 52),
+        BackgroundTransparency = 0.3,
+        BorderColor3 = theme.border or Color3.fromRGB(52, 62, 88),
+        BorderSizePixel = 1,
+        Text = tostring(savedCfg.customBaseUrl or ""),
+        PlaceholderText = "BaseURL，例如 https://api.moonshot.cn/v1",
+        PlaceholderColor3 = theme.textDim or Color3.fromRGB(150, 160, 184),
+        TextColor3 = theme.text or Color3.fromRGB(242, 245, 252),
+        Font = Enum.Font.SourceSans,
+        TextSize = 11,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        ClearTextOnFocus = false,
+        Parent = card,
+    })
+    corner(6, baseBox)
+    create("UIPadding", { PaddingLeft = UDim.new(0, 8), Parent = baseBox })
+    local keyBoxC = create("TextBox", {
+        Size = UDim2.new(1, 0, 0, 28),
+        BackgroundColor3 = theme.surfaceLight or Color3.fromRGB(30, 36, 52),
+        BackgroundTransparency = 0.3,
+        BorderColor3 = theme.border or Color3.fromRGB(52, 62, 88),
+        BorderSizePixel = 1,
+        Text = tostring(savedCfg.customApiKey or ""),
+        PlaceholderText = "API Key",
+        PlaceholderColor3 = theme.textDim or Color3.fromRGB(150, 160, 184),
+        TextColor3 = theme.text or Color3.fromRGB(242, 245, 252),
+        Font = Enum.Font.SourceSans,
+        TextSize = 11,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        ClearTextOnFocus = false,
+        Parent = card,
+    })
+    corner(6, keyBoxC)
+    create("UIPadding", { PaddingLeft = UDim.new(0, 8), Parent = keyBoxC })
+
+    local fetchBtn = create("TextButton", {
+        Size = UDim2.new(1, 0, 0, 30),
+        BackgroundColor3 = theme.accent or Color3.fromRGB(56, 189, 248),
+        BackgroundTransparency = 0,
+        BorderSizePixel = 0,
+        Text = "拉取模型列表",
+        TextColor3 = Color3.fromRGB(255, 255, 255),
+        Font = Enum.Font.SourceSansBold,
+        TextSize = 13,
+        Parent = card,
+    })
+    corner(8, fetchBtn)
+    local statusLabel = create("TextLabel", {
+        Size = UDim2.new(1, 0, 0, 18),
+        BackgroundTransparency = 1,
+        Text = "",
+        TextColor3 = theme.textDim or Color3.fromRGB(150, 160, 184),
+        Font = Enum.Font.SourceSans,
+        TextSize = 11,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        Parent = card,
+    })
+    local modelList = create("ScrollingFrame", {
+        Size = UDim2.new(1, 0, 0, 150),
+        BackgroundColor3 = theme.surfaceLight or Color3.fromRGB(30, 36, 52),
+        BackgroundTransparency = 0.4,
+        BorderSizePixel = 0,
+        ScrollBarThickness = 4,
+        ScrollBarImageColor3 = theme.textDim or Color3.fromRGB(150, 160, 184),
+        Parent = card,
+        Visible = false,
+    })
+    corner(8, modelList)
+    create("UIListLayout", { FillDirection = Enum.FillDirection.Vertical, Padding = UDim.new(0, 5), Parent = modelList })
+    create("UIPadding", { PaddingLeft = UDim.new(0, 8), PaddingRight = UDim.new(0, 8), PaddingTop = UDim.new(0, 8), PaddingBottom = UDim.new(0, 8), Parent = modelList })
+
+    local function refreshCustomHighlight()
+        pcall(function()
+            for _, c in ipairs(modelList:GetChildren()) do
+                if c:IsA("TextButton") then
+                    local active = (c.Name == "M_" .. tostring(AgentLocalAIConfig.customActiveModel or ""))
+                    c.BackgroundColor3 = active and (theme.accent or Color3.fromRGB(56, 189, 248)) or (theme.surface or Color3.fromRGB(22, 27, 40))
+                    c.BackgroundTransparency = active and 0 or 0.3
+                    c.TextColor3 = active and Color3.fromRGB(255, 255, 255) or (theme.text or Color3.fromRGB(242, 245, 252))
+                end
+            end
+        end)
+    end
+
+    fetchBtn.MouseButton1Click:Connect(function()
+        pcall(function()
+            local base = baseBox.Text or ""
+            local key = keyBoxC.Text or ""
+            statusLabel.Text = "正在拉取模型列表..."
+            statusLabel.TextColor3 = theme.textDim or Color3.fromRGB(150, 160, 184)
+            if type(loadConfig) == "function" and type(saveConfig) == "function" then
+                pcall(function()
+                    local cfg = loadConfig()
+                    cfg.customBaseUrl = base
+                    cfg.customApiKey = key
+                    saveConfig(cfg)
+                end)
+            end
+            local okF, a, b = pcall(AgentFetchModels, base, key)
+            if not okF then
+                statusLabel.Text = "拉取异常: " .. tostring(a)
+                statusLabel.TextColor3 = theme.red or Color3.fromRGB(255, 82, 104)
+                return
+            end
+            if a == false then
+                statusLabel.Text = "拉取失败: " .. tostring(b)
+                statusLabel.TextColor3 = theme.red or Color3.fromRGB(255, 82, 104)
+                return
+            end
+            local models = b
+            if type(models) ~= "table" or #models == 0 then
+                statusLabel.Text = "未获取到模型"
+                statusLabel.TextColor3 = theme.red or Color3.fromRGB(255, 82, 104)
+                return
+            end
+            for _, c in ipairs(modelList:GetChildren()) do
+                if c:IsA("TextButton") then c:Destroy() end
+            end
+            for _, mid in ipairs(models) do
+                local mb = create("TextButton", {
+                    Name = "M_" .. tostring(mid),
+                    Size = UDim2.new(1, 0, 0, 26),
+                    BackgroundColor3 = theme.surface or Color3.fromRGB(22, 27, 40),
+                    BackgroundTransparency = 0.3,
+                    BorderSizePixel = 0,
+                    Text = tostring(mid),
+                    TextColor3 = theme.text or Color3.fromRGB(242, 245, 252),
+                    Font = Enum.Font.SourceSans,
+                    TextSize = 11,
+                    TextXAlignment = Enum.TextXAlignment.Left,
+                    Parent = modelList,
+                })
+                corner(6, mb)
+                create("UIPadding", { PaddingLeft = UDim.new(0, 8), Parent = mb })
+                mb.MouseButton1Click:Connect(function()
+                    pcall(function()
+                        local okA, ca, cb = pcall(AgentApplyCustomProvider, base, key, mid)
+                        if not okA then
+                            statusLabel.Text = "应用异常: " .. tostring(ca)
+                            statusLabel.TextColor3 = theme.red or Color3.fromRGB(255, 82, 104)
+                            return
+                        end
+                        if ca == false then
+                            statusLabel.Text = "应用失败: " .. tostring(cb)
+                            statusLabel.TextColor3 = theme.red or Color3.fromRGB(255, 82, 104)
+                            return
+                        end
+                        info.Text = "当前服务商：" .. AgentProviderLabel("custom") .. " · " .. tostring(mid)
+                        refreshCustomHighlight()
+                        statusLabel.Text = "已应用自定义模型：" .. tostring(mid)
+                        statusLabel.TextColor3 = theme.accent or Color3.fromRGB(56, 189, 248)
+                    end)
+                end)
+            end
+            modelList.Visible = true
+            refreshCustomHighlight()
+            statusLabel.Text = "已拉取 " .. tostring(#models) .. " 个模型，点击选择"
+            statusLabel.TextColor3 = theme.accent or Color3.fromRGB(56, 189, 248)
+        end)
+    end)
+
+    pcall(function()
+        if AgentLocalAIConfig.activeModel == "custom" and AgentLocalAIConfig.customActiveModel then
+            modelList.Visible = true
+            local mb = create("TextButton", {
+                Name = "M_" .. tostring(AgentLocalAIConfig.customActiveModel),
+                Size = UDim2.new(1, 0, 0, 26),
+                BackgroundColor3 = theme.accent or Color3.fromRGB(56, 189, 248),
+                BackgroundTransparency = 0,
+                BorderSizePixel = 0,
+                Text = "当前：" .. tostring(AgentLocalAIConfig.customActiveModel),
+                TextColor3 = Color3.fromRGB(255, 255, 255),
+                Font = Enum.Font.SourceSans,
+                TextSize = 11,
+                TextXAlignment = Enum.TextXAlignment.Left,
+                Parent = modelList,
+            })
+            corner(6, mb)
+            create("UIPadding", { PaddingLeft = UDim.new(0, 8), Parent = mb })
+            mb.MouseButton1Click:Connect(function()
+                pcall(function()
+                    local okA, ca = pcall(AgentApplyCustomProvider, savedCfg.customBaseUrl or baseBox.Text, savedCfg.customApiKey or keyBoxC.Text, AgentLocalAIConfig.customActiveModel)
+                    if okA and ca ~= false then
+                        statusLabel.Text = "已应用：" .. tostring(AgentLocalAIConfig.customActiveModel)
+                        statusLabel.TextColor3 = theme.accent or Color3.fromRGB(56, 189, 248)
+                    end
+                end)
+            end)
+        end
+    end)
+
     AgentMakeToggleRow(card, "启用外部 API", function() return AgentReadCfg().useExternalApi == true end,
         function(v) AgentWriteCfg("useExternalApi", v); pcall(updateExternalApiUI, v) end)
     return card
@@ -7220,7 +7690,7 @@ AgentSendMessage = function()
                 role = "assistant",
                 content = tostring(reply),
                 model = AgentLocalAIConfig.activeModel,
-                modelLabel = (WASAAI_MODELS[AgentLocalAIConfig.activeModel] and WASAAI_MODELS[AgentLocalAIConfig.activeModel].label) or AgentLocalAIConfig.model,
+                modelLabel = (AGENT_PROVIDERS[AgentLocalAIConfig.activeModel] and AGENT_PROVIDERS[AgentLocalAIConfig.activeModel].label) or AgentLocalAIConfig.model,
                 timestamp = os.time()
             })
             AgentQueueTrainingPair(text, tostring(reply))
@@ -7572,9 +8042,9 @@ local function buildAgentLessSettings(env, G)
     if not card then return false end
     G.__DeltaUI_agentlessSettingsBuilt = true
 
-    local modelIds = {"flash", "pro", "claude", "aiagent"}
-    local modelLabels = {"model_flash", "model_pro", "model_claude", nil}
-    local modelOptions = {tr("model_flash"), tr("model_pro"), tr("model_claude"), "Agent-2.5-flash"}
+    local modelIds = {"flash", "pro", "claude", "aiagent", "qwen", "glm", "kimi", "minimax", "baichuan", "doubao", "hunyuan", "custom"}
+    local modelLabels = {"model_flash", "model_pro", "model_claude", nil, nil, nil, nil, nil, nil, nil, nil, nil}
+    local modelOptions = {tr("model_flash"), tr("model_pro"), tr("model_claude"), "Agent-2.5-flash", "阿里通义千问", "智谱 GLM", "月之暗面 Kimi", "MiniMax", "百川智能", "火山方舟 豆包", "腾讯混元", "自定义服务商"}
 
     local rowExtApi = makeSettingRow("use_external_api", "use_external_api_desc", 1)
     if rowExtApi then rowExtApi.Parent = card end
@@ -7626,9 +8096,16 @@ local function buildAgentLessSettings(env, G)
         makeDropdown(rowModel, modelOptions, defaultIdx, function(val)
             for i = 1, #modelOptions do
                 if modelOptions[i] == val then
-                    writeCfg("activeModel", modelIds[i])
-                    if type(env.AgentApplyModel) == "function" then
-                        pcall(env.AgentApplyModel, modelIds[i])
+                    local id = modelIds[i]
+                    writeCfg("activeModel", id)
+                    if id == "custom" then
+                        if type(env.AgentApplyCustomProvider) == "function" then
+                            pcall(env.AgentApplyCustomProvider, cfg.customBaseUrl or "", cfg.customApiKey or "", cfg.customActiveModel or "")
+                        end
+                    else
+                        if type(env.AgentApplyModel) == "function" then
+                            pcall(env.AgentApplyModel, id)
+                        end
                     end
                     break
                 end

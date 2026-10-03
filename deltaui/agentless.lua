@@ -2094,7 +2094,7 @@ AgentLocalAIConfig = { -- [官方页面] 提为全局：原文件部分引用早
     
     isClaude = false,
     
-    apiKey = "sk-eb2bb64f6a3c4d0ea916c26b053c2835",
+    apiKey = "",
     timeout = 30,
     thinkingDisabled = true,
     noThinking = false,
@@ -2118,28 +2118,28 @@ local AGENT_PROVIDERS = {
         label = "Deepseek-V4-Flash",
         model = "deepseek-v4-flash",
         endpoint = "https://api.deepseek.com/chat/completions",
-        apiKey = "sk-eb2bb64f6a3c4d0ea916c26b053c2835",
+        apiKey = "",
         isClaude = false,
     },
     pro = {
         label = "Deepseek-V4-Pro",
         model = "deepseek-v4-pro",
         endpoint = "https://api.deepseek.com/chat/completions",
-        apiKey = "sk-eb2bb64f6a3c4d0ea916c26b053c2835",
+        apiKey = "",
         isClaude = false,
     },
     claude = {
         label = "Claude Haiku4.5",
         model = "claude-haiku-4-5",
         endpoint = "https://api.anthropic.com/v1/messages",
-        apiKey = "sk-ant-api03-xxxxxxxxxxxxxxxxxxxx",  
+        apiKey = "",  
         isClaude = true,
     },
     aiagent = {
         label = "Agent-2.5-flash",
         model = "agnes-2.5-flash",
         endpoint = "https://api.agnes-ai.cn/v1/chat/completions",
-        apiKey = "sk-mkvUEEWp8sIFVTKJt232s20BV4DO7mqzxpQPfJZMrJvoBn0",
+        apiKey = "",
         isClaude = false,
         noThinking = true,
         bypassPoints = false,
@@ -5758,6 +5758,15 @@ end
 
 local function AgentBuildProviderSection(panel)
     local card = AgentMakeCard(panel, "AI 服务商管理")
+    -- 服务商列表容器：外部 API 未开启时收起（不展开）
+    local providerBody = create("Frame", {
+        Size = UDim2.new(1, 0, 0, 0),
+        AutomaticSize = Enum.AutomaticSize.Y,
+        BackgroundTransparency = 1,
+        BorderSizePixel = 0,
+        Parent = card,
+    })
+    create("UIListLayout", { FillDirection = Enum.FillDirection.Vertical, Padding = UDim.new(0, 10), Parent = providerBody })
     local cur = (AgentLocalAIConfig and AgentLocalAIConfig.activeModel) or "flash"
     local info = create("TextLabel", {
         Size = UDim2.new(1, 0, 0, 18),
@@ -5767,7 +5776,7 @@ local function AgentBuildProviderSection(panel)
         Font = Enum.Font.SourceSans,
         TextSize = 12,
         TextXAlignment = Enum.TextXAlignment.Left,
-        Parent = card,
+        Parent = providerBody,
     })
 
     create("TextLabel", {
@@ -5778,7 +5787,7 @@ local function AgentBuildProviderSection(panel)
         Font = Enum.Font.SourceSans,
         TextSize = 12,
         TextXAlignment = Enum.TextXAlignment.Left,
-        Parent = card,
+        Parent = providerBody,
     })
 
     local listFrame = create("ScrollingFrame", {
@@ -5788,7 +5797,7 @@ local function AgentBuildProviderSection(panel)
         BorderSizePixel = 0,
         ScrollBarThickness = 4,
         ScrollBarImageColor3 = theme.textDim or Color3.fromRGB(150, 160, 184),
-        Parent = card,
+        Parent = providerBody,
     })
     corner(8, listFrame)
     create("UIListLayout", {
@@ -5901,7 +5910,7 @@ local function AgentBuildProviderSection(panel)
         Font = Enum.Font.SourceSans,
         TextSize = 12,
         TextXAlignment = Enum.TextXAlignment.Left,
-        Parent = card,
+        Parent = providerBody,
     })
     AgentUI.presetStatus = create("TextLabel", {
         Size = UDim2.new(1, 0, 0, 16),
@@ -5911,7 +5920,7 @@ local function AgentBuildProviderSection(panel)
         Font = Enum.Font.SourceSans,
         TextSize = 11,
         TextXAlignment = Enum.TextXAlignment.Left,
-        Parent = card,
+        Parent = providerBody,
     })
     AgentUI.presetFrame = create("ScrollingFrame", {
         Size = UDim2.new(1, 0, 0, 130),
@@ -5920,7 +5929,7 @@ local function AgentBuildProviderSection(panel)
         BorderSizePixel = 0,
         ScrollBarThickness = 4,
         ScrollBarImageColor3 = theme.textDim or Color3.fromRGB(150, 160, 184),
-        Parent = card,
+        Parent = providerBody,
         Visible = true,
     })
     corner(8, AgentUI.presetFrame)
@@ -5936,7 +5945,7 @@ local function AgentBuildProviderSection(panel)
         Font = Enum.Font.SourceSans,
         TextSize = 12,
         TextXAlignment = Enum.TextXAlignment.Left,
-        Parent = card,
+        Parent = providerBody,
     })
     local savedCfg = AgentReadCfg()
     local baseBox = create("TextBox", {
@@ -5953,7 +5962,7 @@ local function AgentBuildProviderSection(panel)
         TextSize = 11,
         TextXAlignment = Enum.TextXAlignment.Left,
         ClearTextOnFocus = false,
-        Parent = card,
+        Parent = providerBody,
     })
     corner(6, baseBox)
     create("UIPadding", { PaddingLeft = UDim.new(0, 8), Parent = baseBox })
@@ -5971,7 +5980,7 @@ local function AgentBuildProviderSection(panel)
         TextSize = 11,
         TextXAlignment = Enum.TextXAlignment.Left,
         ClearTextOnFocus = false,
-        Parent = card,
+        Parent = providerBody,
     })
     corner(6, keyBoxC)
     create("UIPadding", { PaddingLeft = UDim.new(0, 8), Parent = keyBoxC })
@@ -5985,7 +5994,7 @@ local function AgentBuildProviderSection(panel)
         TextColor3 = Color3.fromRGB(255, 255, 255),
         Font = Enum.Font.SourceSansBold,
         TextSize = 13,
-        Parent = card,
+        Parent = providerBody,
     })
     corner(8, fetchBtn)
     local statusLabel = create("TextLabel", {
@@ -5996,7 +6005,7 @@ local function AgentBuildProviderSection(panel)
         Font = Enum.Font.SourceSans,
         TextSize = 11,
         TextXAlignment = Enum.TextXAlignment.Left,
-        Parent = card,
+        Parent = providerBody,
     })
     local modelList = create("ScrollingFrame", {
         Size = UDim2.new(1, 0, 0, 150),
@@ -6005,7 +6014,7 @@ local function AgentBuildProviderSection(panel)
         BorderSizePixel = 0,
         ScrollBarThickness = 4,
         ScrollBarImageColor3 = theme.textDim or Color3.fromRGB(150, 160, 184),
-        Parent = card,
+        Parent = providerBody,
         Visible = false,
     })
     corner(8, modelList)
@@ -6136,7 +6145,7 @@ local function AgentBuildProviderSection(panel)
 
     -- ===== 思考级别切换 =====
     do
-        local thinkCard = AgentMakeCard(panel, "思考级别")
+        local thinkCard = AgentMakeCard(providerBody, "思考级别")
         create("TextLabel", {
             Size = UDim2.new(1, 0, 0, 28),
             BackgroundTransparency = 1,
@@ -6158,11 +6167,13 @@ local function AgentBuildProviderSection(panel)
     end
 
     AgentMakeToggleRow(card, "启用外部 API", function() return AgentReadCfg().useExternalApi == true end,
-        function(v) AgentWriteCfg("useExternalApi", v); pcall(updateExternalApiUI, v) end)
+        function(v) AgentWriteCfg("useExternalApi", v); if providerBody then providerBody.Visible = v end; pcall(updateExternalApiUI, v) end)
 
     -- 初始化：恢复当前服务商的模型列表与思考级别控件
     pcall(AgentRefreshPresetModels, cur)
     pcall(AgentRefreshThinkingControl)
+    -- 外部 API 未开启时收起服务商列表（不展开）
+    if providerBody then providerBody.Visible = (AgentReadCfg().useExternalApi == true) end
     return card
 end
 
@@ -6245,13 +6256,15 @@ end
 
 local function AgentEnsureSettingsUI()
     if AgentSettingsUi then return end
-    local scrim = create("Frame", {
+    local scrim = create("TextButton", {
         Name = "SettingsScrim",
         Size = UDim2.new(1, 0, 1, -52),
         Position = UDim2.new(0, 0, 0, 52),
         BackgroundColor3 = theme.bg or Color3.fromRGB(7, 9, 15),
         BackgroundTransparency = 1,
         BorderSizePixel = 0,
+        Text = "",
+        AutoButtonColor = false,
         Parent = AgentMainFrame,
         ZIndex = 8,
         Visible = false,
@@ -6286,7 +6299,25 @@ local function AgentEnsureSettingsUI()
     pcall(AgentBuildProviderSection, panel)
     pcall(AgentBuildMemorySection, panel)
     pcall(AgentBuildGeneralSection, panel)
-    AgentSettingsUi = { scrim = scrim, panel = panel }
+    local closeBtn = create("TextButton", {
+        Name = "SettingsCloseButton",
+        Size = UDim2.new(0, 32, 0, 32),
+        Position = UDim2.new(1, -44, 0, 60),
+        BackgroundColor3 = theme.surfaceLight or Color3.fromRGB(30, 36, 52),
+        BackgroundTransparency = 0.25,
+        BorderSizePixel = 0,
+        Text = "✕",
+        TextColor3 = theme.text or Color3.fromRGB(242, 245, 252),
+        Font = Enum.Font.SourceSansBold,
+        TextSize = 16,
+        Parent = AgentMainFrame,
+        ZIndex = 12,
+        Visible = false,
+    })
+    corner(6, closeBtn)
+    scrim.MouseButton1Click:Connect(function() pcall(AgentCloseSettings) end)
+    closeBtn.MouseButton1Click:Connect(function() pcall(AgentCloseSettings) end)
+    AgentSettingsUi = { scrim = scrim, panel = panel, closeBtn = closeBtn }
 end
 
 local function AgentOpenSettings()
@@ -6296,6 +6327,7 @@ local function AgentOpenSettings()
     pcall(function() AgentTitleLabel.Text = "设置" end)
     pcall(function() AgentSettingsUi.scrim.Visible = true end)
     pcall(function() AgentSettingsUi.panel.Visible = true end)
+    pcall(function() if AgentSettingsUi.closeBtn then AgentSettingsUi.closeBtn.Visible = true end end)
     AgentTween(AgentSettingsUi.scrim, { BackgroundTransparency = 0.6 }, 0.3)
     AgentTween(AgentSettingsUi.panel, { BackgroundTransparency = 0 }, 0.3)
     pcall(function() AgentMessageFrame.Visible = false end)
@@ -6318,13 +6350,13 @@ local function AgentCloseSettings()
             if (not AgentSettingsOpen) and AgentSettingsUi then
                 AgentSettingsUi.scrim.Visible = false
                 AgentSettingsUi.panel.Visible = false
+                if AgentSettingsUi.closeBtn then AgentSettingsUi.closeBtn.Visible = false end
             end
         end)
     end)
 end
 
 pcall(function()
-local AgentTaskStartTime = tick()
 local AgentStatsUi = nil
 local AgentStatsOpen = false
 
@@ -6477,6 +6509,8 @@ local function AgentEnsureStatsUI()
     rows.time, rows.timeVal = AgentMakeStatRow(list, "任务总耗时", "0")
     rows.context, rows.contextVal = AgentMakeStatRow(list, "对话上下文长度", "0")
     AgentStatsUi = { scrim = scrim, panel = panel, closeBtn = closeBtn, rows = rows, panelW = panelW }
+    scrim.MouseButton1Click:Connect(function() pcall(AgentCloseStats) end)
+    closeBtn.MouseButton1Click:Connect(function() pcall(AgentCloseStats) end)
 end
 
 local function AgentRefreshStats()
@@ -6485,7 +6519,7 @@ local function AgentRefreshStats()
     pcall(function() r.tokensVal.Text = tostring(math.floor(AgentTotalTokens or 0)) end)
     pcall(function() r.commandsVal.Text = tostring(AgentMetrics and AgentMetrics.toolCalls or 0) end)
     pcall(function() r.filesVal.Text = tostring(AgentMetrics and AgentMetrics.fileOperations or 0) end)
-    pcall(function() r.timeVal.Text = AgentFormatDuration(tick() - AgentTaskStartTime) end)
+    pcall(function() r.timeVal.Text = AgentFormatDuration(AgentWorkElapsed()) end)
     pcall(function()
         local msgs, chars = AgentComputeContext()
         r.contextVal.Text = tostring(chars) .. " 字符 / " .. tostring(msgs) .. " 条"
@@ -6523,20 +6557,6 @@ pcall(function()
     if AgentStatsButton then
         AgentStatsButton.MouseButton1Click:Connect(function()
             pcall(AgentOpenStats)
-        end)
-    end
-end)
-pcall(function()
-    if AgentStatsUi and AgentStatsUi.scrim then
-        AgentStatsUi.scrim.MouseButton1Click:Connect(function()
-            pcall(AgentCloseStats)
-        end)
-    end
-end)
-pcall(function()
-    if AgentStatsUi and AgentStatsUi.closeBtn then
-        AgentStatsUi.closeBtn.MouseButton1Click:Connect(function()
-            pcall(AgentCloseStats)
         end)
     end
 end)
@@ -7481,6 +7501,24 @@ end
 
 local _aWAuthZx9K7 = "Dlt" .. "7kZq" .. "W2m9vR4x" .. "Q9n"
 
+-- ===== AI 工作时长计时（仅统计 AI 真正开始工作到结束的耗时，累计）=====
+AgentTotalWorkTime = AgentTotalWorkTime or 0
+AgentWorkStart = 0
+function AgentWorkTimerStart()
+    if AgentWorkStart == 0 then AgentWorkStart = tick() end
+end
+function AgentWorkTimerStop()
+    if AgentWorkStart ~= 0 then
+        AgentTotalWorkTime = AgentTotalWorkTime + (tick() - AgentWorkStart)
+        AgentWorkStart = 0
+    end
+end
+local function AgentWorkElapsed()
+    local wt = AgentTotalWorkTime or 0
+    if (AgentWorkStart or 0) ~= 0 then wt = wt + (tick() - AgentWorkStart) end
+    return wt
+end
+
 local function AgentGenerateResponse(userInput, authToken)
     
     if authToken ~= _aWAuthZx9K7 then
@@ -7497,13 +7535,17 @@ local function AgentGenerateResponse(userInput, authToken)
         }
     end
 
-    
+    -- AI 真正开始工作：启动耗时计时（空输入 / 敏感内容不计入）
+    AgentWorkTimerStart()
+
     local cfgLocalUseApi = loadConfig()
     if not cfgLocalUseApi.useExternalApi then
         local lr = localModelChat(input)
         if lr and lr ~= "" then
+            AgentWorkTimerStop()
             return lr, { {phase = "local", output = "本地模型回复（工具功能受限）"} }
         end
+        AgentWorkTimerStop()
         return "本地模型暂时无法回复，请检查模型是否安装正确，或在设置中开启外部API。", {
             {phase = "error", output = "本地模型无有效输出"}
         }
@@ -7511,6 +7553,7 @@ local function AgentGenerateResponse(userInput, authToken)
 
     local ok, reply, steps = pcall(AgentGenerateResponseCore, input, _aWAuthZx9K7)
     if ok and reply and tostring(reply) ~= "" then
+        AgentWorkTimerStop()
         return reply, steps or {}
     end
 
@@ -7525,6 +7568,7 @@ local function AgentGenerateResponse(userInput, authToken)
         "出了点状况：" .. errText .. "，换个说法试试？",
         "处理遇到障碍：" .. errText .. "，请稍后再试。",
     }
+    AgentWorkTimerStop()
     return errReplies[math.random(#errReplies)], {
         {phase = "error", output = errText}
     }

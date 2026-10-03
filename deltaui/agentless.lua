@@ -5456,6 +5456,10 @@ local function AgentTween(obj, props, dur)
 end
 
 local function AgentMakeCard(parent, title)
+    -- 标题高度（固定）；卡片顶部预留该高度，标题 Frame 用绝对定位钉在顶部，
+    -- 内容容器 body 则从预留高度之下开始。整张卡不使用 UIListLayout，
+    -- 从根上避免「嵌套 AutomaticSize + UIListLayout」导致首个子项被重排/错位。
+    local HEADER_H = 24
     local card = create("Frame", {
         Name = "Card_" .. tostring(title),
         Size = UDim2.new(1, 0, 0, 0),
@@ -5468,22 +5472,20 @@ local function AgentMakeCard(parent, title)
     })
     corner(theme.radius or 14, card)
     stroke(theme.border or Color3.fromRGB(52, 62, 88), 1, card)
+    -- 内边距：左右 12；顶部 10 + 标题高度 + 间距；底部 10
     create("UIPadding", {
         PaddingLeft = UDim.new(0, 12), PaddingRight = UDim.new(0, 12),
-        PaddingTop = UDim.new(0, 10), PaddingBottom = UDim.new(0, 10),
+        PaddingTop = UDim.new(0, 10 + HEADER_H + 8), PaddingBottom = UDim.new(0, 10),
         Parent = card,
     })
-    create("UIListLayout", {
-        FillDirection = Enum.FillDirection.Vertical,
-        Padding = UDim.new(0, 8),
-        Parent = card,
-    })
-    -- 固定高度的标题头部：始终位于卡片顶部，不随内容 AutomaticSize 重排而错位
-    local header
+    -- 固定标题：绝对定位于卡片顶部，不参与任何 UIListLayout 排序
     if title then
-        header = create("Frame", {
-            Size = UDim2.new(1, 0, 0, 22),
+        local header = create("Frame", {
+            Name = "CardHeader",
+            Size = UDim2.new(1, -24, 0, HEADER_H),
+            Position = UDim2.new(0, 12, 0, 10),
             BackgroundTransparency = 1,
+            ZIndex = 2,
             Parent = card,
         })
         create("TextLabel", {
@@ -5494,11 +5496,13 @@ local function AgentMakeCard(parent, title)
             Font = Enum.Font.SourceSansBold,
             TextSize = 15,
             TextXAlignment = Enum.TextXAlignment.Left,
+            TextYAlignment = Enum.TextYAlignment.Center,
             Parent = header,
         })
     end
-    -- 内容容器：自动高度，承载卡片实际内容，与标题头部解耦
+    -- 内容容器：自动高度，承载卡片实际内容；由 UIPadding 的顶部预留把它顶到标题下方
     local body = create("Frame", {
+        Name = "CardBody",
         Size = UDim2.new(1, 0, 0, 0),
         AutomaticSize = Enum.AutomaticSize.Y,
         BackgroundTransparency = 1,
@@ -6404,6 +6408,8 @@ local function AgentCloseSettings()
     AgentSettingsOpen = false
     pcall(function() AgentTitleLabel.Text = "AgentLess" end)
     if AgentSettingsUi then
+        -- 立即停止 scrim 拦截输入，避免淡出期间点不掉
+        pcall(function() AgentSettingsUi.scrim.Active = false end)
         AgentTween(AgentSettingsUi.scrim, { BackgroundTransparency = 1 }, 0.25)
         AgentTween(AgentSettingsUi.panel, { BackgroundTransparency = 1 }, 0.25)
     end
@@ -6516,6 +6522,7 @@ local function AgentEnsureStatsUI()
         ClipsDescendants = true,
         Parent = AgentMainFrame,
         ZIndex = 11,
+        Visible = false,
     })
     corner(theme.radius or 14, panel)
     stroke(theme.border or Color3.fromRGB(52, 62, 88), 1, panel)
@@ -6593,7 +6600,13 @@ local function AgentOpenStats()
     AgentEnsureStatsUI()
     AgentStatsOpen = true
     pcall(AgentRefreshStats)
-    pcall(function() AgentStatsUi.scrim.Visible = true end)
+    pcall(function()
+        -- 从右侧滑入：先置于屏幕外并设为可见，再 tween 到目标位置
+        AgentStatsUi.scrim.Visible = true
+        AgentStatsUi.scrim.Active = true
+        AgentStatsUi.panel.Visible = true
+        AgentStatsUi.panel.Position = UDim2.new(1, 0, 0, 0)
+    end)
     AgentTween(AgentStatsUi.scrim, { BackgroundTransparency = 0.5 }, 0.3)
     AgentTween(AgentStatsUi.panel, { BackgroundTransparency = 0 }, 0.3)
     AgentTween(AgentStatsUi.panel, { Position = UDim2.new(1, -AgentStatsUi.panelW, 0, 0) }, 0.3)
@@ -6601,15 +6614,24 @@ end
 
 local function AgentCloseStats()
     AgentStatsOpen = false
-    if AgentStatsUi then
-        AgentTween(AgentStatsUi.scrim, { BackgroundTransparency = 1 }, 0.28)
-        AgentTween(AgentStatsUi.panel, { Position = UDim2.new(1, 0, 0, 0) }, 0.28)
-        AgentTween(AgentStatsUi.panel, { BackgroundTransparency = 1 }, 0.28)
-    end
+    if not AgentStatsUi then return end
+    -- 立即让面板不再拦截输入 / 不可见，避免 tween 未执行时“关不掉”
+    pcall(function()
+        AgentStatsUi.scrim.Active = false
+        AgentStatsUi.scrim.Visible = false
+        AgentStatsUi.panel.Visible = false
+        AgentStatsUi.panel.Position = UDim2.new(1, 0, 0, 0)
+        AgentStatsUi.panel.BackgroundTransparency = 1
+    end)
+    -- 再做一次淡出/滑出（若 TweenService 不可用，上面的直接赋值已保证关闭）
+    AgentTween(AgentStatsUi.scrim, { BackgroundTransparency = 1 }, 0.28)
+    AgentTween(AgentStatsUi.panel, { Position = UDim2.new(1, 0, 0, 0) }, 0.28)
+    AgentTween(AgentStatsUi.panel, { BackgroundTransparency = 1 }, 0.28)
     task.delay(0.3, function()
         pcall(function()
             if (not AgentStatsOpen) and AgentStatsUi then
                 AgentStatsUi.scrim.Visible = false
+                AgentStatsUi.panel.Visible = false
             end
         end)
     end)

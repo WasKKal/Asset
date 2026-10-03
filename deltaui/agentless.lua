@@ -5361,27 +5361,7 @@ local AgentTitleLabel = create("TextLabel", {
 })
 
 
-AgentModelLabel = create("TextLabel", {
-    Name = "ModelLabel",
-    Size = UDim2.new(0, 96, 0, 20),
-    Position = UDim2.new(1, -230, 0.5, -10),
-    BackgroundTransparency = 1,
-    Text = "DeepSeek",
-    TextColor3 = theme.textDim,
-    Font = Enum.Font.SourceSansBold,
-    TextSize = 11,
-    TextXAlignment = Enum.TextXAlignment.Right,
-    TextYAlignment = Enum.TextYAlignment.Center,
-    Parent = AgentTitleBar,
-    ZIndex = 5
-})
-do
-    local _m = AGENT_PROVIDERS[AgentLocalAIConfig.activeModel or "flash"]
-    if _m then
-        AgentModelLabel.Text = _m.label
-        AgentModelLabel.TextColor3 = _m.isClaude and Color3.fromRGB(255, 200, 60) or theme.textDim
-    end
-end
+-- 已移除标题栏的模型名称显示（原 AgentModelLabel），仅保留左侧标题与右侧按钮
 
 if type(updateExternalApiUI) == "function" then
     updateExternalApiUI()
@@ -6528,6 +6508,7 @@ local function AgentEnsureStatsUI()
         BackgroundTransparency = 1,
         BorderSizePixel = 0,
         Text = "",
+        AutoButtonColor = false,
         Parent = AgentMainFrame,
         ZIndex = 10,
         Visible = false,
@@ -6570,6 +6551,7 @@ local function AgentEnsureStatsUI()
         BackgroundTransparency = 0.3,
         BorderSizePixel = 0,
         Text = "",
+        AutoButtonColor = false,
         Parent = header,
         ZIndex = 12,
     })
@@ -6620,11 +6602,13 @@ local function AgentOpenStats()
     AgentEnsureStatsUI()
     AgentStatsOpen = true
     pcall(AgentRefreshStats)
+    -- 从右向左滑入：先把面板置于屏幕右侧外并可见，再做 Position 补间（方向不变）
     pcall(function()
-        -- 从右侧滑入：先置于屏幕外并设为可见，再 tween 到目标位置
         AgentStatsUi.scrim.Visible = true
         AgentStatsUi.scrim.Active = true
+        AgentStatsUi.scrim.BackgroundTransparency = 1
         AgentStatsUi.panel.Visible = true
+        AgentStatsUi.panel.BackgroundTransparency = 1
         AgentStatsUi.panel.Position = UDim2.new(1, 0, 0, 0)
     end)
     AgentTween(AgentStatsUi.scrim, { BackgroundTransparency = 0.5 }, 0.3)
@@ -6633,28 +6617,22 @@ local function AgentOpenStats()
 end
 
 local function AgentCloseStats()
+    if not AgentStatsOpen then return end
     AgentStatsOpen = false
     if not AgentStatsUi then return end
-    -- 立即让面板不再拦截输入 / 不可见，避免 tween 未执行时“关不掉”
+    local ui = AgentStatsUi
+    -- 立刻解除遮罩拦截并隐藏面板，确保不会出现「关不掉」的情况
     pcall(function()
-        AgentStatsUi.scrim.Active = false
-        AgentStatsUi.scrim.Visible = false
-        AgentStatsUi.panel.Visible = false
-        AgentStatsUi.panel.Position = UDim2.new(1, 0, 0, 0)
-        AgentStatsUi.panel.BackgroundTransparency = 1
+        ui.scrim.Active = false
+        ui.scrim.Visible = false
+        ui.panel.Visible = false
+        ui.panel.Position = UDim2.new(1, 0, 0, 0)
+        ui.panel.BackgroundTransparency = 1
     end)
-    -- 再做一次淡出/滑出（若 TweenService 不可用，上面的直接赋值已保证关闭）
-    AgentTween(AgentStatsUi.scrim, { BackgroundTransparency = 1 }, 0.28)
-    AgentTween(AgentStatsUi.panel, { Position = UDim2.new(1, 0, 0, 0) }, 0.28)
-    AgentTween(AgentStatsUi.panel, { BackgroundTransparency = 1 }, 0.28)
-    task.delay(0.3, function()
-        pcall(function()
-            if (not AgentStatsOpen) and AgentStatsUi then
-                AgentStatsUi.scrim.Visible = false
-                AgentStatsUi.panel.Visible = false
-            end
-        end)
-    end)
+    -- 滑出 + 淡出（TweenService 不可用时，上面的直接隐藏已保证关闭）
+    AgentTween(ui.scrim, { BackgroundTransparency = 1 }, 0.25)
+    AgentTween(ui.panel, { Position = UDim2.new(1, 0, 0, 0) }, 0.25)
+    AgentTween(ui.panel, { BackgroundTransparency = 1 }, 0.25)
 end
 
 pcall(function()

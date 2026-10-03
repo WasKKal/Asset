@@ -2088,8 +2088,8 @@ end
 AgentLocalAIConfig = { -- [官方页面] 提为全局：原文件部分引用早于 local 声明
     enabled = true,
     endpoint = "https://api.deepseek.com/chat/completions",
-    model = "deepseek-v4-flash",
-    
+    model = "",
+
     activeModel = "flash",
     
     isClaude = false,
@@ -2113,31 +2113,33 @@ AgentLocalAIConfig = { -- [官方页面] 提为全局：原文件部分引用早
 }
 
 
+-- 配置读写辅助（必须定义在所有调用它的函数之前，否则会被解析为全局变量而为 nil）
+local function AgentReadCfg()
+    local ok, c = pcall(loadConfig)
+    if ok and type(c) == "table" then return c end
+    return {}
+end
+local function AgentWriteCfg(k, v)
+    local c = AgentReadCfg()
+    c[k] = v
+    pcall(saveConfig, c)
+end
+
 local AGENT_PROVIDERS = {
     flash = {
-        label = "Deepseek-V4-Flash",
-        model = "deepseek-v4-flash",
-        endpoint = "https://api.deepseek.com/chat/completions",
-        apiKey = "",
-        isClaude = false,
-    },
-    pro = {
-        label = "Deepseek-V4-Pro",
-        model = "deepseek-v4-pro",
+        label = "DeepSeek",
         endpoint = "https://api.deepseek.com/chat/completions",
         apiKey = "",
         isClaude = false,
     },
     claude = {
-        label = "Claude Haiku4.5",
-        model = "claude-haiku-4-5",
+        label = "Anthropic",
         endpoint = "https://api.anthropic.com/v1/messages",
-        apiKey = "",  
+        apiKey = "",
         isClaude = true,
     },
     aiagent = {
-        label = "Agent-2.5-flash",
-        model = "agnes-2.5-flash",
+        label = "Agnes",
         endpoint = "https://api.agnes-ai.cn/v1/chat/completions",
         apiKey = "",
         isClaude = false,
@@ -2145,51 +2147,45 @@ local AGENT_PROVIDERS = {
         bypassPoints = false,
     },
     -- ===== 国内主流 AI 预设（填 API Key 即可用，OpenAI 兼容） =====
+    -- 注意：以下预设不内置任何模型名，模型列表由对应服务商 API 拉取后手动选择
     qwen = {
         label = "阿里通义千问",
-        model = "qwen-plus",
         endpoint = "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
         apiKey = "",
         isClaude = false,
     },
     glm = {
         label = "智谱 GLM",
-        model = "glm-4-plus",
         endpoint = "https://open.bigmodel.cn/api/paas/v4/chat/completions",
         apiKey = "",
         isClaude = false,
     },
     kimi = {
         label = "月之暗面 Kimi",
-        model = "moonshot-v1-8k",
         endpoint = "https://api.moonshot.cn/v1/chat/completions",
         apiKey = "",
         isClaude = false,
     },
     minimax = {
         label = "MiniMax",
-        model = "abab6.5s-chat",
         endpoint = "https://api.minimax.chat/v1/chat/completions",
         apiKey = "",
         isClaude = false,
     },
     baichuan = {
         label = "百川智能",
-        model = "Baichuan4",
         endpoint = "https://api.baichuan-ai.com/v1/chat/completions",
         apiKey = "",
         isClaude = false,
     },
     doubao = {
         label = "火山方舟 豆包",
-        model = "doubao-seed-1.6",
         endpoint = "https://ark.cn-beijing.volces.com/api/v3/chat/completions",
         apiKey = "",
         isClaude = false,
     },
     hunyuan = {
         label = "腾讯混元",
-        model = "hunyuan-turbo",
         endpoint = "https://api.hunyuan.cloud.tencent.com/v1/chat/completions",
         apiKey = "",
         isClaude = false,
@@ -2200,10 +2196,9 @@ local AGENT_PROVIDERS = {
 -- switchable = false 表示当前模型不支持「思考级别切换」，界面将显示「当前模型不支持该操作」
 -- style 决定请求体中如何注入级别参数：qwen/hunyuan 用 thinking_budget，其余用 OpenAI 风格 reasoning_effort
 -- 注：以下均为全局，避免主函数局部变量超过 Lua 5.1 的 200 上限
-AgentUI = { objects = {}, presetFrame = nil, presetStatus = nil, thinkFrame = nil, currentPresetId = nil }
+AgentUI = { objects = {}, presetFrame = nil, presetStatus = nil, presetArea = nil, thinkFrame = nil, currentPresetId = nil }
 AGENT_THINKING_CAPS = {
     flash   = {switchable = false},
-    pro     = {switchable = false},
     claude  = {switchable = false},
     aiagent = {switchable = false},
     qwen    = {switchable = true, levels = {"低", "中", "高"}, style = "qwen"},
@@ -2242,7 +2237,6 @@ end
 function AgentApplyPresetModel(id, model)
     pcall(AgentApplyModel, id)
     if not model then return true end
-    if AGENT_PROVIDERS[id] then AGENT_PROVIDERS[id].model = model end
     AgentLocalAIConfig.model = model
     local cfg = AgentReadCfg()
     cfg.providerSelectedModel = cfg.providerSelectedModel or {}
@@ -2285,6 +2279,16 @@ function AgentFetchPresetModels(id)
         pcall(function() if AgentUI.presetStatus then AgentUI.presetStatus.Text = "未获取到模型"; AgentUI.presetStatus.TextColor3 = theme.red or Color3.fromRGB(255, 82, 104) end end)
         return
     end
+    -- 尚无选中模型时，以拉取到的第一个模型作为默认（来源是 API，非内置）
+    local cfg = AgentReadCfg()
+    local savedSel = (cfg.providerSelectedModel and type(cfg.providerSelectedModel[tostring(id)]) == "string") and cfg.providerSelectedModel[tostring(id)] or ""
+    if savedSel == "" and models[1] then
+        savedSel = tostring(models[1])
+        cfg.providerSelectedModel = cfg.providerSelectedModel or {}
+        cfg.providerSelectedModel[tostring(id)] = savedSel
+        pcall(saveConfig, cfg)
+        AgentLocalAIConfig.model = savedSel
+    end
     AgentPersistPresetModels(id, models)
     if AgentUI.currentPresetId == id then AgentRenderPresetModelList(id, models) end
     pcall(function() if AgentUI.presetStatus then AgentUI.presetStatus.Text = "已拉取 " .. tostring(#models) .. " 个模型，点击选择"; AgentUI.presetStatus.TextColor3 = theme.accent or Color3.fromRGB(56, 189, 248) end end)
@@ -2297,8 +2301,9 @@ function AgentRenderPresetModelList(id, list)
         for _, c in ipairs(AgentUI.presetFrame:GetChildren()) do
             if c:IsA("TextButton") or c:IsA("TextLabel") then c:Destroy() end
         end
+        if AgentUI.presetArea then AgentUI.presetArea.Visible = true end
         local cfg = AgentReadCfg()
-        local sel = (cfg.providerSelectedModel and cfg.providerSelectedModel[tostring(id)]) or (AGENT_PROVIDERS[id] and AGENT_PROVIDERS[id].model) or ""
+        local sel = (cfg.providerSelectedModel and type(cfg.providerSelectedModel[tostring(id)]) == "string" and cfg.providerSelectedModel[tostring(id)]) or ""
         for _, mid in ipairs(list) do
             local active = (mid == sel)
             local mb = create("TextButton", {
@@ -2344,17 +2349,10 @@ function AgentRefreshPresetModels(id)
         if cached and #cached > 0 then
             AgentRenderPresetModelList(id, cached)
             pcall(function() if AgentUI.presetStatus then AgentUI.presetStatus.Text = "已加载 " .. tostring(#cached) .. " 个模型（来自缓存）"; AgentUI.presetStatus.TextColor3 = theme.textDim or Color3.fromRGB(150, 160, 184) end end)
+            if AgentUI.presetArea then AgentUI.presetArea.Visible = true end
         else
-            create("TextLabel", {
-                Size = UDim2.new(1, 0, 0, 22),
-                BackgroundTransparency = 1,
-                Text = "暂无模型：点击上方「拉取」加载（选择服务商后会自动加载）",
-                TextColor3 = theme.textDim or Color3.fromRGB(150, 160, 184),
-                Font = Enum.Font.SourceSans,
-                TextSize = 11,
-                TextXAlignment = Enum.TextXAlignment.Left,
-                Parent = AgentUI.presetFrame,
-            })
+            -- 未拉取到模型列表：隐藏整个模型列表区域
+            if AgentUI.presetArea then AgentUI.presetArea.Visible = false end
             pcall(function() if AgentUI.presetStatus then AgentUI.presetStatus.Text = "" end end)
             if m and m.apiKey and m.apiKey ~= "" then
                 if type(task) == "table" and type(task.spawn) == "function" then
@@ -2481,10 +2479,13 @@ end
 
 function AgentApplyModel(id)
     local m = AGENT_PROVIDERS[id] or AGENT_PROVIDERS.flash
-    AgentLocalAIConfig.model = m.model
+    -- 不内置模型名：model 交由 API 拉取后手动选择；仅在已保存过选择时恢复
+    local cfg = AgentReadCfg()
+    local savedSel = (cfg.providerSelectedModel and type(cfg.providerSelectedModel[tostring(id)]) == "string") and cfg.providerSelectedModel[tostring(id)] or ""
+    AgentLocalAIConfig.model = savedSel
     AgentLocalAIConfig.endpoint = m.endpoint
     AgentLocalAIConfig.apiKey = m.apiKey
-    
+
     AgentLocalAIConfig.isClaude = (id == "claude") or (m.isClaude == true)
     AgentLocalAIConfig.noThinking = (m.noThinking == true)
     AgentLocalAIConfig.bypassPoints = (m.bypassPoints == true)
@@ -2492,7 +2493,7 @@ function AgentApplyModel(id)
     if AgentModelLabel then
         pcall(function()
             AgentModelLabel.Text = m.label
-            
+
             AgentModelLabel.TextColor3 = m.isClaude and Color3.fromRGB(255, 200, 60) or theme.textDim
         end)
     end
@@ -2501,14 +2502,10 @@ end
 local _aiModelSaved = loadConfig()
 if _aiModelSaved and _aiModelSaved.activeModel and AGENT_PROVIDERS[_aiModelSaved.activeModel] then
     AgentApplyModel(_aiModelSaved.activeModel)
-    -- 恢复该服务商此前选中的具体模型
+    -- 恢复该服务商此前手动选中的具体模型（来自 API 列表，非内置）
     local selMap = _aiModelSaved.providerSelectedModel
     if type(selMap) == "table" and type(selMap[_aiModelSaved.activeModel]) == "string" then
-        local sid = _aiModelSaved.activeModel
-        if AGENT_PROVIDERS[sid] then
-            AGENT_PROVIDERS[sid].model = selMap[sid]
-            AgentLocalAIConfig.model = selMap[sid]
-        end
+        AgentLocalAIConfig.model = selMap[_aiModelSaved.activeModel]
     end
 end
 
@@ -5369,7 +5366,7 @@ AgentModelLabel = create("TextLabel", {
     Size = UDim2.new(0, 96, 0, 20),
     Position = UDim2.new(1, -230, 0.5, -10),
     BackgroundTransparency = 1,
-    Text = "Deepseek-V4-Flash",
+    Text = "DeepSeek",
     TextColor3 = theme.textDim,
     Font = Enum.Font.SourceSansBold,
     TextSize = 11,
@@ -5481,19 +5478,39 @@ local function AgentMakeCard(parent, title)
         Padding = UDim.new(0, 8),
         Parent = card,
     })
+    -- 固定高度的标题头部：始终位于卡片顶部，不随内容 AutomaticSize 重排而错位
+    local header
     if title then
+        header = create("Frame", {
+            Size = UDim2.new(1, 0, 0, 22),
+            BackgroundTransparency = 1,
+            Parent = card,
+        })
         create("TextLabel", {
-            Size = UDim2.new(1, 0, 0, 18),
+            Size = UDim2.new(1, 0, 1, 0),
             BackgroundTransparency = 1,
             Text = title,
             TextColor3 = theme.accent or Color3.fromRGB(56, 189, 248),
             Font = Enum.Font.SourceSansBold,
             TextSize = 15,
             TextXAlignment = Enum.TextXAlignment.Left,
-            Parent = card,
+            Parent = header,
         })
     end
-    return card
+    -- 内容容器：自动高度，承载卡片实际内容，与标题头部解耦
+    local body = create("Frame", {
+        Size = UDim2.new(1, 0, 0, 0),
+        AutomaticSize = Enum.AutomaticSize.Y,
+        BackgroundTransparency = 1,
+        BorderSizePixel = 0,
+        Parent = card,
+    })
+    create("UIListLayout", {
+        FillDirection = Enum.FillDirection.Vertical,
+        Padding = UDim.new(0, 8),
+        Parent = body,
+    })
+    return card, body
 end
 
 local function AgentMakeToggleRow(parent, label, getVal, setVal)
@@ -5704,24 +5721,15 @@ local function AgentShowToolPreview(toolDef)
 end
 
 
-local function AgentReadCfg()
-    local ok, c = pcall(loadConfig)
-    if ok and type(c) == "table" then return c end
-    return {}
-end
-local function AgentWriteCfg(k, v)
-    local c = AgentReadCfg()
-    c[k] = v
-    pcall(saveConfig, c)
-end
 local AgentDebugBar = nil
 local function AgentEnsureDebugBar()
     if AgentDebugBar then return end
     local bar = create("ScrollingFrame", {
         Name = "DebugToolBar",
-        Size = UDim2.new(1, -134, 0, 26),
-        Position = UDim2.new(0, 122, 1, -86),
-        BackgroundTransparency = 1,
+        Size = UDim2.new(1, -134, 0, 30),
+        Position = UDim2.new(0, 122, 1, -90),
+        BackgroundColor3 = theme.surfaceLight or Color3.fromRGB(30, 36, 52),
+        BackgroundTransparency = 0.25,
         BorderSizePixel = 0,
         ScrollBarThickness = 4,
         ScrollingDirection = Enum.ScrollingDirection.X,
@@ -5729,16 +5737,29 @@ local function AgentEnsureDebugBar()
         CanvasSize = UDim2.new(0, 0, 0, 0),
         VerticalScrollBarInset = Enum.ScrollBarInset.None,
         Parent = AgentMainFrame,
-        ZIndex = 6,
+        ZIndex = 7,
         Visible = false,
     })
+    corner(8, bar)
+    create("UIPadding", { PaddingLeft = UDim.new(0, 8), PaddingRight = UDim.new(0, 8), Parent = bar })
     create("UIListLayout", {FillDirection = Enum.FillDirection.Horizontal, Padding = UDim.new(0, 6), Parent = bar})
+    -- 调试模式标识：明确提示当前已开启调试模式（之前纯透明条，开启后几乎看不出变化）
+    create("TextLabel", {
+        Size = UDim2.new(0, 38, 1, 0),
+        BackgroundTransparency = 1,
+        Text = "调试",
+        TextColor3 = theme.accent or Color3.fromRGB(56, 189, 248),
+        Font = Enum.Font.SourceSansBold,
+        TextSize = 12,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        Parent = bar,
+    })
     local tools = AGENT_DEEPSEEK_TOOLS or {}
     for _, td in ipairs(tools) do
         local fn = td["function"] or td
         local nm = tostring(fn.name or "")
         if nm ~= "" then
-            local b = create("TextButton", {Size = UDim2.new(0, 18 + #nm * 9, 0, 22), BackgroundColor3 = theme.surfaceLight or Color3.fromRGB(30, 36, 52), BackgroundTransparency = 0.4, BorderSizePixel = 0, Text = nm, TextColor3 = theme.textDim or Color3.fromRGB(150, 160, 184), TextSize = 11, Font = Enum.Font.SourceSans, AutoButtonColor = false, Parent = bar})
+            local b = create("TextButton", {Size = UDim2.new(0, 18 + #nm * 9, 0, 22), BackgroundColor3 = theme.surface or Color3.fromRGB(18, 22, 34), BackgroundTransparency = 0.6, BorderSizePixel = 0, Text = nm, TextColor3 = theme.text or Color3.fromRGB(242, 245, 252), TextSize = 11, Font = Enum.Font.SourceSans, AutoButtonColor = false, Parent = bar})
             corner(7, b)
             b.MouseButton1Click:Connect(function()
                 pcall(AgentShowToolPreview, td)
@@ -5757,14 +5778,14 @@ end
 
 
 local function AgentBuildProviderSection(panel)
-    local card = AgentMakeCard(panel, "AI 服务商管理")
+    local card, body = AgentMakeCard(panel, "AI 服务商管理")
     -- 服务商列表容器：外部 API 未开启时收起（不展开）
     local providerBody = create("Frame", {
         Size = UDim2.new(1, 0, 0, 0),
         AutomaticSize = Enum.AutomaticSize.Y,
         BackgroundTransparency = 1,
         BorderSizePixel = 0,
-        Parent = card,
+        Parent = body,
     })
     create("UIListLayout", { FillDirection = Enum.FillDirection.Vertical, Padding = UDim.new(0, 10), Parent = providerBody })
     local cur = (AgentLocalAIConfig and AgentLocalAIConfig.activeModel) or "flash"
@@ -5902,6 +5923,19 @@ local function AgentBuildProviderSection(panel)
     end
 
     -- ===== 预设服务商模型列表（选择服务商后自动加载 / 点「拉取」刷新）=====
+    -- 未拉取到模型列表时不显示该区域（presetArea.Visible 由刷新逻辑控制）
+    local presetArea = create("Frame", {
+        Name = "PresetModelArea",
+        Size = UDim2.new(1, 0, 0, 0),
+        AutomaticSize = Enum.AutomaticSize.Y,
+        BackgroundTransparency = 1,
+        BorderSizePixel = 0,
+        ClipsDescendants = true,
+        Parent = providerBody,
+        Visible = false,
+    })
+    AgentUI.presetArea = presetArea
+    create("UIListLayout", { FillDirection = Enum.FillDirection.Vertical, Padding = UDim.new(0, 6), Parent = presetArea })
     create("TextLabel", {
         Size = UDim2.new(1, 0, 0, 16),
         BackgroundTransparency = 1,
@@ -5910,7 +5944,7 @@ local function AgentBuildProviderSection(panel)
         Font = Enum.Font.SourceSans,
         TextSize = 12,
         TextXAlignment = Enum.TextXAlignment.Left,
-        Parent = providerBody,
+        Parent = presetArea,
     })
     AgentUI.presetStatus = create("TextLabel", {
         Size = UDim2.new(1, 0, 0, 16),
@@ -5920,7 +5954,7 @@ local function AgentBuildProviderSection(panel)
         Font = Enum.Font.SourceSans,
         TextSize = 11,
         TextXAlignment = Enum.TextXAlignment.Left,
-        Parent = providerBody,
+        Parent = presetArea,
     })
     AgentUI.presetFrame = create("ScrollingFrame", {
         Size = UDim2.new(1, 0, 0, 130),
@@ -5929,7 +5963,7 @@ local function AgentBuildProviderSection(panel)
         BorderSizePixel = 0,
         ScrollBarThickness = 4,
         ScrollBarImageColor3 = theme.textDim or Color3.fromRGB(150, 160, 184),
-        Parent = providerBody,
+        Parent = presetArea,
         Visible = true,
     })
     corner(8, AgentUI.presetFrame)
@@ -6105,6 +6139,22 @@ local function AgentBuildProviderSection(panel)
                     end)
                 end)
             end
+            -- 尚无选中模型时，以拉取到的第一个模型作为默认（来源是 API，非内置）
+            if not (AgentLocalAIConfig.customActiveModel) and models[1] then
+                local first = tostring(models[1])
+                AgentLocalAIConfig.customActiveModel = first
+                AgentLocalAIConfig.model = first
+                if type(loadConfig) == "function" and type(saveConfig) == "function" then
+                    pcall(function()
+                        local cfg = loadConfig()
+                        cfg.customActiveModel = first
+                        saveConfig(cfg)
+                    end)
+                end
+                info.Text = "当前服务商：" .. AgentProviderLabel("custom")
+                statusLabel.Text = "已应用自定义模型：" .. first
+                statusLabel.TextColor3 = theme.accent or Color3.fromRGB(56, 189, 248)
+            end
             modelList.Visible = true
             refreshCustomHighlight()
             statusLabel.Text = "已拉取 " .. tostring(#models) .. " 个模型，点击选择"
@@ -6145,7 +6195,7 @@ local function AgentBuildProviderSection(panel)
 
     -- ===== 思考级别切换 =====
     do
-        local thinkCard = AgentMakeCard(providerBody, "思考级别")
+        local thinkCard, thinkBody = AgentMakeCard(providerBody, "思考级别")
         create("TextLabel", {
             Size = UDim2.new(1, 0, 0, 28),
             BackgroundTransparency = 1,
@@ -6155,18 +6205,18 @@ local function AgentBuildProviderSection(panel)
             TextSize = 11,
             TextWrapped = true,
             TextXAlignment = Enum.TextXAlignment.Left,
-            Parent = thinkCard,
+            Parent = thinkBody,
         })
         AgentUI.thinkFrame = create("Frame", {
             Size = UDim2.new(1, 0, 0, 0),
             AutomaticSize = Enum.AutomaticSize.Y,
             BackgroundTransparency = 1,
-            Parent = thinkCard,
+            Parent = thinkBody,
         })
         create("UIListLayout", { FillDirection = Enum.FillDirection.Vertical, Padding = UDim.new(0, 6), Parent = AgentUI.thinkFrame })
     end
 
-    AgentMakeToggleRow(card, "启用外部 API", function() return AgentReadCfg().useExternalApi == true end,
+    AgentMakeToggleRow(body, "启用外部 API", function() return AgentReadCfg().useExternalApi == true end,
         function(v) AgentWriteCfg("useExternalApi", v); if providerBody then providerBody.Visible = v end; pcall(updateExternalApiUI, v) end)
 
     -- 初始化：恢复当前服务商的模型列表与思考级别控件
@@ -6178,7 +6228,7 @@ local function AgentBuildProviderSection(panel)
 end
 
 local function AgentBuildMemorySection(panel)
-    local card = AgentMakeCard(panel, "全局记忆管理")
+    local card, body = AgentMakeCard(panel, "全局记忆管理")
     local okDb, db = pcall(AgentLoadMemoryDB)
     db = (okDb and type(db) == "table") and db or {}
     local count = #db
@@ -6194,7 +6244,7 @@ local function AgentBuildMemorySection(panel)
         Font = Enum.Font.SourceSans,
         TextSize = 12,
         TextXAlignment = Enum.TextXAlignment.Left,
-        Parent = card,
+        Parent = body,
     })
     local clearBtn = create("TextButton", {
         Size = UDim2.new(1, 0, 0, 30),
@@ -6202,10 +6252,10 @@ local function AgentBuildMemorySection(panel)
         BackgroundTransparency = 0.15,
         BorderSizePixel = 0,
         Text = "清空全部全局记忆",
-        TextColor3 = theme.red or Color3.fromRGB(255, 82, 104),
+        TextColor3 = Color3.fromRGB(255, 255, 255),
         Font = Enum.Font.SourceSansBold,
         TextSize = 13,
-        Parent = card,
+        Parent = body,
     })
     corner(8, clearBtn)
     local confirming = false
@@ -6234,8 +6284,8 @@ local function AgentBuildMemorySection(panel)
 end
 
 local function AgentBuildGeneralSection(panel)
-    local card = AgentMakeCard(panel, "通用")
-    AgentMakeToggleRow(card, "调试模式", function() return AgentReadCfg().debug_mode == true end,
+    local card, body = AgentMakeCard(panel, "通用")
+    AgentMakeToggleRow(body, "调试模式", function() return AgentReadCfg().debug_mode == true end,
         function(v) AgentWriteCfg("debug_mode", v); AgentApplyDebugBar() end)
     create("TextLabel", {
         Size = UDim2.new(1, 0, 0, 28),
@@ -6245,7 +6295,7 @@ local function AgentBuildGeneralSection(panel)
         Font = Enum.Font.SourceSans,
         TextSize = 12,
         TextXAlignment = Enum.TextXAlignment.Left,
-        Parent = card,
+        Parent = body,
     })
     return card
 end
@@ -8427,9 +8477,8 @@ local AGENTLESS_TRANSLATIONS = {
     thinking_mode_desc = {en = "Enable the model's thinking mode and visualize its reasoning process", zh = "开启模型思考模式，可视化思考过程", ko = "모델의 사고 모드를 켜고 추론 과정을 시각화", ja = "モデルの思考モードを有効化し推論プロセスを可視化"},
     model_switch = {en = "Model", zh = "选择模型", ko = "모델 선택", ja = "モデル"},
     model_switch_desc = {en = "Switch the AI model used by AgentLess", zh = "切换 AgentLess 使用的 AI 模型", ko = "AgentLess가 사용하는 AI 모델 전환", ja = "AgentLessが使用するAIモデルを切り替え"},
-    model_flash = {en = "Deepseek-V4-Flash", zh = "Deepseek-V4-Flash", ko = "Deepseek-V4-Flash", ja = "Deepseek-V4-Flash"},
-    model_pro = {en = "Deepseek-V4-Pro", zh = "Deepseek-V4-Pro", ko = "Deepseek-V4-Pro", ja = "Deepseek-V4-Pro"},
-    model_claude = {en = "Claude Haiku4.5", zh = "Claude Haiku4.5", ko = "Claude Haiku4.5", ja = "Claude Haiku4.5"},
+    model_flash = {en = "DeepSeek", zh = "DeepSeek", ko = "DeepSeek", ja = "DeepSeek"},
+    model_claude = {en = "Anthropic", zh = "Anthropic", ko = "Anthropic", ja = "Anthropic"},
     use_external_api = {en = "Use External API", zh = "使用外部API", ko = "외부 API 사용", ja = "外部APIを使用"},
     use_external_api_desc = {en = "Show model & thinking mode settings. Model name stays hidden while off", zh = "启用后显示模型/思考模式设置；关闭时不显示模型名称", ko = "켜면 모델/사고 모드 설정 표시, 끄면 모델명 숨김", ja = "ONでモデル/思考モードを表示、OFF時はモデル名を非表示"},
     training_upload = {en = "Upload Training Data", zh = "上传训练数据", ko = "학습 데이터 업로드", ja = "学習データをアップロード"},
@@ -8486,9 +8535,9 @@ local function buildAgentLessSettings(env, G)
     if not card then return false end
     G.__DeltaUI_agentlessSettingsBuilt = true
 
-    local modelIds = {"flash", "pro", "claude", "aiagent", "qwen", "glm", "kimi", "minimax", "baichuan", "doubao", "hunyuan", "custom"}
-    local modelLabels = {"model_flash", "model_pro", "model_claude", nil, nil, nil, nil, nil, nil, nil, nil, nil}
-    local modelOptions = {tr("model_flash"), tr("model_pro"), tr("model_claude"), "Agent-2.5-flash", "阿里通义千问", "智谱 GLM", "月之暗面 Kimi", "MiniMax", "百川智能", "火山方舟 豆包", "腾讯混元", "自定义服务商"}
+    local modelIds = {"flash", "claude", "aiagent", "qwen", "glm", "kimi", "minimax", "baichuan", "doubao", "hunyuan", "custom"}
+    local modelLabels = {"model_flash", "model_claude", nil, nil, nil, nil, nil, nil, nil, nil, nil}
+    local modelOptions = {tr("model_flash"), tr("model_claude"), "Agnes", "阿里通义千问", "智谱 GLM", "月之暗面 Kimi", "MiniMax", "百川智能", "火山方舟 豆包", "腾讯混元", "自定义服务商"}
 
     local rowExtApi = makeSettingRow("use_external_api", "use_external_api_desc", 1)
     if rowExtApi then rowExtApi.Parent = card end

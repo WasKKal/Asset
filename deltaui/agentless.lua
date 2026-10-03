@@ -2252,7 +2252,7 @@ function AgentApplyPresetModel(id, model)
     pcall(function()
         if AgentModelLabel then
             local m = AGENT_PROVIDERS[id] or {}
-            AgentModelLabel.Text = (m.label or id) .. " · " .. tostring(model)
+            AgentModelLabel.Text = (m.label or id)
             AgentModelLabel.TextColor3 = (m.isClaude == true) and Color3.fromRGB(255, 200, 60) or (theme.textDim or Color3.fromRGB(150, 160, 184))
         end
     end)
@@ -3276,7 +3276,7 @@ function AgentApplyCustomProvider(baseUrl, apiKey, model)
     end
     pcall(function()
         if AgentModelLabel then
-            AgentModelLabel.Text = AgentProviderLabel("custom") .. " · " .. model
+            AgentModelLabel.Text = AgentProviderLabel("custom")
             AgentModelLabel.TextColor3 = theme.textDim or Color3.fromRGB(150, 160, 184)
         end
     end)
@@ -5807,7 +5807,7 @@ local function AgentBuildProviderSection(panel)
     })
     create("UIPadding", {
         PaddingLeft = UDim.new(0, 8), PaddingRight = UDim.new(0, 8),
-        PaddingTop = UDim.new(0, 8), PaddingBottom = UDim.new(0, 8),
+        PaddingTop = UDim.new(0, 4), PaddingBottom = UDim.new(0, 4),
         Parent = listFrame,
     })
 
@@ -5934,7 +5934,7 @@ local function AgentBuildProviderSection(panel)
     })
     corner(8, AgentUI.presetFrame)
     create("UIListLayout", { FillDirection = Enum.FillDirection.Vertical, Padding = UDim.new(0, 5), Parent = AgentUI.presetFrame })
-    create("UIPadding", { PaddingLeft = UDim.new(0, 8), PaddingRight = UDim.new(0, 8), PaddingTop = UDim.new(0, 8), PaddingBottom = UDim.new(0, 8), Parent = AgentUI.presetFrame })
+    create("UIPadding", { PaddingLeft = UDim.new(0, 8), PaddingRight = UDim.new(0, 8), PaddingTop = UDim.new(0, 4), PaddingBottom = UDim.new(0, 4), Parent = AgentUI.presetFrame })
 
     -- ===== 自定义服务商 =====
     create("TextLabel", {
@@ -6019,7 +6019,7 @@ local function AgentBuildProviderSection(panel)
     })
     corner(8, modelList)
     create("UIListLayout", { FillDirection = Enum.FillDirection.Vertical, Padding = UDim.new(0, 5), Parent = modelList })
-    create("UIPadding", { PaddingLeft = UDim.new(0, 8), PaddingRight = UDim.new(0, 8), PaddingTop = UDim.new(0, 8), PaddingBottom = UDim.new(0, 8), Parent = modelList })
+    create("UIPadding", { PaddingLeft = UDim.new(0, 8), PaddingRight = UDim.new(0, 8), PaddingTop = UDim.new(0, 4), PaddingBottom = UDim.new(0, 4), Parent = modelList })
 
     local function refreshCustomHighlight()
         pcall(function()
@@ -6097,7 +6097,7 @@ local function AgentBuildProviderSection(panel)
                             statusLabel.TextColor3 = theme.red or Color3.fromRGB(255, 82, 104)
                             return
                         end
-                        info.Text = "当前服务商：" .. AgentProviderLabel("custom") .. " · " .. tostring(mid)
+                        info.Text = "当前服务商：" .. AgentProviderLabel("custom")
                         refreshCustomHighlight()
                         statusLabel.Text = "已应用自定义模型：" .. tostring(mid)
                         statusLabel.TextColor3 = theme.accent or Color3.fromRGB(56, 189, 248)
@@ -6235,10 +6235,6 @@ end
 
 local function AgentBuildGeneralSection(panel)
     local card = AgentMakeCard(panel, "通用")
-    AgentMakeToggleRow(card, "思考模式", function() return AgentReadCfg().thinking_mode == true end,
-        function(v) AgentWriteCfg("thinking_mode", v) end)
-    AgentMakeToggleRow(card, "训练数据上传", function() return AgentReadCfg().training_upload == true end,
-        function(v) AgentWriteCfg("training_upload", v) end)
     AgentMakeToggleRow(card, "调试模式", function() return AgentReadCfg().debug_mode == true end,
         function(v) AgentWriteCfg("debug_mode", v); AgentApplyDebugBar() end)
     create("TextLabel", {
@@ -6252,6 +6248,28 @@ local function AgentBuildGeneralSection(panel)
         Parent = card,
     })
     return card
+end
+
+-- 用两个旋转 Frame 绘制 Lucide 风格 X 图标（避免依赖字体字形，渲染稳定）
+local function AgentMakeLucideX(parent, size, color)
+    local len = size * 0.62
+    local thick = math.max(2, math.floor(size * 0.12))
+    local base = {
+        BorderSizePixel = 0,
+        BackgroundColor3 = color,
+        AnchorPoint = Vector2.new(0.5, 0.5),
+        Position = UDim2.new(0.5, 0, 0.5, 0),
+        Parent = parent,
+    }
+    local a = create("Frame", base)
+    a.Size = UDim2.new(0, thick, 0, len)
+    a.Rotation = 45
+    corner(thick / 2, a)
+    local b = create("Frame", base)
+    b.Size = UDim2.new(0, thick, 0, len)
+    b.Rotation = -45
+    corner(thick / 2, b)
+    return a, b
 end
 
 local function AgentEnsureSettingsUI()
@@ -6306,15 +6324,13 @@ local function AgentEnsureSettingsUI()
         BackgroundColor3 = theme.surfaceLight or Color3.fromRGB(30, 36, 52),
         BackgroundTransparency = 0.25,
         BorderSizePixel = 0,
-        Text = "✕",
-        TextColor3 = theme.text or Color3.fromRGB(242, 245, 252),
-        Font = Enum.Font.SourceSansBold,
-        TextSize = 16,
+        Text = "",
         Parent = AgentMainFrame,
         ZIndex = 12,
         Visible = false,
     })
     corner(6, closeBtn)
+    AgentMakeLucideX(closeBtn, 16, theme.text or Color3.fromRGB(242, 245, 252))
     scrim.MouseButton1Click:Connect(function() pcall(AgentCloseSettings) end)
     closeBtn.MouseButton1Click:Connect(function() pcall(AgentCloseSettings) end)
     AgentSettingsUi = { scrim = scrim, panel = panel, closeBtn = closeBtn }
@@ -6332,7 +6348,6 @@ local function AgentOpenSettings()
     AgentTween(AgentSettingsUi.panel, { BackgroundTransparency = 0 }, 0.3)
     pcall(function() AgentMessageFrame.Visible = false end)
     pcall(function() AgentInputFrame.Visible = false end)
-    pcall(function() AgentDivider.Visible = false end)
 end
 
 local function AgentCloseSettings()
@@ -6344,7 +6359,6 @@ local function AgentCloseSettings()
     end
     pcall(function() AgentMessageFrame.Visible = true end)
     pcall(function() AgentInputFrame.Visible = true end)
-    pcall(function() AgentDivider.Visible = true end)
     task.delay(0.3, function()
         pcall(function()
             if (not AgentSettingsOpen) and AgentSettingsUi then
@@ -6478,14 +6492,12 @@ local function AgentEnsureStatsUI()
         BackgroundColor3 = theme.surfaceLight or Color3.fromRGB(30, 36, 52),
         BackgroundTransparency = 0.3,
         BorderSizePixel = 0,
-        Text = "✕",
-        TextColor3 = theme.text or Color3.fromRGB(242, 245, 252),
-        Font = Enum.Font.SourceSansBold,
-        TextSize = 16,
+        Text = "",
         Parent = header,
         ZIndex = 12,
     })
     corner(6, closeBtn)
+    AgentMakeLucideX(closeBtn, 15, theme.text or Color3.fromRGB(242, 245, 252))
     local list = create("Frame", {
         Size = UDim2.new(1, 0, 1, -52),
         Position = UDim2.new(0, 0, 0, 48),
@@ -6576,16 +6588,6 @@ task.spawn(function()
     if type(loader) == "function" then pcall(loader) end
 end)
 
-local AgentDivider = create("Frame", {
-    Size = UDim2.new(1, -32, 0, 1),
-    Position = UDim2.new(0, 16, 0, 30),
-    BackgroundColor3 = theme.border,
-    BackgroundTransparency = 0.4,
-    BorderSizePixel = 0,
-    Parent = AgentMainFrame,
-    ZIndex = 4
-})
-
 AgentMessageFrame = create("ScrollingFrame", {
     Name = "MessageFrame",
     Size = UDim2.new(1, -20, 1, -48 - 56 - 8),
@@ -6670,16 +6672,26 @@ AgentSendButton = create("TextButton", {
     Size = UDim2.new(0, 52, 0, 32),
     Position = UDim2.new(1, -58, 0.5, -16),
     BackgroundColor3 = theme.accent,
-    Text = "发送",
-    TextColor3 = Color3.fromRGB(255, 255, 255),
-    TextSize = 13,
-    Font = Enum.Font.SourceSansBold,
+    Text = "",
     BorderSizePixel = 0,
     Parent = AgentInputFrame,
     ZIndex = 5
 })
 applyGradient(AgentSendButton, theme.accent, theme.accent2, 120)
 corner(16, AgentSendButton)
+-- 文字覆盖层：置于渐变图层之上，避免被渐变 ImageLabel 遮挡
+create("TextLabel", {
+    Size = UDim2.new(1, 0, 1, 0),
+    BackgroundTransparency = 1,
+    Text = "发送",
+    TextColor3 = Color3.fromRGB(255, 255, 255),
+    TextSize = 13,
+    Font = Enum.Font.SourceSansBold,
+    TextXAlignment = Enum.TextXAlignment.Center,
+    TextYAlignment = Enum.TextYAlignment.Center,
+    ZIndex = 6,
+    Parent = AgentSendButton,
+})
 
 
 -- ===== 深度思考开关（胶囊按钮，位于输入框栏上方最左侧）=====
@@ -8484,12 +8496,6 @@ local function buildAgentLessSettings(env, G)
     local rowModel = makeSettingRow("model_switch", "model_switch_desc", 2)
     if rowModel then rowModel.Parent = card end
 
-    local rowThinking = makeSettingRow("thinking_mode", "thinking_mode_desc", 3)
-    if rowThinking then rowThinking.Parent = card end
-
-    local rowTraining = makeSettingRow("training_upload", "training_upload_desc", 4)
-    if rowTraining then rowTraining.Parent = card end
-
     local rowThinkingLevel = makeSettingRow("thinking_level", "thinking_level_desc", 5)
     if rowThinkingLevel then rowThinkingLevel.Parent = card end
 
@@ -8502,10 +8508,6 @@ local function buildAgentLessSettings(env, G)
         if rowModel then
             rowModel.Visible = state
             rowModel.Size = UDim2.new(1, 0, 0, state and 54 or 0)
-        end
-        if rowThinking then
-            rowThinking.Visible = state
-            rowThinking.Size = UDim2.new(1, 0, 0, state and 54 or 0)
         end
         if rowThinkingLevel then
             rowThinkingLevel.Visible = state
@@ -8553,8 +8555,6 @@ local function buildAgentLessSettings(env, G)
 
     local cfg = readCfg()
     local extEnabled = cfg.useExternalApi == true
-    local trainingEnabled = cfg.trainingUploadConsent == true
-    local thinkingEnabled = cfg.thinkingMode == true
 
     if type(makeToggle) == "function" and rowExtApi then
         makeToggle(rowExtApi, extEnabled, function(state)
@@ -8588,24 +8588,6 @@ local function buildAgentLessSettings(env, G)
                 end
             end
         end)
-    end
-
-    if type(makeToggle) == "function" and rowThinking then
-        makeToggle(rowThinking, thinkingEnabled, function(state)
-            writeCfg("thinkingMode", state)
-            local setter = G.__DeltaAI_setThinkingMode
-            if type(setter) == "function" then pcall(setter, state) end
-            
-            local pill = G.__DeltaAI_updateThinkPill
-            if type(pill) == "function" then pcall(pill, state) end
-        end, "thinkingMode")
-    end
-
-    if type(makeToggle) == "function" and rowTraining then
-        makeToggle(rowTraining, trainingEnabled, function(state)
-            writeCfg("trainingUploadConsent", state == true)
-            notify(state and "训练数据上传已开启" or "训练数据上传已关闭", 2)
-        end, "trainingUploadConsent")
     end
 
     refreshExternalRows(extEnabled)

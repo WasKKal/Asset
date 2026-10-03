@@ -5455,62 +5455,82 @@ local function AgentTween(obj, props, dur)
     if ok and t then pcall(function() t:Play() end) end
 end
 
+-- 分区卡片：结构完全对齐 DeltaUI 本体设置页的 addSection / makeSectionCard。
+-- 分区稳定的关键：标题栏与内容区都是「卡片自身 UIListLayout 的普通子项」——
+--   标题栏 LayoutOrder = -1，永远排在第一位；内容区紧随其后。
+--   两者都是显式尺寸 / 自动高度，不用绝对定位，因此不会互相覆盖或错位。
 local function AgentMakeCard(parent, title)
-    -- 标题高度（固定）；卡片顶部预留该高度，标题 Frame 用绝对定位钉在顶部，
-    -- 内容容器 body 则从预留高度之下开始。整张卡不使用 UIListLayout，
-    -- 从根上避免「嵌套 AutomaticSize + UIListLayout」导致首个子项被重排/错位。
-    local HEADER_H = 24
     local card = create("Frame", {
-        Name = "Card_" .. tostring(title),
+        Name = "Card_" .. tostring(title or ""),
         Size = UDim2.new(1, 0, 0, 0),
         AutomaticSize = Enum.AutomaticSize.Y,
-        BackgroundColor3 = theme.surface,
-        BackgroundTransparency = 0.12,
+        BackgroundColor3 = theme.surfaceLight or Color3.fromRGB(30, 36, 52),
+        BackgroundTransparency = 0.45,
         BorderSizePixel = 0,
-        ClipsDescendants = true,
+        ZIndex = 3,
         Parent = parent,
     })
-    corner(theme.radius or 14, card)
+    corner(theme.radiusLg or 18, card)
     stroke(theme.border or Color3.fromRGB(52, 62, 88), 1, card)
-    -- 内边距：左右 12；顶部 10 + 标题高度 + 间距；底部 10
-    create("UIPadding", {
-        PaddingLeft = UDim.new(0, 12), PaddingRight = UDim.new(0, 12),
-        PaddingTop = UDim.new(0, 10 + HEADER_H + 8), PaddingBottom = UDim.new(0, 10),
+
+    create("UIListLayout", {
+        FillDirection = Enum.FillDirection.Vertical,
+        SortOrder = Enum.SortOrder.LayoutOrder,
+        Padding = UDim.new(0, 6),
         Parent = card,
     })
-    -- 固定标题：绝对定位于卡片顶部，不参与任何 UIListLayout 排序
-    if title then
-        local header = create("Frame", {
-            Name = "CardHeader",
-            Size = UDim2.new(1, -24, 0, HEADER_H),
-            Position = UDim2.new(0, 12, 0, 10),
-            BackgroundTransparency = 1,
-            ZIndex = 2,
-            Parent = card,
-        })
-        create("TextLabel", {
-            Size = UDim2.new(1, 0, 1, 0),
-            BackgroundTransparency = 1,
-            Text = title,
-            TextColor3 = theme.accent or Color3.fromRGB(56, 189, 248),
-            Font = Enum.Font.SourceSansBold,
-            TextSize = 15,
-            TextXAlignment = Enum.TextXAlignment.Left,
-            TextYAlignment = Enum.TextYAlignment.Center,
-            Parent = header,
-        })
-    end
-    -- 内容容器：自动高度，承载卡片实际内容；由 UIPadding 的顶部预留把它顶到标题下方
+    create("UIPadding", {
+        PaddingLeft = UDim.new(0, 10), PaddingRight = UDim.new(0, 10),
+        PaddingTop = UDim.new(0, 8), PaddingBottom = UDim.new(0, 10),
+        Parent = card,
+    })
+
+    -- ① 分区标题栏：LayoutOrder = -1，固定位于卡片最顶部
+    local header = create("Frame", {
+        Name = "CardHeader",
+        Size = UDim2.new(1, 0, 0, 24),
+        BackgroundTransparency = 1,
+        LayoutOrder = -1,
+        ZIndex = 4,
+        Parent = card,
+    })
+    local accentBar = create("Frame", {
+        Size = UDim2.new(0, 3, 0, 16),
+        Position = UDim2.new(0, 2, 0.5, -8),
+        BackgroundColor3 = theme.accent or Color3.fromRGB(56, 189, 248),
+        BorderSizePixel = 0,
+        ZIndex = 5,
+        Parent = header,
+    })
+    corner(2, accentBar)
+    pcall(function() applyGradient(accentBar, theme.accent, theme.accent2, 90) end)
+    create("TextLabel", {
+        Position = UDim2.new(0, 14, 0, 0),
+        Size = UDim2.new(1, -20, 1, 0),
+        BackgroundTransparency = 1,
+        Text = tostring(title or ""),
+        TextColor3 = theme.text or Color3.fromRGB(242, 245, 252),
+        Font = Enum.Font.SourceSansBold,
+        TextSize = 14,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        TextYAlignment = Enum.TextYAlignment.Center,
+        ZIndex = 5,
+        Parent = header,
+    })
+
+    -- ② 内容区：自动高度，排在标题栏之后
     local body = create("Frame", {
         Name = "CardBody",
         Size = UDim2.new(1, 0, 0, 0),
         AutomaticSize = Enum.AutomaticSize.Y,
         BackgroundTransparency = 1,
         BorderSizePixel = 0,
+        ZIndex = 4,
         Parent = card,
     })
     create("UIListLayout", {
         FillDirection = Enum.FillDirection.Vertical,
+        SortOrder = Enum.SortOrder.LayoutOrder,
         Padding = UDim.new(0, 8),
         Parent = body,
     })

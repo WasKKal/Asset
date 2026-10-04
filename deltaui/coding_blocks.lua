@@ -4695,6 +4695,2930 @@ if not codingBuildSpaceRestoreWatching then
         codingBuildSpaceRestoreWatching = nil
     end)
 end
+
+-- === merged from DeltaUI main body: object browser + property editor + build space ===
+-- (moved out of UI main body to keep cheat-triggering refs out of DeltaUI.txt)
+buildSpaceActive = false
+buildSpaceRoot = nil
+buildSpaceTab = "build"
+buildSpaceSavedPage = nil
+orbWasVisibleBeforeBuildSpace = false
+
+obState = {expanded = {}, selected = nil, query = "", budget = 0}
+obRows = {}
+obContextPanel = nil
+obContextTarget = nil
+obContextOpenedAt = 0
+obContextClosedAt = 0
+obClipboard = nil
+propSignature = nil
+
+local OB_MAX_ROWS = 260
+local OB_SCAN_BUDGET = 1400
+
+local OB_LONG_HOLD_SEC = 0.5
+local OB_LONG_DRAG_PX = 8
+
+function obResolve(path)
+    if type(path) ~= "table" or #path == 0 then return nil end
+    local ok, node = pcall(function() return game:GetService(path[1]) end)
+    if not ok or not node then return nil end
+    for i = 2, #path do
+        local child
+        ok, child = pcall(function() return node:FindFirstChild(path[i]) end)
+        if not ok or not child then return nil end
+        node = child
+    end
+    return node
+end
+
+function obKey(path)
+    return table.concat(path, "\1")
+end
+
+function obIsRootService(node, path)
+    if type(path) == "table" and #path <= 1 then return true end
+    if not node then return false end
+    local ok, isUnderGame = pcall(function() return node.Parent == game end)
+    return ok and isUnderGame == true
+end
+
+function obChildCount(node)
+    if not node then return 0 end
+    local ok, n = pcall(function() return #node:GetChildren() end)
+    if ok and n then return n end
+    return 0
+end
+
+function obClassIcon(class)
+    if class == "Workspace" then return "mountain-snow" end
+    if class == "Players" then return "users-round" end
+    if class == "ReplicatedStorage" then return "server-plus" end
+    if class == "CoreGui" then return "picture-in-picture-2" end
+    if class == "PlayerGui" then return "picture-in-picture-2" end
+    if class == "Folder" then return "folder" end
+    if class == "ModuleScript" then return "package-open" end
+
+    if class == "RemoteFunction" then return "shredder" end
+    if class == "RemoteEvent" then return "shredder" end
+    if class == "NumberValue" then return "file-digit" end
+    if class == "BoolValue" then return "sigma" end
+    if class == "StringValue" then return "square-sigma" end
+    if class == "IntValue" then return "square-kanban" end
+    if class == "Backpack" then return "backpack" end
+    if class == "Player" then return "user-round" end
+    if class == "Humanoid" then return "person-standing" end
+    if class == "StarterGear" then return "user-cog" end
+    if class == "ObjectValue" then return "square-dashed-kanban" end
+    if class == "LocalizationTable" then return "languages" end
+    if class == "ImageButton" then return "images" end
+    if class == "TextButton" then return "type" end
+    if class == "ScreenGui" then return "app-window" end
+    if class == "UICorner" then return "square-round-corner" end
+    if class == "UIStroke" then return "frame" end
+    if class == "TextLabel" then return "tag" end
+    if class == "ImageLabel" then return "images" end
+    if class == "PackageLink" then return "link" end
+    if class == "StyleLink" then return "link-2" end
+
+    if class == "UIDragDetector" then return "alarm-smoke" end
+    if class == "UIListLayout" then return "list-ordered" end
+    if class == "UIPadding" then return "panel-left-dashed" end
+    if class == "UIAspectRatioConstraint" then return "proportions" end
+
+    if class == "Configuration" then return "settings-2" end
+    if class == "ConfigurationFolder" then return "settings-2" end
+    if class == "StyleSheet" then return "palette" end
+    if class:find("Script") then return "file-code" end
+    if class:find("Part") or class:find("Model") then return "box" end
+    if class:find("Sound") then return "volume-2" end
+    if class:find("Lighting") then return "sun" end
+    if class:find("Camera") then return "camera" end
+    if class:find("Attractor") or class:find("Force") then return "magnet" end
+
+    if class == "ScrollingFrame" then return "gallery-vertical-end" end
+    if class == "Frame" then return "square-dashed-top-solid" end
+    if class:find("Gui") or class:find("Frame") then return "layout" end
+    return "layers"
+end
+
+OB_CLASS_COLORS = {
+    Workspace = Color3.fromRGB(57, 214, 146),
+    Players = Color3.fromRGB(56, 189, 248),
+    ReplicatedStorage = Color3.fromRGB(56, 189, 248),
+    CoreGui = Color3.fromRGB(56, 189, 248),
+    PlayerGui = Color3.fromRGB(56, 189, 248),
+    Folder = Color3.fromRGB(255, 196, 66),
+    Model = Color3.fromRGB(255, 82, 104),
+    Part = Color3.fromRGB(255, 255, 255),
+    Terrain = Color3.fromRGB(57, 214, 146),
+    Script = Color3.fromRGB(57, 214, 146),
+    ModuleScript = Color3.fromRGB(255, 152, 66),
+    RemoteFunction = Color3.fromRGB(139, 92, 246),
+    RemoteEvent = Color3.fromRGB(255, 196, 66),
+    StringValue = Color3.fromRGB(255, 255, 255),
+    IntValue = Color3.fromRGB(255, 255, 255),
+    NumberValue = Color3.fromRGB(255, 255, 255),
+    BoolValue = Color3.fromRGB(255, 255, 255),
+    ScrollingFrame = Color3.fromRGB(255, 196, 66),
+    Frame = Color3.fromRGB(255, 196, 66),
+    Backpack = Color3.fromRGB(255, 196, 66),
+    Player = Color3.fromRGB(56, 189, 248),
+    Humanoid = Color3.fromRGB(255, 196, 66),
+    ImageButton = Color3.fromRGB(57, 214, 146),
+    TextButton = Color3.fromRGB(255, 196, 66),
+    ScreenGui = Color3.fromRGB(56, 189, 248),
+    UICorner = Color3.fromRGB(255, 255, 255),
+    UIStroke = Color3.fromRGB(255, 255, 255),
+    TextLabel = Color3.fromRGB(56, 189, 248),
+    ImageLabel = Color3.fromRGB(57, 214, 146),
+    PackageLink = Color3.fromRGB(56, 189, 248),
+    StyleLink = Color3.fromRGB(139, 92, 246),
+    Configuration = Color3.fromRGB(255, 196, 66),
+    ConfigurationFolder = Color3.fromRGB(255, 196, 66),
+    StyleSheet = Color3.fromRGB(56, 189, 248),
+    StarterGear = Color3.fromRGB(57, 214, 146),
+    ObjectValue = Color3.fromRGB(255, 255, 255),
+    UIDragDetector = Color3.fromRGB(255, 255, 255),
+    UIListLayout = Color3.fromRGB(255, 255, 255),
+    UIPadding = Color3.fromRGB(255, 255, 255),
+    UIAspectRatioConstraint = Color3.fromRGB(255, 255, 255),
+    LocalizationTable = Color3.fromRGB(57, 214, 146),
+}
+
+OB_CLASS_COLOR_KEYS = {
+    workspace = "Workspace",
+    players = "Players",
+    replicatedstorage = "ReplicatedStorage",
+    coregui = "CoreGui",
+    playergui = "PlayerGui",
+    folder = "Folder",
+    scriptfolder = "Folder",
+    model = "Model",
+    terrain = "Terrain",
+    modulescript = "ModuleScript",
+    script = "Script",
+    localscript = "Script",
+    remotefunction = "RemoteFunction",
+    remoteevent = "RemoteEvent",
+    stringvalue = "StringValue",
+    intvalue = "IntValue",
+    numbervalue = "NumberValue",
+    boolvalue = "BoolValue",
+    scrollingframe = "ScrollingFrame",
+    frame = "Frame",
+    backpack = "Backpack",
+    player = "Player",
+    humanoid = "Humanoid",
+    imagebutton = "ImageButton",
+    textbutton = "TextButton",
+    screengui = "ScreenGui",
+    uicorner = "UICorner",
+    uistroke = "UIStroke",
+    textlabel = "TextLabel",
+    imagelabel = "ImageLabel",
+    packagelink = "PackageLink",
+    stylelink = "StyleLink",
+    configuration = "Configuration",
+    configurationfolder = "ConfigurationFolder",
+    stylesheet = "StyleSheet",
+    startergear = "StarterGear",
+    objectvalue = "ObjectValue",
+    uilistlayout = "UIListLayout",
+    uipadding = "UIPadding",
+    uiAspectRatioConstraint = "UIAspectRatioConstraint",
+    uiAspectratioconstraint = "UIAspectRatioConstraint",
+    uidragdetector = "UIDragDetector",
+    localizationtable = "LocalizationTable",
+    part = "Part",
+    meshpart = "Part",
+    basepart = "Part",
+    spawnlocation = "Part",
+    unionoperation = "Part",
+    wedges = "Part",
+    filemesh = "Part",
+    truss = "Part",
+}
+
+function obClassColor(class)
+    if type(class) ~= "string" then return theme.textDim end
+    local lc = class:lower()
+
+    local key = OB_CLASS_COLOR_KEYS[lc]
+    if not key and lc:find("part") then key = "Part" end
+    if not key and lc:find("script") then key = "Script" end
+    if not key and lc:find("model") then key = "Model" end
+    if not key and lc:find("configuration") then key = "Configuration" end
+    if not key and lc:find("style") then key = "StyleSheet" end
+    return (key and OB_CLASS_COLORS[key]) or theme.textDim
+end
+
+function obSelectedPathText()
+    if not obState.selected then return nil end
+    local path = obState.selected
+    local lpName = svc and svc.Players and svc.Players.LocalPlayer
+        and tostring(svc.Players.LocalPlayer.Name)
+    local txt = 'game:GetService("' .. tostring(path[1]) .. '")'
+    for i = 2, #path do
+        if i == 2 and lpName and tostring(path[1]) == "Players" and tostring(path[2]) == lpName then
+            
+            txt = txt .. ".LocalPlayer"
+        else
+            txt = txt .. ':FindFirstChild("' .. tostring(path[i]) .. '")'
+        end
+    end
+    return txt
+end
+
+OB_PATH_MAX = 15
+
+function obCharLen(s)
+    if type(s) ~= "string" then return 0 end
+    local ok, n = pcall(function() return utf8.len(s) end)
+    if ok and type(n) == "number" then return n end
+    return #s
+end
+
+function obTail(s, n)
+    if type(s) ~= "string" or s == "" or n <= 0 then return "" end
+    local ok, off = pcall(function() return utf8.offset(s, -n) end)
+    if ok and type(off) == "number" and off > 0 then return s:sub(off) end
+    return s:sub(math.max(1, #s - n + 1))
+end
+
+function obTruncatePath(txt)
+    if type(txt) ~= "string" or txt == "" then return txt end
+    if obCharLen(txt) <= OB_PATH_MAX then return txt end
+
+    local name = txt:match('^.*%("([^"]*)"%)%s*$')
+    local tail = name and ('("' .. name .. '")') or ""
+
+    local PREFIX_MIN = 10
+    local MIN_BUDGET = PREFIX_MIN + 2
+    local budget = OB_PATH_MAX
+    if budget < MIN_BUDGET then budget = MIN_BUDGET end
+
+    local tailLen = obCharLen(tail)
+    local tailPart = ""
+    if tailLen > 0 then
+
+        local reservedForPrefix = budget - 1 - tailLen
+        if reservedForPrefix < PREFIX_MIN then
+
+            local nameKeep = 1
+            tailPart = '…("' .. obTail(name, nameKeep) .. '")'
+            reservedForPrefix = budget - 1 - obCharLen(tailPart)
+            if reservedForPrefix < PREFIX_MIN then
+                reservedForPrefix = PREFIX_MIN
+            end
+        else
+            tailPart = tail
+        end
+    end
+
+    local prefix = txt:sub(1, PREFIX_MIN)
+    local reservedForPrefix = budget - 1 - obCharLen(tailPart)
+    if reservedForPrefix > PREFIX_MIN then
+        prefix = txt:sub(1, reservedForPrefix)
+    end
+    if tailPart ~= "" then
+        return prefix .. "…" .. tailPart
+    end
+
+    local restBudget = budget - PREFIX_MIN - 1
+    local rest = obTail(txt, math.max(1, restBudget))
+    return prefix .. "…" .. rest
+end
+
+function obCopyText(txt)
+    local setclip = setclipboard or toclipboard or (syn and syn.setclipboard) or (clipboard and clipboard.set)
+    if not setclip then return false end
+    return pcall(setclip, txt)
+end
+
+function obHasChildren(inst)
+    local ok, empty = pcall(function() return #inst:GetChildren() == 0 end)
+    return ok and not empty
+end
+
+function obArrange(kids)
+    local heads, tails = {}, {}
+    for _, inst in ipairs(kids) do
+        if obHasChildren(inst) then
+            table.insert(heads, inst)
+        else
+            table.insert(tails, inst)
+        end
+    end
+    if #tails == 0 or #heads == 0 then return kids end
+    local ordered = {}
+    for _, inst in ipairs(heads) do ordered[#ordered + 1] = inst end
+    for _, inst in ipairs(tails) do ordered[#ordered + 1] = inst end
+    return ordered
+end
+
+function obMatches(node, q)
+    local okName, nm = pcall(function() return node.Name end)
+    if not okName then return false end
+    if nm:lower():find(q, 1, true) then return true end
+    local okClass, cl = pcall(function() return node.ClassName end)
+    if okClass and cl and cl:lower():find(q, 1, true) then return true end
+    return false
+end
+
+function obCollect(node, path, q, depth, out)
+    if obState.budget <= 0 then return end
+    local kids
+    local ok, res = pcall(function() return node:GetChildren() end)
+    if not ok or not res then return end
+    kids = res
+
+    kids = obArrange(kids)
+    for _, child in ipairs(kids) do
+        if obState.budget <= 0 then return end
+        obState.budget = obState.budget - 1
+        local cp = {}
+        for i = 1, #path do cp[i] = path[i] end
+        local okN, n = pcall(function() return child.Name end)
+        local cname = (okN and n) or ("?_" .. tostring(#out))
+        cp[#cp + 1] = cname
+        local cclass
+        local okC, cl = pcall(function() return child.ClassName end)
+        cclass = (okC and cl) or "?"
+        local hasKids = obHasChildren(child)
+        if not q or (depth < 10 and obMatches(child, q)) then
+            table.insert(out, {path = cp, name = cname, class = cclass, depth = depth, hasKids = hasKids})
+        end
+        local key = obKey(cp)
+        if q then
+            if depth < 8 and obState.budget > 0 then obCollect(child, cp, q, depth + 1, out) end
+        elseif obState.expanded[key] then
+            obCollect(child, cp, nil, depth + 1, out)
+        end
+        if #out >= OB_MAX_ROWS then obState.budget = 0 return end
+    end
+end
+
+function obToggle(path)
+    local key = obKey(path)
+    if obState.query and obState.query ~= "" then
+        obState.query = ""
+        if obSearchInput then obSearchInput.Text = "" end
+        obState.expanded[key] = true
+    else
+        obState.expanded[key] = not obState.expanded[key]
+    end
+    obState.selected = path
+    obRender()
+end
+
+OB_ROW_H = 22
+
+
+function obFlashRowAtIndex(index)
+    local rec = obRows[index]
+    if not (rec and rec.obj and rec.obj.Parent) then return end
+    local row = rec.obj
+
+    local function scroll()
+        if not (obTreeScroll and obTreeScroll.Parent) then return end
+        local ok, viewH, canvasH, cur = pcall(function()
+            return obTreeScroll.AbsoluteSize.Y, obTreeScroll.CanvasSize.Y.Offset, obTreeScroll.CanvasPosition.Y
+        end)
+        if not ok or not viewH or viewH <= 0 then return end
+        local rowTop = 4 + (index - 1) * OB_ROW_H
+        local target = nil
+        if rowTop + OB_ROW_H > cur + viewH - 6 then
+            target = rowTop + OB_ROW_H - viewH + 10
+        elseif rowTop < cur + 6 then
+            target = rowTop - 8
+        end
+        if not target then return end
+        if type(canvasH) == "number" and canvasH > 0 then
+            target = math.min(target, math.max(0, canvasH - viewH))
+        end
+        target = math.max(0, target)
+        pcall(function()
+            local cp = obTreeScroll.CanvasPosition
+            obTreeScroll.CanvasPosition = Vector2.new(cp.X, target)
+        end)
+    end
+
+    scroll()
+    task.defer(scroll)
+    pcall(function()
+        row.BackgroundColor3 = theme.accent
+        row.BackgroundTransparency = 0.28
+        svc.TweenService:Create(row, TweenInfo.new(0.6, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+            BackgroundTransparency = 0.82,
+        }):Play()
+    end)
+end
+
+
+function obClearSearchAndJump(path)
+    if type(path) ~= "table" or #path == 0 then return false end
+    if not obResolve(path) then
+        ShowNotification("该对象已不存在，无法跳转", 2)
+        return false
+    end
+    obCloseContextPanel()
+    for i = 1, #path do
+        local sub = {}
+        for j = 1, i do sub[j] = path[j] end
+        obState.expanded[obKey(sub)] = true
+    end
+    obState.selected = path
+    obState.jumpKey = obKey(path)
+    if obSearchInput and (obSearchInput.Text or "") ~= "" then
+        obSearchInput.Text = ""
+    else
+        obState.query = ""
+        obRender(true)
+    end
+    return true
+end
+
+function obCloseContextPanel()
+    if obContextPanel and obContextPanel.Parent then
+        local p = obContextPanel
+        svc.TweenService:Create(p, TweenInfo.new(0.16, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
+            {BackgroundTransparency = 1}):Play()
+        for _, c in pairs(p:GetDescendants()) do
+            if c:IsA("TextLabel") or c:IsA("TextButton") then
+                svc.TweenService:Create(c, TweenInfo.new(0.16), {TextTransparency = 1}):Play()
+            elseif c:IsA("Frame") then
+                svc.TweenService:Create(c, TweenInfo.new(0.16), {BackgroundTransparency = 1}):Play()
+            end
+        end
+        task.delay(0.18, function() if p and p.Parent then p:Destroy() end end)
+    end
+    obContextPanel = nil
+    obContextTarget = nil
+    obContextOpenedAt = 0
+end
+
+local function obScreenSize()
+    local mouse = svc.Players.LocalPlayer and svc.Players.LocalPlayer:GetMouse()
+    if mouse and mouse.ViewSizeX and mouse.ViewSizeY then
+        return Vector2.new(mouse.ViewSizeX, mouse.ViewSizeY)
+    end
+    local cam = workspace.CurrentCamera
+    if cam and cam.ViewportSize and cam.ViewportSize.X > 100 then
+        return cam.ViewportSize
+    end
+    local ok, loc = pcall(function() return svc.UserInputService:GetMouseLocation() end)
+    if ok and loc then
+        return Vector2.new(loc.X * 2, loc.Y * 2)
+    end
+    return Vector2.new(1280, 720)
+end
+
+local function obClampToWindow(x, y, w, h)
+    local vp = obScreenSize()
+    local maxX = math.max(0, vp.X - w - 8)
+    local maxY = math.max(0, vp.Y - h - 8)
+    return math.clamp(x, 8, maxX), math.clamp(y, 8, maxY)
+end
+
+function obCopyToClipboard(data)
+    local node = obResolve(data.path)
+    if not node or not node.Parent then
+        ShowNotification("该对象已不存在", 2)
+        return
+    end
+    if obIsRootService(node, data.path) then
+        ShowNotification("顶层服务不能整体复制，请复制它下面的对象", 2.5)
+        return
+    end
+    local path = {}
+    for i = 1, #data.path do path[i] = data.path[i] end
+    obClipboard = { path = path, class = node.ClassName, name = node.Name }
+    ShowNotification("已复制 " .. node.ClassName .. " \"" .. node.Name .. "\"", 1.5)
+end
+
+function obClipboardSource()
+    local cb = obClipboard
+    if not cb then return nil end
+    local node = obResolve(cb.path)
+    if not node or not node.Parent then
+        obClipboard = nil
+        return nil
+    end
+    return node
+end
+
+function obPasteClipboard(data, mode)
+    local src = obClipboardSource()
+    if not src then
+        obClipboard = nil
+        ShowNotification("剪贴板中的对象已失效", 2)
+        return
+    end
+    local target = obResolve(data.path)
+    if not target then
+        ShowNotification("目标对象已不存在", 2)
+        return
+    end
+    local parent
+    if mode == "child" then
+        parent = target
+    else
+        parent = target.Parent
+
+        if not parent or parent == game then
+            ShowNotification("顶层对象没有同级位置，请改用「粘贴到下方」", 2.5)
+            return
+        end
+    end
+
+    local ok, clone = pcall(function() return src:Clone() end)
+    if not ok or not clone then
+        ShowNotification("粘贴失败：该对象无法被 Clone", 2.5)
+        return
+    end
+    local ok2, err2 = pcall(function() clone.Parent = parent end)
+    if not ok2 or not clone or not clone.Parent then
+        pcall(function() if clone then clone:Destroy() end end)
+        ShowNotification("粘贴失败：" .. tostring(err2), 3)
+        return
+    end
+
+    local parentPath = {}
+    local upTo = (mode == "child") and #data.path or (#data.path - 1)
+    for i = 1, upTo do parentPath[i] = data.path[i] end
+    if #parentPath > 0 then obState.expanded[obKey(parentPath)] = true end
+    local newPath = {}
+    for i = 1, #parentPath do newPath[i] = parentPath[i] end
+    newPath[#newPath + 1] = clone.Name
+    obState.selected = newPath
+    ShowNotification("已粘贴 " .. clone.ClassName .. " \"" .. clone.Name .. "\"", 1.5)
+    obRender()
+end
+
+function obIsLocalPlayerSide(node)
+    if not node then return true end
+    local lp = svc and svc.Players and svc.Players.LocalPlayer
+    if not lp then return false end
+    local ok, yes = pcall(function()
+        if node == lp then return true end
+        return node:IsDescendantOf(lp)
+    end)
+    return ok and yes == true
+end
+
+function obIsRemotePlayer(node)
+    if not node then return false end
+    if obIsLocalPlayerSide(node) then return false end
+    local ok, isPlayer = pcall(function() return node:IsA("Player") end)
+    return ok and isPlayer == true
+end
+
+
+function obPlayerCharCF(player)
+    local okC, char = pcall(function() return player.Character end)
+    if not okC or not (char and char.Parent) then return nil end
+    local okH, hrp = pcall(function() return char:FindFirstChild("HumanoidRootPart") end)
+    if okH and hrp then
+        local okCF, cf = pcall(function() return hrp.CFrame end)
+        if okCF and typeof(cf) == "CFrame" then return cf end
+    end
+    local okW, wp = pcall(function() return char.WorldPivot end)
+    if okW and typeof(wp) == "CFrame" then return wp end
+    return nil
+end
+
+function obTeleportTargetCF(node)
+    if not node then return nil end
+    if obIsLocalPlayerSide(node) then return nil end
+    if obIsRemotePlayer(node) then return obPlayerCharCF(node) end
+
+    local ok, cf = pcall(function() return node.CFrame end)
+    if ok and typeof(cf) == "CFrame" then return cf end
+
+    local okW, wp = pcall(function() return node.WorldPivot end)
+    if okW and typeof(wp) == "CFrame" then return wp end
+    local okP, pp = pcall(function() return node.PrimaryPart end)
+    if okP and pp then
+        local okC, pcf = pcall(function() return pp.CFrame end)
+        if okC and typeof(pcf) == "CFrame" then return pcf end
+    end
+    return nil
+end
+
+function obTeleportTo(cf, label)
+    local lp = svc and svc.Players and svc.Players.LocalPlayer
+    if not lp then
+        ShowNotification("传送失败：取不到本地玩家", 2.5)
+        return false
+    end
+    local char = lp.Character
+    if not (char and char.Parent) then
+        ShowNotification("传送失败：角色尚未加载", 2.5)
+        return false
+    end
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    if not (hrp and hrp:IsA("BasePart")) then
+        ShowNotification("传送失败：角色没有 HumanoidRootPart", 2.5)
+        return false
+    end
+    local target = cf + Vector3.new(0, 3, 0)
+    local ok, err = pcall(function() hrp.CFrame = target end)
+    if not ok then
+        ShowNotification("传送失败：" .. tostring(err), 2.5)
+        return false
+    end
+    ShowNotification("已传送至「" .. tostring(label or "目标") .. "」", 2)
+    return true
+end
+
+OB_STORED_MAX = 12
+
+obStoredObjects = obStoredObjects or {}
+
+function obPathToDotted(path)
+    if type(path) ~= "table" or #path == 0 then return "" end
+    local segs = {}
+    for i, s in ipairs(path) do segs[i] = tostring(s) end
+    local head = segs[1]
+    if head == "Workspace" then
+        head = "workspace"
+    else
+
+        if head == "Players" and #segs >= 2 then
+            local lp = svc and svc.Players and svc.Players.LocalPlayer
+            if lp and segs[2] == lp.Name then segs[2] = "LocalPlayer" end
+        end
+        head = "game." .. head
+    end
+    local out = { head }
+    for i = 2, #segs do out[#out + 1] = segs[i] end
+    return table.concat(out, ".")
+end
+
+function obStoredIndexOf(path)
+    local key = obKey(path or {})
+    for i, rec in ipairs(obStoredObjects) do
+        if obKey(rec.path) == key then return i end
+    end
+    return nil
+end
+
+function obStoreObject(node, path)
+    if type(path) ~= "table" or #path == 0 then return false, "路径无效" end
+    if obStoredIndexOf(path) then return false, "该对象已储存过" end
+    if #obStoredObjects >= OB_STORED_MAX then
+        return false, "最多储存 " .. tostring(OB_STORED_MAX) .. " 个对象"
+    end
+
+    local copy = {}
+    for i, s in ipairs(path) do copy[i] = tostring(s) end
+    local okC, cls = pcall(function() return node and node.ClassName end)
+    obStoredObjects[#obStoredObjects + 1] = {
+        path = copy,
+        text = obPathToDotted(copy),
+        name = copy[#copy] or "",
+        class = (okC and type(cls) == "string") and cls or "",
+    }
+    return true
+end
+
+function obUnstoreObject(path)
+    local i = obStoredIndexOf(path)
+    if not i then return false end
+    table.remove(obStoredObjects, i)
+    return true
+end
+
+function obStoredObjTexts()
+    local out = {}
+    for _, rec in ipairs(obStoredObjects) do
+        if rec.text and rec.text ~= "" then out[#out + 1] = rec.text end
+    end
+    return out
+end
+
+function obOpenContextPanel(data, screenX, screenY)
+    obCloseContextPanel()
+    if not obWindow or not obWindow.Parent then return end
+    local node = obResolve(data.path)
+    local panelW, itemH = 180, 36
+
+    local items = {}
+
+    local isRoot = obIsRootService(node, data.path)
+    table.insert(items, {
+        icon = "copy", fallback = "clipboard", label = "复制对象",
+        color = isRoot and theme.textDim or theme.text,
+        cb = function()
+            if isRoot then
+                ShowNotification("顶层服务不能整体复制，请复制它下面的对象", 2.5)
+                return
+            end
+            obCopyToClipboard(data)
+        end,
+    })
+
+    if type(obState.query) == "string" and obState.query ~= "" then
+        table.insert(items, {
+            icon = "search-x", fallback = "search", label = "清空搜索并跳转", color = theme.accent,
+            cb = function() obClearSearchAndJump(data.path) end,
+        })
+    end
+
+    if obClipboardSource() then
+        table.insert(items, {
+            icon = "corner-up-left", fallback = "clipboard", label = "粘贴到同级", color = theme.accent,
+            cb = function() obPasteClipboard(data, "sibling") end,
+        })
+        table.insert(items, {
+            icon = "corner-down-right", fallback = "clipboard", label = "粘贴到下方", color = theme.accent,
+            cb = function() obPasteClipboard(data, "child") end,
+        })
+    end
+
+    local tpCF = obTeleportTargetCF(node)
+    if tpCF or obIsRemotePlayer(node) then
+        table.insert(items, {
+            icon = "navigation", fallback = "send", label = "传送至",
+            color = theme.green,
+            cb = function()
+
+                local live = obResolve(data.path)
+                local cf = obTeleportTargetCF(live)
+                if not cf then
+                    if obIsRemotePlayer(live) then
+                        ShowNotification("该玩家角色尚未加载，无法传送", 2)
+                    else
+                        ShowNotification("该对象已不存在或取不到位置", 2)
+                    end
+                    return
+                end
+                obTeleportTo(cf, live and live.Name or data.path)
+            end,
+        })
+    end
+
+    local wasStored = obStoredIndexOf(data.path) ~= nil
+    table.insert(items, {
+        icon = wasStored and "bookmark-minus" or "bookmark-plus", fallback = "bookmark",
+        label = wasStored and "移除储存" or "储存对象",
+        color = theme.accent2,
+        cb = function()
+            if wasStored then
+                obUnstoreObject(data.path)
+                ShowNotification("已移除储存", 1.5)
+            else
+                local ok, err = obStoreObject(obResolve(data.path), data.path)
+                if ok then
+                    ShowNotification("已储存，积木的物体下拉里可直接选到", 2.5)
+                else
+                    ShowNotification(err or "储存失败", 2)
+                end
+            end
+        end,
+    })
+    local canDelete = (node and node.Parent ~= nil) and not isRoot
+    table.insert(items, {
+        icon = "trash-2", fallback = "x", label = "删除对象",
+        color = canDelete and theme.red or theme.textDim,
+        cb = function()
+
+            if isRoot then
+                ShowNotification("顶层服务不可删除（会连带销毁其下全部对象）", 2.5)
+                return
+            end
+            if not canDelete then
+                ShowNotification("该对象不可删除（无父级或已销毁）", 2)
+                return
+            end
+            obConfirmDelete(data)
+        end,
+    })
+    local panelH = itemH * #items + 10
+
+    local panel = create("Frame", {
+        Size = UDim2.new(0, panelW, 0, panelH),
+        BackgroundColor3 = theme.surface,
+        BackgroundTransparency = 1,
+        BorderSizePixel = 0,
+        Active = true,
+        ZIndex = 980,
+        Name = "ObContextPanel",
+    })
+    corner(10, panel)
+    stroke(theme.border, 1, panel)
+    panel.Parent = obWindow
+    obContextPanel = panel
+    obContextTarget = data.path
+
+    obContextOpenedAt = tick()
+
+    local function addItem(index, spec)
+        local it = create("TextButton", {
+            Position = UDim2.new(0, 6, 0, 4 + (index - 1) * itemH),
+            Size = UDim2.new(1, -12, 0, itemH - 2),
+            BackgroundColor3 = theme.surfaceLight,
+            BackgroundTransparency = 1,
+            BorderSizePixel = 0,
+            Text = "",
+            AutoButtonColor = false,
+            ZIndex = 982,
+        })
+        corner(8, it)
+        local iconColor = spec.color
+        local ic = GetIcon(spec.icon, UDim2.new(0, 15, 0, 15), iconColor)
+            or GetIcon(spec.fallback, UDim2.new(0, 15, 0, 15), iconColor)
+        if ic then
+            ic.Position = UDim2.new(0, 12, 0.5, -7)
+            ic.ZIndex = 983
+            ic.Parent = it
+        end
+        local lbl = create("TextLabel", {
+            Position = UDim2.new(0, 36, 0, 0),
+            Size = UDim2.new(1, -44, 1, 0),
+            BackgroundTransparency = 1,
+            Text = spec.label,
+            TextColor3 = spec.color,
+            TextSize = 13,
+            Font = Enum.Font.SourceSans,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            ZIndex = 983,
+        })
+
+        lbl.Parent = it
+        it.MouseEnter:Connect(function()
+            svc.TweenService:Create(it, TweenInfo.new(0.12), {BackgroundTransparency = 0.6}):Play()
+        end)
+        it.MouseLeave:Connect(function()
+            svc.TweenService:Create(it, TweenInfo.new(0.12), {BackgroundTransparency = 1}):Play()
+        end)
+        it.MouseButton1Click:Connect(function()
+            obCloseContextPanel()
+            spec.cb()
+        end)
+        it.Parent = panel
+    end
+
+    for i, spec in ipairs(items) do addItem(i, spec) end
+
+    local absPos = obWindow.AbsolutePosition
+    local absSize = obWindow.AbsoluteSize
+    local localX = screenX - absPos.X
+    local localY = screenY - absPos.Y
+
+    local x = math.clamp(localX + 12, 8, math.max(8, absSize.X - panelW - 8))
+    local y = math.clamp(localY - 4, 8, math.max(8, absSize.Y - panelH - 8))
+    panel.Position = UDim2.new(0, x, 0, y)
+
+    panel.BackgroundTransparency = 1
+    svc.TweenService:Create(panel, TweenInfo.new(0.16, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+        {BackgroundTransparency = 0.06}):Play()
+    for _, c in pairs(panel:GetDescendants()) do
+        if c:IsA("ImageLabel") or c:IsA("ImageButton") then
+            c.ImageTransparency = 0
+        elseif c:IsA("TextLabel") or c:IsA("TextButton") then
+            c.TextTransparency = 0
+        elseif c:IsA("UIStroke") then
+            c.Transparency = 0
+        end
+    end
+end
+
+function obConfirmDelete(data)
+    if not obWindow or not obWindow.Parent then return end
+    local node = obResolve(data.path)
+    if not node or not node.Parent then
+        ShowNotification("该对象已不存在", 2)
+        return
+    end
+
+    if obIsRootService(node, data.path) then
+        ShowNotification("顶层服务不可删除（会连带销毁其下全部对象）", 2.5)
+        return
+    end
+    obCloseContextPanel()
+
+    local w, h = 244, 106
+    local dlg = create("Frame", {
+        Size = UDim2.new(0, w, 0, h),
+        BackgroundColor3 = theme.surface,
+        BackgroundTransparency = 1,
+        BorderSizePixel = 0,
+        Active = true,
+        ZIndex = 985,
+        Name = "ObDeleteConfirm",
+    })
+    corner(12, dlg)
+    stroke(theme.red, 1, dlg)
+    local abs = obWindow.AbsoluteSize
+    dlg.Position = UDim2.new(0, math.floor((abs.X - w) / 2), 0, math.floor((abs.Y - h) / 2))
+    dlg.Parent = obWindow
+
+    local title = create("TextLabel", {
+        Position = UDim2.new(0, 16, 0, 10),
+        Size = UDim2.new(1, -32, 0, 20),
+        BackgroundTransparency = 1,
+        Text = "删除 " .. tostring(node.ClassName) .. " \"" .. tostring(node.Name) .. "\"？",
+        TextColor3 = theme.text,
+        TextSize = 13,
+        Font = Enum.Font.SourceSansBold,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        ZIndex = 986,
+    })
+    title.Parent = dlg
+
+    local warnL = create("TextLabel", {
+        Position = UDim2.new(0, 16, 0, 32),
+        Size = UDim2.new(1, -32, 0, 28),
+        BackgroundTransparency = 1,
+        Text = "此操作不可撤销，对象及其所有子级将被销毁。",
+        TextColor3 = theme.textDim,
+        TextSize = 11,
+        Font = Enum.Font.SourceSans,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        TextYAlignment = Enum.TextYAlignment.Top,
+        ZIndex = 986,
+    })
+    warnL.Parent = dlg
+
+    local function closeDlg()
+        svc.TweenService:Create(dlg, TweenInfo.new(0.14), {BackgroundTransparency = 1}):Play()
+        for _, c in pairs(dlg:GetDescendants()) do
+            if c:IsA("TextLabel") or c:IsA("TextButton") then
+                svc.TweenService:Create(c, TweenInfo.new(0.14), {TextTransparency = 1}):Play()
+            end
+        end
+        task.delay(0.16, function() if dlg and dlg.Parent then dlg:Destroy() end end)
+    end
+
+    local cancelBtn = create("TextButton", {
+        Position = UDim2.new(0, 16, 1, -38),
+        Size = UDim2.new(0.5, -22, 0, 28),
+        BackgroundColor3 = theme.surfaceLight,
+        BackgroundTransparency = 0.4,
+        BorderSizePixel = 0,
+        Text = "取消",
+        TextColor3 = theme.text,
+        TextSize = 12,
+        Font = Enum.Font.SourceSans,
+        AutoButtonColor = false,
+        ZIndex = 986,
+    })
+    corner(8, cancelBtn)
+    cancelBtn.MouseButton1Click:Connect(closeDlg)
+    cancelBtn.Parent = dlg
+
+    local okBtn = create("TextButton", {
+        Position = UDim2.new(0.5, 6, 1, -38),
+        Size = UDim2.new(0.5, -22, 0, 28),
+        BackgroundColor3 = theme.red,
+        BackgroundTransparency = 0.2,
+        BorderSizePixel = 0,
+        Text = "确认删除",
+        TextColor3 = Color3.fromRGB(255, 255, 255),
+        TextSize = 12,
+        Font = Enum.Font.SourceSansBold,
+        AutoButtonColor = false,
+        ZIndex = 986,
+    })
+    corner(8, okBtn)
+    okBtn.MouseButton1Click:Connect(function()
+        local ok, err = pcall(function() node:Destroy() end)
+        closeDlg()
+        if ok then
+            if obState.selected and obKey(obState.selected) == obKey(data.path) then
+                obState.selected = nil
+            end
+            obState.expanded[obKey(data.path)] = nil
+            ShowNotification("对象已删除", 1.5)
+            obRender()
+        else
+            ShowNotification("删除失败：" .. tostring(err), 3)
+        end
+    end)
+    okBtn.Parent = dlg
+
+    dlg.BackgroundTransparency = 1
+    svc.TweenService:Create(dlg, TweenInfo.new(0.16, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+        {BackgroundTransparency = 0.06}):Play()
+end
+
+
+
+OB_FOLD_HOLD_SEC = 1
+OB_FOLD_TITLE_H = 30
+OB_FOLD_FADE_SEC = 0.16
+OB_FOLD_MOVE_SEC = 0.22
+obFoldStates = setmetatable({}, {__mode = "k"})
+
+local function obFadePropsOf(inst)
+    local props = {}
+    pcall(function() if inst:IsA("GuiObject") then props[#props + 1] = "BackgroundTransparency" end end)
+    pcall(function() if inst:IsA("ImageLabel") or inst:IsA("ImageButton") then props[#props + 1] = "ImageTransparency" end end)
+    pcall(function() if inst:IsA("TextLabel") or inst:IsA("TextButton") then props[#props + 1] = "TextTransparency" end end)
+    pcall(function() if inst:IsA("UIStroke") then props[#props + 1] = "Transparency" end end)
+    return props
+end
+
+local function obFoldCollect(win, titleBar)
+    local titleLabel = nil
+    pcall(function() titleLabel = titleBar:FindFirstChildOfClass("TextLabel") end)
+    local out = {}
+    for _, d in ipairs(win:GetDescendants()) do
+        local skip = (d == titleBar) or (titleLabel ~= nil and d == titleLabel)
+        if not skip then
+            pcall(function()
+                
+                local chrome = d:IsA("UICorner") or d:IsA("UIStroke")
+                if chrome and (d.Parent == win or d:IsDescendantOf(titleBar)) then skip = true end
+            end)
+        end
+        if not skip and d.Name ~= "Veil" then
+            local props = obFadePropsOf(d)
+            if #props > 0 then
+                local rec = {inst = d, props = props, save = {}, visible = true}
+                local ok = pcall(function()
+                    for _, p in ipairs(props) do
+                        local v = d[p]
+                        if type(v) == "number" then rec.save[p] = v end
+                    end
+                    rec.visible = d.Visible ~= false
+                end)
+                if ok then out[#out + 1] = rec end
+            end
+        end
+    end
+    return out
+end
+
+local function obFoldFade(items, show, dur, done)
+    for _, rec in ipairs(items or {}) do
+        local inst = rec.inst
+        if inst then
+            if show then pcall(function() inst.Visible = rec.visible end) end
+            for _, p in ipairs(rec.props) do
+                local v = show and (rec.save[p] or 0) or 1
+                if dur > 0 then
+                    pcall(function()
+                        svc.TweenService:Create(inst, TweenInfo.new(dur, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {[p] = v}):Play()
+                    end)
+                else
+                    pcall(function() inst[p] = v end)
+                end
+            end
+            if not show then
+                pcall(function()
+                    if dur > 0 then task.delay(dur, function() inst.Visible = false end) end
+                end)
+            end
+        end
+    end
+    if done then
+        if dur > 0 then
+            task.delay(dur + 0.02, done)
+        else
+            pcall(done)
+        end
+    end
+end
+
+local function obFoldResizeTo(win, toSize, toPos, dur, done)
+    local function land()
+        if win and win.Parent then
+            pcall(function()
+                win.Size = toSize
+                win.Position = toPos
+            end)
+        end
+        if done then pcall(done) end
+    end
+    if dur > 0 then
+        pcall(function()
+            svc.TweenService:Create(win, TweenInfo.new(dur, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+                Size = toSize, Position = toPos,
+            }):Play()
+        end)
+        task.delay(dur + 0.04, land)
+    else
+        land()
+    end
+end
+
+function obWindowCollapsed(win)
+    local s = win and obFoldStates[win]
+    return s ~= nil and s.collapsed == true
+end
+
+function obWindowSetCollapsed(win, titleBar, want, instant)
+    if not (win and win.Parent and titleBar) then return end
+    local s = obFoldStates[win]
+    if not s then
+        s = {collapsed = false}
+        obFoldStates[win] = s
+    end
+    if s.busy == true or s.collapsed == want then return end
+    s.busy = true
+    local fadeDur = instant and 0 or OB_FOLD_FADE_SEC
+    local moveDur = instant and 0 or OB_FOLD_MOVE_SEC
+
+    if want then
+        s.baseH = win.Size.Y.Offset
+        s.items = obFoldCollect(win, titleBar)
+        local function foldUp()
+            local delta = (s.baseH or 0) - OB_FOLD_TITLE_H
+            if delta <= 0 then
+                s.collapsed = true
+                s.busy = nil
+                return
+            end
+            local p = win.Position
+            obFoldResizeTo(win,
+                UDim2.new(win.Size.X.Scale, win.Size.X.Offset, 0, OB_FOLD_TITLE_H),
+                UDim2.new(p.X.Scale, p.X.Offset, p.Y.Scale, p.Y.Offset - delta / 2),
+                moveDur, function()
+                    s.collapsed = true
+                    s.busy = nil
+                end)
+        end
+        obFoldFade(s.items, false, fadeDur, foldUp)
+    else
+        local baseH = s.baseH
+        if type(baseH) ~= "number" or baseH <= OB_FOLD_TITLE_H then baseH = s.fallbackH or 480 end
+        local p = win.Position
+        obFoldFade(s.items, true, fadeDur)
+        obFoldResizeTo(win,
+            UDim2.new(win.Size.X.Scale, win.Size.X.Offset, 0, baseH),
+            UDim2.new(p.X.Scale, p.X.Offset, p.Y.Scale, p.Y.Offset + (baseH - OB_FOLD_TITLE_H) / 2),
+            moveDur, function()
+                s.collapsed = false
+                s.busy = nil
+                s.items = nil
+            end)
+    end
+end
+
+function obWindowResetFold(win, titleBar)
+    local s = win and obFoldStates[win]
+    if not s then return end
+    local items = s.items
+    s.busy = nil
+    s.collapsed = false
+    s.items = nil
+    if not (win and win.Parent) then return end
+    local baseH = s.baseH or win:GetAttribute("BaseH")
+    if type(baseH) == "number" and baseH > OB_FOLD_TITLE_H then
+        pcall(function()
+            local w, pos = win.Size.X, win.Position
+            local delta = win.Size.Y.Offset - baseH
+            win.Size = UDim2.new(w.Scale, w.Offset, 0, baseH)
+            win.Position = UDim2.new(pos.X.Scale, pos.X.Offset, pos.Y.Scale, pos.Y.Offset - delta / 2)
+        end)
+    end
+    if items then obFoldFade(items, true, 0) end
+end
+
+function obAttachTitleFold(win, titleBar)
+    if not (win and titleBar) then return end
+    local pressInput, startPos, fired, connChanged, connEnded, connCancel
+    local lastPressAt = 0
+
+    local function stop()
+        fired = true
+        if connChanged then connChanged:Disconnect(); connChanged = nil end
+        if connEnded then connEnded:Disconnect(); connEnded = nil end
+        if connCancel then connCancel:Disconnect(); connCancel = nil end
+        pressInput = nil
+    end
+
+    local function toggle()
+        stop()
+        obWindowSetCollapsed(win, titleBar, not obWindowCollapsed(win))
+    end
+
+    titleBar.InputBegan:Connect(function(input)
+        if input.UserInputType ~= Enum.UserInputType.MouseButton1 and input.UserInputType ~= Enum.UserInputType.Touch then return end
+        
+        stop()
+        fired = false
+
+        local now = tick()
+        
+        if lastPressAt > 0 and (now - lastPressAt) < 0.34 then
+            lastPressAt = now
+            toggle()
+            return
+        end
+        lastPressAt = now
+
+        pressInput = input
+        startPos = Vector2.new(input.Position.X, input.Position.Y)
+
+        connChanged = svc.UserInputService.InputChanged:Connect(function(i)
+            if not pressInput then return end
+            if i.UserInputType ~= Enum.UserInputType.MouseMovement and i.UserInputType ~= Enum.UserInputType.Touch then return end
+            local dx = i.Position.X - startPos.X
+            local dy = i.Position.Y - startPos.Y
+            if dx * dx + dy * dy > OB_LONG_DRAG_PX * OB_LONG_DRAG_PX then
+                
+                lastPressAt = 0
+                stop()
+            end
+        end)
+        connEnded = svc.UserInputService.InputEnded:Connect(function(i)
+            if i ~= pressInput then return end
+            stop()
+        end)
+        connCancel = svc.UserInputService.WindowFocusReleased:Connect(stop)
+
+        task.spawn(function()
+            task.wait(OB_FOLD_HOLD_SEC)
+            if fired or not pressInput then return end
+            toggle()
+        end)
+    end)
+end
+
+local function obAttachLongPress(row, data)
+    local pressInput, startTime, startPos, fired, connChanged, connEnded, connCancel
+
+    local function cancel(reason)
+        fired = true
+        if connChanged then connChanged:Disconnect() end
+        if connEnded then connEnded:Disconnect() end
+        if connCancel then connCancel:Disconnect() end
+        if pressInput then pressInput = nil end
+    end
+
+    row.InputBegan:Connect(function(input)
+        if fired then return end
+        if input.UserInputType ~= Enum.UserInputType.MouseButton1 and input.UserInputType ~= Enum.UserInputType.Touch then return end
+
+        pressInput = input
+        startTime = tick()
+        startPos = Vector2.new(input.Position.X, input.Position.Y)
+        fired = false
+
+        local function onChanged(i)
+            if i ~= pressInput then return end
+            local dx = i.Position.X - startPos.X
+            local dy = i.Position.Y - startPos.Y
+            if dx * dx + dy * dy > OB_LONG_DRAG_PX * OB_LONG_DRAG_PX then
+
+                cancel()
+            end
+        end
+        local function onEnded(i)
+            if i ~= pressInput then return end
+            cancel()
+        end
+        connChanged = svc.UserInputService.InputChanged:Connect(onChanged)
+        connEnded = svc.UserInputService.InputEnded:Connect(onEnded)
+
+        connCancel = svc.UserInputService.WindowFocusReleased:Connect(function() cancel() end)
+
+        task.spawn(function()
+            task.wait(OB_LONG_HOLD_SEC)
+            if fired or not pressInput then return end
+
+            obOpenContextPanel(data, startPos.X, startPos.Y)
+            cancel()
+        end)
+    end)
+end
+
+function obMakeRow(data, order)
+    local depth = data.depth
+    local rowH = OB_ROW_H
+
+    local OB_ROW_INDENT = 14
+    local OB_ROW_BASE_X = 320
+    local maxDepth = math.max(obState._maxDepth or 0, depth)
+    obState._maxDepth = maxDepth
+    local reservedX = OB_ROW_BASE_X + (maxDepth + 1) * OB_ROW_INDENT + 60
+    local row = create("TextButton", {
+        Size = UDim2.new(0, reservedX, 0, rowH),
+        BackgroundColor3 = theme.surfaceLight,
+        BackgroundTransparency = 1,
+        BorderSizePixel = 0,
+        Text = "",
+        AutoButtonColor = false,
+        LayoutOrder = order,
+        ZIndex = 6,
+    })
+    corner(6, row)
+
+    local rowKey = obKey(data.path)
+    local isSel = (obState.selected ~= nil and obKey(obState.selected) == rowKey)
+    local expandedNow = obState.expanded[rowKey] == true
+    row.BackgroundColor3 = theme.accent
+    row.BackgroundTransparency = isSel and 0.82 or 1
+    if isSel then
+        local bar = create("Frame", {
+            AnchorPoint = Vector2.new(0, 0.5),
+            Position = UDim2.new(0, 2, 0.5, 0),
+            Size = UDim2.new(0, 3, 0, 13),
+            BackgroundColor3 = theme.accent,
+            BorderSizePixel = 0,
+            ZIndex = 8,
+        })
+        corner(2, bar)
+        bar.Parent = row
+    end
+
+    local chev
+    if data.hasKids then
+        chev = create("TextButton", {
+            AnchorPoint = Vector2.new(0, 0.5),
+            Position = UDim2.new(0, 4 + depth * 14, 0.5, 0),
+            Size = UDim2.new(0, 20, 0, 20),
+            BackgroundTransparency = 1,
+            BorderSizePixel = 0,
+            Text = expandedNow and "v" or ">",
+            TextColor3 = theme.accent,
+            TextSize = 12,
+            Font = Enum.Font.SourceSansBold,
+            TextXAlignment = Enum.TextXAlignment.Center,
+            AutoButtonColor = false,
+            ZIndex = 8,
+        })
+        chev.MouseButton1Click:Connect(function() obToggle(data.path) end)
+    else
+        chev = create("TextLabel", {
+            AnchorPoint = Vector2.new(0, 0.5),
+            Position = UDim2.new(0, 8 + depth * 14, 0.5, 0),
+            Size = UDim2.new(0, 14, 0, 14),
+            BackgroundTransparency = 1,
+            Text = "",
+            TextColor3 = theme.border,
+            TextSize = 12,
+            Font = Enum.Font.SourceSansBold,
+            TextXAlignment = Enum.TextXAlignment.Center,
+            ZIndex = 7,
+        })
+    end
+    chev.Parent = row
+
+    local iconName = obClassIcon(data.class)
+    local icColor = obClassColor(data.class)
+    local ic = GetIcon(iconName, UDim2.new(0, 13, 0, 13), icColor)
+    if not ic and iconName == "package-open" then
+        ic = GetIcon("package", UDim2.new(0, 13, 0, 13), icColor)
+    end
+
+    if not ic and iconName == "person-standing" then
+        ic = GetIcon("user", UDim2.new(0, 13, 0, 13), icColor)
+    end
+    if ic then
+        ic.Position = UDim2.new(0, 24 + depth * 14, 0.5, -6)
+        ic.ZIndex = 7
+        ic.Parent = row
+        ic.ImageColor3 = icColor
+    end
+
+    local nameLbl = create("TextLabel", {
+        Position = UDim2.new(0, (ic and 42 or 26) + depth * 14, 0, 0),
+        Size = UDim2.new(1, -14 - ((ic and 42 or 26) + depth * 14), 1, 0),
+        BackgroundTransparency = 1,
+        Text = data.name,
+        TextColor3 = isSel and theme.accent or theme.text,
+        TextSize = 13,
+        Font = Enum.Font.SourceSans,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        ZIndex = 7,
+    })
+    nameLbl.Parent = row
+
+    row.MouseButton1Click:Connect(function()
+
+        if obContextClosedAt and (tick() - obContextClosedAt) < 0.3 then return end
+
+        if obContextPanel and obContextPanel.Parent then
+
+            if obContextOpenedAt and (tick() - obContextOpenedAt) < 0.35 then
+                return
+            end
+            obCloseContextPanel()
+            return
+        end
+        obState.selected = data.path
+        obRender()
+    end)
+
+    obAttachLongPress(row, data)
+    table.insert(obRows, {obj = row})
+    return row
+end
+
+function obRender(forceClosePanel)
+    if not obTreeScroll or not obTreeScroll.Parent then return end
+    obState._maxDepth = 0
+
+    if (forceClosePanel or (obContextTarget and not obResolve(obContextTarget))) and obContextPanel then
+        obCloseContextPanel()
+    end
+    for _, r in ipairs(obRows) do
+        pcall(function() r.obj:Destroy() end)
+    end
+    obRows = {}
+    obState.budget = OB_SCAN_BUDGET
+    if obState.selected and not obResolve(obState.selected) then obState.selected = nil end
+    local q = nil
+    if type(obState.query) == "string" and obState.query ~= "" then
+        q = obState.query:lower()
+    end
+    local flat = {}
+    for _, root in ipairs(obRoots) do
+        if root.node then
+            obState.budget = obState.budget - 1
+            if q then
+                table.insert(flat, {path = {root.key}, name = root.node.Name, class = root.node.ClassName, depth = 0, hasKids = obChildCount(root.node) > 0})
+                obCollect(root.node, {root.key}, q, 1, flat)
+            else
+                table.insert(flat, {path = {root.key}, name = root.node.Name, class = root.node.ClassName, depth = 0, hasKids = obChildCount(root.node) > 0})
+                if obState.expanded[root.key] then
+                    obCollect(root.node, {root.key}, nil, 1, flat)
+                end
+            end
+            if #flat >= OB_MAX_ROWS then break end
+        end
+    end
+
+    for i, data in ipairs(flat) do
+        if data.depth > 20 then data.depth = 20 end
+        local row = obMakeRow(data, i)
+        row.Parent = obTreeScroll
+    end
+
+    if obState.jumpKey then
+        local jumpIndex = nil
+        for i, data in ipairs(flat) do
+            if obKey(data.path) == obState.jumpKey then
+                jumpIndex = i
+                break
+            end
+        end
+        obState.jumpKey = nil
+        if jumpIndex then
+            obFlashRowAtIndex(jumpIndex)
+        else
+            ShowNotification("该对象不在本次显示条数内，请逐级展开定位", 2.5)
+        end
+    end
+
+    if propWindow and propWindow.Visible and not obWindowCollapsed(propWindow) then pcall(propSync) end
+
+    if #flat == 0 then
+        local empty = create("TextLabel", {
+            Size = UDim2.new(1, -6, 0, 30),
+            BackgroundTransparency = 1,
+            Text = (q and "无匹配对象" or "无法读取该实例的子级"),
+            TextColor3 = theme.textDim,
+            TextSize = 12,
+            Font = Enum.Font.SourceSans,
+            ZIndex = 6,
+            Parent = obTreeScroll,
+        })
+        table.insert(obRows, {obj = empty})
+    elseif #flat >= OB_MAX_ROWS then
+        local cap = create("TextLabel", {
+            Size = UDim2.new(1, -6, 0, 26),
+            LayoutOrder = 100000,
+            BackgroundTransparency = 1,
+            Text = "… 已达本次显示上限 " .. tostring(OB_MAX_ROWS) .. " 条，请输入关键词缩小范围",
+            TextColor3 = theme.warn,
+            TextSize = 12,
+            Font = Enum.Font.SourceSans,
+            ZIndex = 6,
+        })
+        cap.Parent = obTreeScroll
+        table.insert(obRows, {obj = cap})
+    end
+
+    if obFootLeft then
+        if obState.selected then
+            obFootLeft.Text = obTruncatePath(obSelectedPathText())
+        else
+            obFootLeft.Text = "未选中对象"
+        end
+    end
+    if obFootLeft then
+        local txt = obSelectedPathText()
+        obFootLeft.Text = (txt and obTruncatePath(txt)) or "未选中对象 · 点击可复制路径"
+        obFootLeft.TextColor3 = txt and theme.text or theme.textDim
+    end
+    if obFootRight then
+        local node = obState.selected and obResolve(obState.selected)
+        obFootRight.Text = node and node.ClassName or ""
+        obFootRight.TextColor3 = node and theme.accent or theme.textDim
+    end
+    task.defer(function()
+        if obTreeScroll and obTreeList and obTreeScroll.Parent then
+            local abs = obTreeList.AbsoluteContentSize
+            if abs then
+
+                obTreeScroll.CanvasSize = UDim2.new(
+                    0, math.max(0, abs.X - obTreeScroll.AbsoluteSize.X) + 12,
+                    0, abs.Y + 8
+                )
+            end
+        end
+    end)
+end
+
+obRoots = {
+    {key = "Workspace", label = "Workspace"},
+    {key = "Players", label = "Players"},
+    {key = "ReplicatedStorage", label = "ReplicatedStorage"},
+    {key = "CoreGui", label = "CoreGui"},
+}
+for i = #obRoots, 1, -1 do
+    local r = obRoots[i]
+    if not r.node then
+        local ok, sv = pcall(function() return game:GetService(r.key) end)
+        if ok and sv then
+            r.node = sv
+        else
+            table.remove(obRoots, i)
+        end
+    end
+end
+
+function bsView()
+    local ok, cam = pcall(function() return workspace.CurrentCamera end)
+    if ok and cam and cam.ViewportSize and cam.ViewportSize.X > 100 then return cam.ViewportSize end
+    return Vector2.new(1280, 720)
+end
+
+OB_LEFT_MARGIN = 12
+
+function createBuildSpaceUI()
+    if buildSpaceRoot then return end
+    local vp = bsView()
+    local winW = math.clamp(vp.X * 0.22, 260, 340)
+    local winH = math.clamp(vp.Y * 0.78, 400, 620)
+
+    buildSpaceRoot = create("Frame", {
+        Size = UDim2.new(1, 0, 1, 0),
+        BackgroundTransparency = 1,
+        BorderSizePixel = 0,
+        Visible = false,
+        ZIndex = 900,
+    })
+    buildSpaceRoot.Name = "BuildSpace"
+    buildSpaceRoot.Parent = screenGui
+
+    bsDim = create("Frame", {
+        Size = UDim2.new(1, 0, 1, 0),
+        BackgroundColor3 = Color3.fromRGB(0, 0, 0),
+        BackgroundTransparency = 1,
+        BorderSizePixel = 0,
+        ZIndex = 900,
+    })
+    bsDim.Name = "Dim"
+    bsDim.Parent = buildSpaceRoot
+
+    buildSpaceExit = create("TextButton", {
+        AnchorPoint = Vector2.new(1, 0),
+        Position = UDim2.new(1, -18, 0, -60),
+        Size = UDim2.new(0, 96, 0, 32),
+        BackgroundColor3 = theme.red,
+        BackgroundTransparency = 0.72,
+        BorderSizePixel = 0,
+        Text = "",
+        AutoButtonColor = false,
+        ZIndex = 905,
+    })
+    buildSpaceExit.Name = "ExitBtn"
+    corner(16, buildSpaceExit)
+    stroke(theme.red, 1, buildSpaceExit)
+    local exIcon = GetIcon("log-out", UDim2.new(0, 14, 0, 14), theme.red)
+    if exIcon then
+        exIcon.Position = UDim2.new(0, 10, 0.5, -7)
+        exIcon.ZIndex = 906
+        exIcon.Parent = buildSpaceExit
+    end
+    create("TextLabel", {
+        Position = UDim2.new(0, (exIcon and 28 or 10), 0, 0),
+        Size = UDim2.new(1, (exIcon and -34 or -14), 1, 0),
+        BackgroundTransparency = 1,
+        Text = "退出",
+        TextColor3 = theme.text,
+        TextSize = 13,
+        Font = Enum.Font.SourceSansBold,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        ZIndex = 906,
+        Parent = buildSpaceExit,
+    })
+    buildSpaceExit.Parent = buildSpaceRoot
+    buildSpaceExit.MouseButton1Click:Connect(function()
+        exitBuildSpace()
+    end)
+
+    obWindow = create("Frame", {
+        AnchorPoint = Vector2.new(0.5, 0.5),
+
+        Position = UDim2.new(0, OB_LEFT_MARGIN + winW / 2, 0.5, 3),
+        Size = UDim2.new(0, winW, 0, winH),
+        BackgroundColor3 = theme.surface,
+        BackgroundTransparency = 1,
+        BorderSizePixel = 0,
+        ClipsDescendants = true,
+        Active = true,
+        ZIndex = 901,
+    })
+    obWindow.Name = "ObjectBrowser"
+
+    corner(12, obWindow)
+    stroke(theme.border, 1, obWindow)
+    obWindow:SetAttribute("BaseW", winW)
+    obWindow:SetAttribute("BaseH", winH)
+    obWindow.Parent = buildSpaceRoot
+    obWindow.Visible = false
+
+    obVeil = create("Frame", {
+        Size = UDim2.new(1, 0, 1, 0),
+        BackgroundColor3 = theme.surface,
+        BackgroundTransparency = 1,
+        BorderSizePixel = 0,
+        Visible = false,
+        ZIndex = 960,
+    })
+    obVeil.Name = "Veil"
+    corner(12, obVeil)
+    obVeil.Parent = obWindow
+
+    obHeader = create("Frame", {
+        Position = UDim2.new(0, 1, 0, 1),
+        Size = UDim2.new(1, -2, 0, 28),
+        BackgroundColor3 = theme.surfaceLight,
+        BackgroundTransparency = 0.45,
+        BorderSizePixel = 0,
+        ZIndex = 902,
+    })
+    corner(11, obHeader)
+    obHeader.Parent = obWindow
+
+    create("TextLabel", {
+        Position = UDim2.new(0, 12, 0, 0),
+        Size = UDim2.new(0, 200, 1, 0),
+        BackgroundTransparency = 1,
+        Text = "对象树浏览器",
+        TextColor3 = theme.text,
+        TextSize = 13,
+        Font = Enum.Font.SourceSansBold,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        ZIndex = 903,
+        Parent = obHeader,
+    })
+
+    local obSearchW = math.clamp(winW - 200, 80, 160)
+    obSearchInput = create("TextBox", {
+        AnchorPoint = Vector2.new(1, 0),
+        Position = UDim2.new(1, -8, 0, 6),
+        Size = UDim2.new(0, obSearchW, 0, 20),
+        BackgroundColor3 = theme.surface,
+        BackgroundTransparency = 0.2,
+        BorderSizePixel = 0,
+        PlaceholderText = "搜索…",
+        Text = "",
+        TextColor3 = theme.text,
+        PlaceholderColor3 = theme.textDim,
+        TextSize = 12,
+        Font = Enum.Font.SourceSans,
+        ClearTextOnFocus = false,
+        ZIndex = 903,
+    })
+    corner(10, obSearchInput)
+    stroke(theme.border, 1, obSearchInput)
+    obSearchInput.Parent = obHeader
+    obSearchInput:GetPropertyChangedSignal("Text"):Connect(function()
+        obState.query = obSearchInput.Text
+        obRender()
+    end)
+
+    local function obPointInsidePanel(px, py)
+        local panel = obContextPanel
+        if not panel or not panel.Parent then return false end
+        local ok, ap, as = pcall(function() return panel.AbsolutePosition, panel.AbsoluteSize end)
+        if not ok or not ap or not as then return false end
+        return px >= ap.X and px <= ap.X + as.X and py >= ap.Y and py <= ap.Y + as.Y
+    end
+
+    svc.UserInputService.InputBegan:Connect(function(input)
+        if not (obContextPanel and obContextPanel.Parent) then return end
+        if input.UserInputType ~= Enum.UserInputType.MouseButton1 and input.UserInputType ~= Enum.UserInputType.Touch then return end
+
+        if obContextOpenedAt and (tick() - obContextOpenedAt) < 0.35 then return end
+        local px, py = input.Position.X, input.Position.Y
+
+        if (not px or px == 0) and (not py or py == 0) then
+            local okM, m = pcall(function() return svc.UserInputService:GetMouseLocation() end)
+            if okM and m then px, py = m.X, m.Y end
+        end
+        if px and py and obPointInsidePanel(px, py) then return end
+        obContextClosedAt = tick()
+        obCloseContextPanel()
+    end)
+
+    obTreeScroll = create("ScrollingFrame", {
+
+        Position = UDim2.new(0, 8, 0, 33),
+        Size = UDim2.new(1, -16, 1, -61),
+        BackgroundColor3 = theme.bg,
+        BackgroundTransparency = 0.45,
+        BorderSizePixel = 0,
+        ScrollBarThickness = 4,
+        ScrollBarImageColor3 = theme.textDim,
+        CanvasSize = UDim2.new(0, 0, 0, 0),
+        ClipsDescendants = true,
+        ZIndex = 902,
+
+        ScrollingDirection = Enum.ScrollingDirection.XY,
+        ElasticBehavior = Enum.ElasticBehavior.WhenScrollable,
+    })
+    corner(12, obTreeScroll)
+    stroke(theme.border, 1, obTreeScroll)
+    obTreeScroll.Parent = obWindow
+
+    obTreeList = create("UIListLayout", {
+        SortOrder = Enum.SortOrder.LayoutOrder,
+        Padding = UDim.new(0, 0),
+    })
+    obTreeList.Parent = obTreeScroll
+    local treePad = create("UIPadding", {PaddingTop = UDim.new(0, 4), PaddingBottom = UDim.new(0, 6)})
+    treePad.Parent = obTreeScroll
+    local function obUpdateCanvasSize()
+        if not (obTreeScroll and obTreeList and obTreeScroll.Parent) then return end
+        local abs = obTreeList.AbsoluteContentSize
+        if not abs then return end
+
+        obTreeScroll.CanvasSize = UDim2.new(
+            0, math.max(0, abs.X - obTreeScroll.AbsoluteSize.X) + 12,
+            0, abs.Y + 10
+        )
+    end
+    obTreeList:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(obUpdateCanvasSize)
+
+    obTreeScroll:GetPropertyChangedSignal("AbsoluteSize"):Connect(obUpdateCanvasSize)
+
+    obFootBar = create("Frame", {
+        AnchorPoint = Vector2.new(0, 1),
+        Position = UDim2.new(0, 0, 1, 0),
+        Size = UDim2.new(1, 0, 0, 26),
+        BackgroundTransparency = 1,
+        BorderSizePixel = 0,
+        ZIndex = 902,
+    })
+    obFootBar.Parent = obWindow
+
+    obFootWrap = create("Frame", {
+        AnchorPoint = Vector2.new(0, 1),
+        Position = UDim2.new(0, 16, 1, -2),
+        Size = UDim2.new(0, 0, 0, 22),
+        AutomaticSize = Enum.AutomaticSize.X,
+        BackgroundTransparency = 1,
+        BorderSizePixel = 0,
+        ZIndex = 903,
+    })
+    create("UIListLayout", {
+        FillDirection = Enum.FillDirection.Horizontal,
+        SortOrder = Enum.SortOrder.LayoutOrder,
+        VerticalAlignment = Enum.VerticalAlignment.Center,
+        Padding = UDim.new(0, 6),
+        Parent = obFootWrap,
+    })
+    local footIcon = GetIcon("clipboard", UDim2.new(0, 12, 0, 12), theme.textDim)
+    if footIcon then
+        footIcon.LayoutOrder = 1
+        footIcon.ZIndex = 904
+        footIcon.Parent = obFootWrap
+    end
+    obFootLeft = create("TextButton", {
+        LayoutOrder = 2,
+        Size = UDim2.new(0, 0, 1, 0),
+        AutomaticSize = Enum.AutomaticSize.X,
+        BackgroundTransparency = 1,
+        BorderSizePixel = 0,
+        Text = "未选中对象 · 点击可复制路径",
+        TextColor3 = theme.textDim,
+        TextSize = 11,
+        Font = Enum.Font.SourceSans,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        AutoButtonColor = false,
+        ZIndex = 904,
+    })
+    obFootLeft.MouseEnter:Connect(function()
+        if obState.selected then obFootLeft.TextColor3 = theme.accent end
+    end)
+    obFootLeft.MouseLeave:Connect(function()
+        obFootLeft.TextColor3 = obState.selected and theme.text or theme.textDim
+    end)
+    obFootLeft.MouseButton1Click:Connect(function()
+        local txt = obSelectedPathText()
+        if not txt then
+            ShowNotification("请先选中一个对象", 1.5)
+            return
+        end
+        if obCopyText(txt) then
+
+            obFootLeft.TextColor3 = theme.green
+            task.delay(0.6, function()
+                if obFootLeft and obFootLeft.Parent then obFootLeft.TextColor3 = theme.text end
+            end)
+            ShowNotification("路径已复制到剪贴板", 1.5)
+        else
+            ShowNotification("复制失败：当前环境不支持剪贴板", 2)
+        end
+    end)
+    obFootLeft.Parent = obFootWrap
+    obFootWrap.Parent = obFootBar
+    obFootRight = create("TextLabel", {
+        AnchorPoint = Vector2.new(1, 0.5),
+        Position = UDim2.new(1, -16, 0.5, 0),
+        Size = UDim2.new(0, 110, 1, 0),
+        BackgroundTransparency = 1,
+        Text = "",
+        TextColor3 = theme.textDim,
+        TextSize = 11,
+        Font = Enum.Font.SourceSansBold,
+        TextXAlignment = Enum.TextXAlignment.Right,
+        ZIndex = 903,
+        Parent = obFootBar,
+    })
+
+    makeWindowDraggable(obWindow, obHeader)
+    obAttachTitleFold(obWindow, obHeader)
+
+    local okProp, errProp = pcall(createPropBrowserUI)
+    if not okProp then warn("[DeltaUI] 属性浏览器创建失败: " .. tostring(errProp)) end
+end
+
+local PROP_ROW_H = 22
+local PROP_NAME_W = 0.44
+
+local function propFormatValue(v)
+    local t = typeof(v)
+    if t == "boolean" then
+        return tostring(v), v and theme.green or theme.textDim
+    elseif t == "number" then
+        return string.format("%.4g", v), theme.text
+    elseif t == "string" then
+
+        local s = (v:gsub("[\r\n]+", " "))
+        if #s > 46 then s = s:sub(1, 46) .. "…" end
+        return '"' .. s .. '"', theme.text
+    elseif t == "Color3" then
+        local r, g, b = math.floor(v.R * 255 + 0.5), math.floor(v.G * 255 + 0.5), math.floor(v.B * 255 + 0.5)
+        return string.format("%d, %d, %d", r, g, b), v
+    elseif t == "Vector3" then
+        return string.format("(%.2f, %.2f, %.2f)", v.X, v.Y, v.Z), theme.text
+    elseif t == "Vector2" then
+        return string.format("(%.2f, %.2f)", v.X, v.Y), theme.text
+    elseif t == "CFrame" then
+        local p = v.Position
+        return string.format("pos(%.1f, %.1f, %.1f) rot(%.0f°)", p.X, p.Y, p.Z, math.deg(v:ToEulerAnglesYXZ())), theme.text
+    elseif t == "UDim2" then
+        return string.format("{%.3f, %d, %.3f, %d}", v.X.Scale, v.X.Offset, v.Y.Scale, v.Y.Offset), theme.text
+    elseif t == "UDim" then
+        return string.format("{%.3f, %d}", v.Scale, v.Offset), theme.text
+    elseif t == "Rect" then
+        return string.format("(%.0f,%.0f)-(%.0f,%.0f)", v.Min.X, v.Min.Y, v.Max.X, v.Max.Y), theme.text
+    elseif t == "EnumItem" then
+        return tostring(v.Name), theme.warn
+    elseif t == "Instance" then
+
+        local okD, d = pcall(function() return v.ClassName .. " \"" .. v.Name .. "\"" end)
+        return (okD and d) or "<Instance>", theme.accent
+    elseif t == "function" or t == "table" then
+        return nil, nil
+    end
+    local ok, s = pcall(tostring, v)
+    return ok and s or "?", theme.text
+end
+
+local PROP_STATIC = {
+    common = {"Name", "Parent", "Archivable", "Enabled", "Disabled"},
+    BasePart = {"Position", "Rotation", "CFrame", "Size", "Color", "Transparency", "Reflectance",
+        "Material", "CanCollide", "Anchored", "Massive", "Locked", "CastShadow", "Velocity",
+        "RotVelocity", "TopSurface", "BottomSurface", "Shape", "Materials", "AssemblyLinearVelocity"},
+    Model = {"PrimaryPart", "WorldPivot", "LevelOfDetail", "EditorColor"},
+    GuiObject = {"Position", "Size", "Visible", "ZIndex", "Active", "AnchorPoint", "BackgroundColor3",
+        "BackgroundTransparency", "BorderSizePixel", "BorderColor3", "ClipsDescendants", "Rotation",
+        "AbsolutePosition", "AbsoluteSize", "LayoutOrder", "IgnoreGuiInset"},
+    GuiLabel = {"Text", "TextColor3", "TextSize", "TextTransparency", "TextXAlignment", "TextYAlignment",
+        "TextWrapped", "TextScaled", "TextStrokeColor3", "TextStrokeTransparency", "Font", "PlaceholderText"},
+    Script = {"Disabled", "RunContext", "Source"},
+}
+
+local function propTagOf(p)
+    local show, readOnly = true, false
+    local okH, hidden = pcall(function() return p:HasTag("Hidden") end)
+    if okH and hidden == true then show = false end
+    for _, tag in ipairs({"ReadOnly", "NotEditable"}) do
+        local ok, has = pcall(function() return p:HasTag(tag) end)
+        if ok and has == true then readOnly = true end
+    end
+    return show, readOnly
+end
+
+local function propListNames(node)
+    local names = {}
+    local seen = {}
+    local roSet = {}
+    local function put(n)
+        if type(n) ~= "string" or n == "" or seen[n] then return end
+        seen[n] = true
+        names[#names + 1] = n
+    end
+
+    put("Name")
+    put("ClassName")
+    put("Parent")
+    roSet.ClassName = "派生属性，由引擎决定"
+    local found = 0
+    local function putFound(n) local before = seen[n] put(n) if not before then found = found + 1 end end
+
+    local gp = (typeof(getproperties) == "function" and getproperties) or (typeof(getprops) == "function" and getprops)
+    if typeof(gp) == "function" then
+        local ok, tb = pcall(gp, node, true)
+        if ok and type(tb) == "table" then
+            for k in pairs(tb) do putFound(k) end
+        end
+    end
+
+    if found == 0 then
+        local ok, props = pcall(function() return node.Properties end)
+        if ok and type(props) == "table" then
+            for _, p in ipairs(props) do
+                local okN, pn = pcall(function() return p.Name end)
+                if okN and type(pn) == "string" then
+                    local show, readOnly = propTagOf(p)
+                    if readOnly and pn ~= "Name" then roSet[pn] = "引擎标记为只读" end
+                    if show or pn == "Name" then putFound(pn) end
+                end
+            end
+        end
+    end
+
+    if found == 0 then
+        local okC, cls = pcall(function() return node.ClassName end)
+        if okC and cls and PROP_STATIC[cls] then
+            for _, n in ipairs(PROP_STATIC[cls]) do putFound(n) end
+        end
+        for _, n in ipairs(PROP_STATIC.common) do putFound(n) end
+    end
+    table.sort(names)
+
+    local function pinOrder(n)
+        if n == "Name" then return 1 end
+        if n == "ClassName" then return 2 end
+        if n == "Parent" then return 3 end
+        return 10
+    end
+    table.sort(names, function(a, b)
+        local oa, ob = pinOrder(a), pinOrder(b)
+        if oa ~= ob then return oa < ob end
+        return a < b
+    end)
+    return names, roSet
+end
+
+local propRowRefs = {}
+
+local function propDestroyRows()
+    for i = #propRowRefs, 1, -1 do
+        local r = propRowRefs[i]
+        propRowRefs[i] = nil
+        pcall(function() if r then r:Destroy() end end)
+    end
+end
+
+local function propFindInstanceByPath(text)
+    local parts = {}
+    for seg in tostring(text or ""):gmatch("[^%.]+") do parts[#parts + 1] = seg end
+    if parts[1] == "game" then table.remove(parts, 1) end
+    if #parts == 0 then return nil end
+    local cur
+    local okS, sv = pcall(function() return game:GetService(parts[1]) end)
+    cur = (okS and sv) or nil
+    if not cur then
+        local okW, kid = pcall(function() return workspace:FindFirstChild(parts[1]) end)
+        cur = (okW and kid) or nil
+    end
+    if not cur then return nil end
+    for i = 2, #parts do
+        local okC, kid = pcall(function() return cur:FindFirstChild(parts[i]) end)
+        if not okC or not kid then return nil end
+        cur = kid
+    end
+    return cur
+end
+
+propEditor = nil
+propEditOpenedAt = 0
+
+local PROP_EDIT_FIELDS = {
+    number = {{"值", "number"}},
+    string = {{"值", "string"}},
+    ProtectedString = {{"值", "string"}},
+    Content = {{"rbxassetid:// 或 URL", "string"}},
+    Beverages = {{"rbxassetid:// 或 URL", "string"}},
+    EnumItem = {{"枚举项名", "string"}},
+    Instance = {{"对象全名（如 Workspace.Map）", "string"}},
+    Class = {{"对象全名（如 Workspace.Map）", "string"}},
+    Color3 = {{"R 0-255", "number"}, {"G 0-255", "number"}, {"B 0-255", "number"}},
+    Vector3 = {{"X", "number"}, {"Y", "number"}, {"Z", "number"}},
+    Vector2 = {{"X", "number"}, {"Y", "number"}},
+    UDim = {{"Scale", "number"}, {"Offset", "number"}},
+    UDim2 = {{"X.Scale", "number"}, {"X.Offset", "number"}, {"Y.Scale", "number"}, {"Y.Offset", "number"}},
+    Rect = {{"Min X", "number"}, {"Min Y", "number"}, {"Max X", "number"}, {"Max Y", "number"}},
+}
+
+function propAttachLongPress(btn, onLong)
+    local pressInput, startPos, fired, cChanged, cEnded
+    local function stop()
+        fired = true
+        if cChanged then cChanged:Disconnect() cChanged = nil end
+        if cEnded then cEnded:Disconnect() cEnded = nil end
+        pressInput = nil
+    end
+    btn.InputBegan:Connect(function(input)
+        if fired then return end
+        if input.UserInputType ~= Enum.UserInputType.MouseButton1 and input.UserInputType ~= Enum.UserInputType.Touch then return end
+        pressInput = input
+        startPos = Vector2.new(input.Position.X, input.Position.Y)
+        fired = false
+
+        cChanged = svc.UserInputService.InputChanged:Connect(function(i)
+            if i ~= pressInput or not startPos then return end
+            local dx, dy = i.Position.X - startPos.X, i.Position.Y - startPos.Y
+            if dx * dx + dy * dy > OB_LONG_DRAG_PX * OB_LONG_DRAG_PX then stop() end
+        end)
+        cEnded = svc.UserInputService.InputEnded:Connect(function(i)
+            if i == pressInput then stop() end
+        end)
+        task.spawn(function()
+            task.wait(OB_LONG_HOLD_SEC)
+            if fired or not pressInput or not startPos then return end
+            local px, py = startPos.X, startPos.Y
+            stop()
+            onLong(px, py)
+        end)
+    end)
+    btn.MouseLeave:Connect(stop)
+end
+
+function propCloseEditor()
+    if propEditor and propEditor.Parent then propEditor:Destroy() end
+    propEditor = nil
+end
+
+function propPrefillOf(kind, v)
+    if kind == "Color3" then
+        return {math.floor(v.R * 255 + 0.5), math.floor(v.G * 255 + 0.5), math.floor(v.B * 255 + 0.5)}
+    elseif kind == "Vector3" then
+        return {v.X, v.Y, v.Z}
+    elseif kind == "Vector2" then
+        return {v.X, v.Y}
+    elseif kind == "UDim" then
+        return {v.Scale, v.Offset}
+    elseif kind == "UDim2" then
+        return {v.X.Scale, v.X.Offset, v.Y.Scale, v.Y.Offset}
+    elseif kind == "Rect" then
+        return {v.Min.X, v.Min.Y, v.Max.X, v.Max.Y}
+    elseif kind == "EnumItem" then
+        return {tostring(v.Name)}
+    elseif kind == "Instance" or kind == "Class" then
+        local okN, n = pcall(function() return v:GetFullName() end)
+        return {(okN and n) or ""}
+    end
+    return {tostring(v)}
+end
+
+function propBuildValue(kind, texts, spec)
+
+    local function nums(want)
+        local out = {}
+        for i = 1, want do
+            if texts[i] == nil then return nil, "还缺 " .. (want - #out) .. " 个数字" end
+            local n = tonumber(texts[i])
+            if not n then return nil, tostring(texts[i]) .. " 不是数字" end
+            out[#out + 1] = n
+        end
+        return out, nil
+    end
+    if kind == "number" then
+        local n = tonumber(texts[1])
+        if not n then return nil, "请输入数字" end
+        return n, nil
+    elseif kind == "string" or kind == "ProtectedString" or kind == "Content" or kind == "Beverages" then
+        return texts[1], nil
+    elseif kind == "Color3" then
+        local n, err = nums(3)
+        if not n then return nil, err end
+        return Color3.fromRGB(math.clamp(n[1], 0, 255), math.clamp(n[2], 0, 255), math.clamp(n[3], 0, 255)), nil
+    elseif kind == "Vector3" then
+        local n, err = nums(3)
+        if not n then return nil, err end
+        return Vector3.new(n[1], n[2], n[3]), nil
+    elseif kind == "Vector2" then
+        local n, err = nums(2)
+        if not n then return nil, err end
+        return Vector2.new(n[1], n[2]), nil
+    elseif kind == "UDim" then
+        local n, err = nums(2)
+        if not n then return nil, err end
+        return UDim.new(n[1], math.floor(n[2])), nil
+    elseif kind == "UDim2" then
+        local n, err = nums(4)
+        if not n then return nil, err end
+        return UDim2.new(n[1], math.floor(n[2]), n[3], math.floor(n[4])), nil
+    elseif kind == "Rect" then
+        local n, err = nums(4)
+        if not n then return nil, err end
+        return Rect.new(n[1], n[2], n[3], n[4]), nil
+    elseif kind == "EnumItem" then
+        local nm = texts[1]:gsub("^%s+", ""):gsub("%s+$", "")
+        if not spec.enumName or spec.enumName == "" then
+            return nil, "未能解析该属性的枚举类型，请长按属性名重试"
+        end
+        local okItem, item = pcall(function() return Enum[spec.enumName][nm] end)
+        if not okItem or item == nil then
+            return nil, "「" .. spec.enumName .. "」里没有叫 " .. nm .. " 的枚举项"
+        end
+        return item, nil
+    elseif kind == "Instance" or kind == "Class" then
+
+        local t = tostring(texts[1] or ""):match("^%s*(.-)%s*$")
+        if t == "" or t:lower() == "nil" then return nil, nil, true end
+        local target = propFindInstanceByPath(t)
+        if not target then return nil, "找不到对象：" .. t end
+        return target, nil
+    end
+    return nil, "该类型暂不支持在此修改"
+end
+
+function propWriteProp(node, key, value)
+    local function rawWrite()
+        local ok, err = pcall(function() node[key] = value end)
+        return ok, err
+    end
+    local ok, err = rawWrite()
+    if ok then return true end
+    if type(setreadonly) == "function" then
+        local wasReadonly = true
+        if type(isreadonly) == "function" then
+            local okR, r = pcall(isreadonly, node)
+            wasReadonly = (not okR) or r ~= false
+        end
+        if wasReadonly then pcall(setreadonly, node, false) end
+        local ok2, err2 = rawWrite()
+        if wasReadonly then pcall(setreadonly, node, true) end
+        if ok2 then return true end
+        return false, err2 or err
+    end
+    return false, err
+end
+
+function propCommit(spec, value, clear)
+    if clear then value = nil end
+    local node = spec.node
+    if not node or not (node.Parent or node == game) then
+        ShowNotification("对象已销毁，无法修改", 2)
+        propCloseEditor()
+        return
+    end
+    local wrote, werr = propWriteProp(node, spec.name, value)
+    if not wrote then
+        ShowNotification("写入失败：" .. tostring(werr), 3)
+        return
+    end
+
+    if spec.name == "Name" then
+        if type(obState.selected) == "table" then
+            obState.selected[#obState.selected] = tostring(value)
+        end
+        pcall(obRender)
+    end
+    propCloseEditor()
+
+    if spec.name == "Parent" and (value == nil or value == game) then
+        ShowNotification("已修改 Parent：对象离开层级树后不会再出现在列表里", 3)
+    else
+        ShowNotification("已修改 " .. spec.name, 1.4)
+    end
+    propSignature = "\0__force__"
+    pcall(propSync)
+end
+
+function propApplyEdit(spec, texts)
+    local value, err, clear = propBuildValue(spec.kind, texts or {}, spec)
+    if err then
+        ShowNotification("输入无效：" .. err, 2.5)
+        return
+    end
+    propCommit(spec, value, clear)
+end
+
+function propOpenEditor(r, screenX, screenY)
+    if not (propWindow and propWindow.Parent) then return end
+    local node = obResolve(obState.selected)
+    if not node then
+        ShowNotification("对象已不存在", 2)
+        return
+    end
+
+    if r.ro then
+        ShowNotification(r.name .. " 不可修改（" .. tostring(r.ro) .. "）", 2.5)
+        return
+    end
+    local fields = PROP_EDIT_FIELDS[r.kind]
+
+    if not fields and r.kind ~= "boolean" then
+        ShowNotification(r.name .. "：" .. r.kind .. " 类型暂不支持在此修改", 2.5)
+        return
+    end
+    propCloseEditor()
+
+    local spec = {name = r.name, kind = r.kind, node = node, value = r.value}
+    if spec.kind == "EnumItem" then
+
+        local okT, tn = pcall(function() return r.value.EnumType.Name end)
+        spec.enumName = (okT and tn) or nil
+    end
+
+    local isBool = r.kind == "boolean"
+    local panelW = math.min(260, propWindow.AbsoluteSize.X - 16)
+    local rowStep = 30
+    local bodyH = isBool and 26 or (#fields * rowStep)
+    local panelH = 30 + bodyH + 8 + 26 + 8
+    local pw = propWindow.AbsoluteSize.X
+    local phh = propWindow.AbsoluteSize.Y
+
+    local x = math.clamp(screenX - propWindow.AbsolutePosition.X - panelW / 2, 8, math.max(8, pw - panelW - 8))
+    local y = math.clamp(screenY - propWindow.AbsolutePosition.Y + 8, 8, math.max(8, phh - panelH - 8))
+
+    local panel = create("Frame", {
+        Name = "PropEditor",
+        Position = UDim2.new(0, x, 0, y),
+        Size = UDim2.new(0, panelW, 0, panelH),
+        BackgroundColor3 = theme.surfaceLight,
+        BackgroundTransparency = 0.08,
+        BorderSizePixel = 0,
+        Active = true,
+        ZIndex = 960,
+    })
+    corner(10, panel)
+    stroke(theme.accent, 1, panel)
+    panel.Parent = propWindow
+    propEditor = panel
+    propEditOpenedAt = tick()
+
+    create("TextLabel", {
+        Position = UDim2.new(0, 10, 0, 7),
+        Size = UDim2.new(1, -20, 0, 18),
+        BackgroundTransparency = 1,
+        Text = r.name .. " · " .. r.kind,
+        TextColor3 = theme.text,
+        TextSize = 12,
+        Font = Enum.Font.SourceSansBold,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        TextTruncate = Enum.TextTruncate.AtEnd,
+        ZIndex = 961,
+        Parent = panel,
+    })
+
+    local boxes = {}
+    local texts = {}
+    if isBool then
+
+        local function boolBtn(ax, label, val, col)
+            local b = create("TextButton", {
+                Position = UDim2.new(ax, 10, 0, 30),
+                Size = UDim2.new(0.5, -15, 0, 26),
+                BackgroundColor3 = col,
+                BackgroundTransparency = 0.6,
+                BorderSizePixel = 0,
+                Text = "设为 " .. label,
+                TextColor3 = theme.text,
+                TextSize = 12,
+                Font = Enum.Font.SourceSansBold,
+                AutoButtonColor = false,
+                ZIndex = 962,
+                Parent = panel,
+            })
+            corner(8, b)
+            b.MouseButton1Click:Connect(function()
+                propCommit(spec, val)
+            end)
+            return b
+        end
+        boolBtn(0, "设为 true", true, theme.green)
+        boolBtn(0.5, "设为 false", false, theme.red)
+    else
+        local prefill = propPrefillOf(r.kind, r.value)
+        for fi, f in ipairs(fields) do
+            local label, kind2 = f[1], f[2]
+            local fy = 28 + (fi - 1) * rowStep
+            create("TextLabel", {
+                Position = UDim2.new(0, 10, 0, fy + 4),
+                Size = UDim2.new(0.38, -10, 0, 18),
+                BackgroundTransparency = 1,
+                Text = label,
+                TextColor3 = theme.textDim,
+                TextSize = 11,
+                Font = Enum.Font.SourceSans,
+                TextXAlignment = Enum.TextXAlignment.Left,
+                TextTruncate = Enum.TextTruncate.AtEnd,
+                ZIndex = 961,
+                Parent = panel,
+            })
+            local box = create("TextBox", {
+                Position = UDim2.new(0.38, 0, 0, fy, 1, 0),
+                Size = UDim2.new(0.62, -10, 0, 24),
+                BackgroundColor3 = theme.surface,
+                BackgroundTransparency = 0.25,
+                BorderSizePixel = 0,
+                Text = prefill[fi] ~= nil and tostring(prefill[fi]) or "",
+                TextColor3 = theme.text,
+                TextSize = 11,
+                Font = Enum.Font.SourceSans,
+                ClearTextOnFocus = false,
+                ZIndex = 961,
+                Parent = panel,
+            })
+            corner(7, box)
+            if kind2 == "number" then
+                box.KeyboardType = Enum.KeyboardType.Number
+            end
+            boxes[fi] = box
+        end
+    end
+
+    local function footBtn(ax, label, col, fn)
+        local b = create("TextButton", {
+            Position = UDim2.new(0, 10, 1, -34),
+            Size = UDim2.new(0.5, -15, 0, 26),
+            BackgroundColor3 = col,
+            BackgroundTransparency = 0.6,
+            BorderSizePixel = 0,
+            Text = label,
+            TextColor3 = theme.text,
+            TextSize = 12,
+            Font = Enum.Font.SourceSansBold,
+            AutoButtonColor = false,
+            ZIndex = 962,
+        })
+
+        b.Position = UDim2.new(ax, 10, 1, -34)
+        corner(8, b)
+        b.MouseButton1Click:Connect(fn)
+        b.Parent = panel
+        return b
+    end
+    if not isBool then
+        footBtn(0, "应用", theme.accent, function()
+            for i, bx in ipairs(boxes) do texts[i] = bx.Text end
+            propApplyEdit(spec, texts)
+        end)
+        pcall(function() boxes[1]:CaptureFocus() end)
+    end
+    footBtn(0.5, "取消", theme.surface, function() propCloseEditor() end)
+end
+
+function propSync()
+    if not (propWindow and propWindow.Parent and propList and propWindow.Visible) then return end
+    local node = obResolve(obState.selected)
+    propWindowTarget.Text = node and (node.ClassName .. " · \"" .. node.Name .. "\"") or "未选中对象"
+    if not node then
+        propSignature = nil
+        propDestroyRows()
+        propEmpty.Visible = true
+        propCount.Text = ""
+        return
+    end
+    propEmpty.Visible = false
+
+    local q = ""
+    if propSearchInput then
+
+        q = tostring(propSearchInput.Text or ""):lower():match("^%s*(.-)%s*$") or ""
+    end
+
+    local names, roNames = propListNames(node)
+    local rowsData = {}
+    local function addRow(nm)
+        local ok, v = pcall(function() return node[nm] end)
+        if not ok or v == nil then
+
+            if q ~= "" and nm:lower():find(q, 1, true) then
+                rowsData[#rowsData + 1] = {name = nm, text = "〈读取失败〉", color = theme.red, kind = "nil", ro = "读取失败"}
+            end
+            return
+        end
+        local txt, col = propFormatValue(v)
+        if txt == nil then return end
+        rowsData[#rowsData + 1] = {
+            name = nm, text = txt, color = col or theme.text,
+            kind = typeof(v),
+            ro = roNames[nm],
+            value = v,
+        }
+    end
+    if q == "" then
+        for _, n in ipairs(names) do addRow(n) end
+    else
+        for _, n in ipairs(names) do
+            if n:lower():find(q, 1, true) then addRow(n) end
+        end
+    end
+
+    local sig = (node.ClassName .. "\0" .. node.Name)
+    for _, r in ipairs(rowsData) do sig = sig .. "\1" .. r.name .. "\2" .. r.text end
+    propCount.Text = #rowsData .. " 项"
+
+    propEmpty.Text = (#rowsData == 0) and "没有匹配的属性" or "未选中对象 · 在对象树中选择一个"
+    propEmpty.Visible = (#rowsData == 0)
+    if sig == propSignature then return end
+    propSignature = sig
+
+    propDestroyRows()
+    for i, r in ipairs(rowsData) do
+        local shade = (i % 2 == 0) and 0.62 or 0.72
+        local row = create("TextButton", {
+            Name = "PropRow",
+            LayoutOrder = i,
+            Size = UDim2.new(1, -6, 0, PROP_ROW_H),
+            BackgroundColor3 = theme.surfaceLight,
+            BackgroundTransparency = shade,
+            BorderSizePixel = 0,
+            Text = "",
+            AutoButtonColor = false,
+            ZIndex = 903,
+        })
+        create("TextLabel", {
+            Position = UDim2.new(0, 8, 0, 0),
+            Size = UDim2.new(PROP_NAME_W, -10, 1, 0),
+            BackgroundTransparency = 1,
+            Text = r.name,
+            TextColor3 = theme.textDim,
+            TextSize = 11,
+            Font = Enum.Font.SourceSans,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            TextTruncate = Enum.TextTruncate.AtEnd,
+            ZIndex = 904,
+            Parent = row,
+        })
+
+        create("Frame", {
+            Position = UDim2.new(0, 2, 0.5, -2),
+            Size = UDim2.new(0, 4, 0, 4),
+            BackgroundColor3 = r.ro and theme.border or r.color,
+            BorderSizePixel = 0,
+            ZIndex = 904,
+            Parent = row,
+        })
+        create("TextLabel", {
+            Position = UDim2.new(PROP_NAME_W, 0, 0, 0),
+            Size = UDim2.new(1 - PROP_NAME_W, -8, 1, 0),
+            BackgroundTransparency = 1,
+            Text = r.text,
+            TextColor3 = r.color,
+            TextSize = 11,
+            Font = Enum.Font.SourceSans,
+            TextXAlignment = Enum.TextXAlignment.Right,
+            TextTruncate = Enum.TextTruncate.AtEnd,
+            ZIndex = 904,
+            Parent = row,
+        })
+        row.MouseEnter:Connect(function()
+            svc.TweenService:Create(row, TweenInfo.new(0.12), {BackgroundTransparency = 0.4}):Play()
+        end)
+        row.MouseLeave:Connect(function()
+            svc.TweenService:Create(row, TweenInfo.new(0.14), {BackgroundTransparency = shade}):Play()
+        end)
+        row.MouseButton1Click:Connect(function()
+
+            if propEditOpenedAt and (tick() - propEditOpenedAt) < 0.35 then return end
+
+            if obCopyText(r.name .. " = " .. r.text) then
+                ShowNotification("已复制 " .. r.name, 1.2)
+            else
+                ShowNotification("复制失败：当前环境不支持剪贴板", 2)
+            end
+        end)
+
+        propAttachLongPress(row, function(px, py)
+            propOpenEditor(r, px, py)
+        end)
+        row.Parent = propList
+        propRowRefs[#propRowRefs + 1] = row
+    end
+end
+
+function propFollowTreeSize()
+    if not (propWindow and propWindow.Parent and obWindow and obWindow.Parent) then return end
+    
+    
+    local f = obFoldStates and obFoldStates[obWindow]
+    if f and (f.busy == true or f.collapsed == true) then return end
+    if obWindowCollapsed(propWindow) then return end
+    local oh = obWindow.Size.Y.Offset
+    if not oh or oh <= 0 then return end
+    propWindow.Size = UDim2.new(0, propWindow.Size.X.Offset, 0, oh)
+end
+
+function propWindowSetVisible(on)
+    if not propWindow then return end
+    if on then
+        propWindow.Visible = true
+        propSignature = "\0__force__"
+        pcall(propSync)
+    else
+        propCloseEditor()
+        propWindow.Visible = false
+    end
+end
+
+function createPropBrowserUI()
+    if propWindow or not buildSpaceRoot or not buildSpaceRoot.Parent then return end
+    local vp = bsView()
+    local winW = obWindow and obWindow.Size.X.Offset or 300
+    local winH = obWindow and obWindow.Size.Y.Offset or 480
+    local w = math.clamp(vp.X * 0.2, 250, 330)
+
+    local h = winH
+
+    local obCenterX = OB_LEFT_MARGIN + winW / 2
+    local rightRoom = vp.X - (OB_LEFT_MARGIN + winW)
+    local dx = (rightRoom >= w + 24) and (obCenterX + winW / 2 + 16 + w / 2) or (OB_LEFT_MARGIN + w / 2)
+
+    propWindow = create("Frame", {
+        AnchorPoint = Vector2.new(0.5, 0.5),
+        Position = UDim2.new(0, dx, 0.5, 3),
+        Size = UDim2.new(0, w, 0, h),
+        BackgroundColor3 = theme.surface,
+        BackgroundTransparency = 0.1,
+        BorderSizePixel = 0,
+        ClipsDescendants = true,
+        Active = true,
+        Visible = false,
+        ZIndex = 901,
+    })
+    propWindow.Name = "PropertyBrowser"
+    propWindow:SetAttribute("Dx", dx)
+    corner(12, propWindow)
+    stroke(theme.border, 1, propWindow)
+    propWindow.Parent = buildSpaceRoot
+
+    propHead = create("Frame", {
+        Position = UDim2.new(0, 1, 0, 1),
+        Size = UDim2.new(1, -2, 0, 28),
+        BackgroundColor3 = theme.surfaceLight,
+        BackgroundTransparency = 0.45,
+        BorderSizePixel = 0,
+        ZIndex = 902,
+    })
+    corner(11, propHead)
+    propHead.Parent = propWindow
+
+    create("TextLabel", {
+        Position = UDim2.new(0, 12, 0, 0),
+        Size = UDim2.new(0, 110, 1, 0),
+        BackgroundTransparency = 1,
+        Text = "属性浏览器",
+        TextColor3 = theme.text,
+        TextSize = 13,
+        Font = Enum.Font.SourceSansBold,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        ZIndex = 903,
+        Parent = propHead,
+    })
+
+    propSearchInput = create("TextBox", {
+        AnchorPoint = Vector2.new(1, 0),
+        Position = UDim2.new(1, -8, 0, 6),
+        Size = UDim2.new(0, math.clamp(w - 130, 80, 150), 0, 20),
+        BackgroundColor3 = theme.surface,
+        BackgroundTransparency = 0.2,
+        BorderSizePixel = 0,
+        PlaceholderText = "搜索属性…",
+        Text = "",
+        TextColor3 = theme.text,
+        PlaceholderColor3 = theme.textDim,
+        TextSize = 12,
+        Font = Enum.Font.SourceSans,
+        ClearTextOnFocus = false,
+        ZIndex = 903,
+    })
+    corner(10, propSearchInput)
+    stroke(theme.border, 1, propSearchInput)
+    propSearchInput.Parent = propHead
+    propSearchInput:GetPropertyChangedSignal("Text"):Connect(function()
+        propSignature = ""
+        pcall(propSync)
+    end)
+
+    propWindowTarget = create("TextLabel", {
+        Position = UDim2.new(0, 8, 0, 33),
+        Size = UDim2.new(1, -16, 0, 18),
+        BackgroundTransparency = 1,
+        Text = "未选中对象",
+        TextColor3 = theme.accent,
+        TextSize = 11,
+        Font = Enum.Font.SourceSansBold,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        TextTruncate = Enum.TextTruncate.AtEnd,
+        ZIndex = 902,
+        Parent = propWindow,
+    })
+
+    propList = create("ScrollingFrame", {
+        Position = UDim2.new(0, 8, 0, 54),
+        Size = UDim2.new(1, -16, 1, -84),
+        BackgroundColor3 = theme.bg,
+        BackgroundTransparency = 0.45,
+        BorderSizePixel = 0,
+        ScrollBarThickness = 4,
+        ScrollBarImageColor3 = theme.textDim,
+        CanvasSize = UDim2.new(0, 0, 0, 0),
+        AutomaticCanvasSize = Enum.AutomaticSize.Y,
+        ClipsDescendants = true,
+        ZIndex = 902,
+    })
+    corner(12, propList)
+    stroke(theme.border, 1, propList)
+    propList.Parent = propWindow
+    create("UIListLayout", {SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 2)}).Parent = propList
+    create("UIPadding", {PaddingTop = UDim.new(0, 3), PaddingBottom = UDim.new(0, 4), PaddingLeft = UDim.new(0, 3), PaddingRight = UDim.new(0, 3)}).Parent = propList
+
+    propEmpty = create("TextLabel", {
+        Position = UDim2.new(0, 8, 0, 78),
+        Size = UDim2.new(1, -16, 0, 18),
+        BackgroundTransparency = 1,
+        Text = "未选中对象 · 在对象树中选择一个",
+        TextColor3 = theme.textDim,
+        TextSize = 11,
+        Font = Enum.Font.SourceSans,
+        TextXAlignment = Enum.TextXAlignment.Center,
+        ZIndex = 903,
+        Parent = propWindow,
+    })
+
+    propCount = create("TextLabel", {
+        AnchorPoint = Vector2.new(1, 0),
+        Position = UDim2.new(1, -8, 0, 33),
+        Size = UDim2.new(0, 90, 0, 18),
+        BackgroundTransparency = 1,
+        Text = "",
+        TextColor3 = theme.textDim,
+        TextSize = 11,
+        Font = Enum.Font.SourceSans,
+        TextXAlignment = Enum.TextXAlignment.Right,
+        ZIndex = 902,
+        Parent = propWindow,
+    })
+
+    makeWindowDraggable(propWindow, propHead)
+    obAttachTitleFold(propWindow, propHead)
+    propWindow:SetAttribute("BaseH", h)
+
+    pcall(function()
+        obWindow:GetPropertyChangedSignal("Size"):Connect(propFollowTreeSize)
+    end)
+    propFollowTreeSize()
+
+    create("TextLabel", {
+        AnchorPoint = Vector2.new(0, 1),
+        Position = UDim2.new(0, 12, 1, -8),
+        Size = UDim2.new(1, -24, 0, 16),
+        BackgroundTransparency = 1,
+        Text = "点击行复制「属性 = 值」 · 长按行修改",
+        TextColor3 = theme.textDim,
+        TextSize = 10,
+        Font = Enum.Font.SourceSans,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        ZIndex = 902,
+        Parent = propWindow,
+    })
+
+    task.spawn(function()
+        while propWindow and propWindow.Parent do
+            task.wait(0.5)
+            if buildSpaceActive and propWindow.Visible and not obWindowCollapsed(propWindow) then pcall(propSync) end
+        end
+    end)
+end
+
+function makeWindowDraggable(win, handle)
+    local dragging = false
+    local grabX, grabY = 0, 0
+    local startPos = win.Position
+    handle.InputBegan:Connect(function(input)
+        if input.UserInputType ~= Enum.UserInputType.MouseButton1 and input.UserInputType ~= Enum.UserInputType.Touch then return end
+
+        local okF, focused = pcall(function() return svc.UserInputService:GetFocusedTextBox() end)
+        if okF and focused then return end
+        dragging = true
+        startPos = win.Position
+        grabX = input.Position.X
+        grabY = input.Position.Y
+    end)
+    svc.UserInputService.InputChanged:Connect(function(input)
+        if not dragging then return end
+        if input.UserInputType ~= Enum.UserInputType.MouseMovement and input.UserInputType ~= Enum.UserInputType.Touch then return end
+
+        win.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + (input.Position.X - grabX),
+            startPos.Y.Scale, startPos.Y.Offset + (input.Position.Y - grabY))
+    end)
+    svc.UserInputService.InputEnded:Connect(function(input)
+        if input.UserInputType ~= Enum.UserInputType.MouseButton1 and input.UserInputType ~= Enum.UserInputType.Touch then return end
+        dragging = false
+    end)
+end
+
+function setBuildSpaceTab(key)
+    buildSpaceTab = key
+end
+
+bsNavFadeSaved = nil
+
+function bsFadeNavChrome(hide, duration)
+    if not navBg then return end
+    if hide then
+        if not bsNavFadeSaved then
+            bsNavFadeSaved = {bg = navBg.BackgroundTransparency, ind = navIndicator and navIndicator.BackgroundTransparency or 0.2}
+        end
+    elseif not bsNavFadeSaved then
+        bsNavFadeSaved = {bg = 0.5, ind = 0.2}
+    end
+    duration = duration or 0.28
+    local ti = TweenInfo.new(duration, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+    svc.TweenService:Create(navBg, ti, {BackgroundTransparency = hide and 1 or bsNavFadeSaved.bg}):Play()
+    local bgStroke = navBg:FindFirstChildOfClass("UIStroke")
+    if bgStroke then
+        svc.TweenService:Create(bgStroke, ti, {Transparency = hide and 1 or 0}):Play()
+    end
+    if navIndicator then
+        svc.TweenService:Create(navIndicator, ti, {BackgroundTransparency = hide and 1 or bsNavFadeSaved.ind}):Play()
+        local indStroke = navIndicator:FindFirstChildOfClass("UIStroke")
+        if indStroke then
+            svc.TweenService:Create(indStroke, ti, {Transparency = hide and 1 or 0}):Play()
+        end
+    end
+    if navContainer then
+        for _, btn in ipairs(navContainer:GetChildren()) do
+            if btn:IsA("GuiButton") then
+                for _, sub in ipairs(btn:GetChildren()) do
+                    if sub:IsA("ImageLabel") then
+                        svc.TweenService:Create(sub, ti, {ImageTransparency = hide and 1 or 0}):Play()
+                    end
+                end
+            end
+        end
+    end
+    if not hide then bsNavFadeSaved = nil end
+end
+
+function resetBuildSpaceChrome()
+    if buildSpaceTop then buildSpaceTop.Position = UDim2.new(0.5, 0, 0, -62) end
+    buildSpaceExit.Position = UDim2.new(1, -18, 0, -62)
+    local hint = buildSpaceRoot:FindFirstChild("Hint")
+    if hint then hint.TextTransparency = 1 end
+    if bsDim then bsDim.BackgroundTransparency = 1 end
+    if obWindow then
+        
+        obWindowResetFold(obWindow, obHeader)
+        obWindowResetFold(propWindow, propHead)
+        if propWindow then propWindow.Visible = false end
+        obWindow.AnchorPoint = Vector2.new(0.5, 0.5)
+
+        local obW = obWindow.Size.X.Offset
+        if not obW or obW <= 0 then obW = obWindow:GetAttribute("BaseW") or 300 end
+        obWindow.Position = UDim2.new(0, OB_LEFT_MARGIN + obW / 2, 0.5, 3)
+
+        if propWindow then
+            local dx = propWindow:GetAttribute("Dx") or (OB_LEFT_MARGIN + obW / 2)
+            propWindow.Position = UDim2.new(0, dx, 0.5, 3)
+            local oh = obWindow.Size.Y.Offset
+            if oh and oh > 120 then
+                propWindow.Size = UDim2.new(0, propWindow.Size.X.Offset, 0, oh)
+            end
+        end
+        obWindow.Visible = false
+    end
+    if orbFrame then orbFrame.Visible = false end
+end
+
+function enterBuildSpace()
+    if buildSpaceActive then return end
+    if not buildSpaceRoot or not buildSpaceRoot.Parent then
+        local ok, err = pcall(createBuildSpaceUI)
+        if not ok then
+            pcall(function() if buildSpaceRoot then buildSpaceRoot:Destroy() end end)
+            buildSpaceRoot = nil
+            ShowNotification("建造空间 UI 创建失败: " .. tostring(err), 4)
+            return
+        end
+    end
+    buildSpaceActive = true
+    buildSpaceSavedPage = currentPage
+
+    if #fadeableElements == 0 then collectFadeableElements() end
+    fadeOutUI(0.28)
+    bsFadeNavChrome(true, 0.28)
+    task.delay(0.3, function()
+        if buildSpaceActive and main and main.Parent then
+            main.Visible = false
+        end
+    end)
+
+    orbWasVisibleBeforeBuildSpace = orbFrame and orbFrame.Visible or false
+    resetBuildSpaceChrome()
+    buildSpaceRoot.Visible = true
+
+    local tw = TweenInfo.new(0.45, Enum.EasingStyle.Quart, Enum.EasingDirection.Out)
+    svc.TweenService:Create(buildSpaceExit, tw, {Position = UDim2.new(1, -18, 0, 16)}):Play()
+    local hint = buildSpaceRoot:FindFirstChild("Hint")
+    if hint then
+        svc.TweenService:Create(hint, TweenInfo.new(0.5, Enum.EasingStyle.Quad, Enum.EasingDirection.Out, 0, false, 0.18), {TextTransparency = 0.35}):Play()
+    end
+
+    if bsDim then
+
+        bsDim.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+        bsDim.BackgroundTransparency = 1
+    end
+    if obWindow then
+        local w, h = obWindow:GetAttribute("BaseW"), obWindow:GetAttribute("BaseH")
+        if not w then w, h = obWindow.Size.X.Offset, obWindow.Size.Y.Offset end
+        obWindow.Visible = true
+        obWindow.BackgroundTransparency = 1
+        obWindow.Size = UDim2.new(0, w - 120, 0, h - 80)
+        if obVeil then obVeil.BackgroundTransparency = 0 end
+        svc.TweenService:Create(obWindow, TweenInfo.new(0.44, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {
+            BackgroundTransparency = 0.1,
+            Size = UDim2.new(0, w, 0, h),
+        }):Play()
+        if obVeil then
+            obVeil.Visible = true
+            obVeil.BackgroundTransparency = 0
+            svc.TweenService:Create(obVeil, TweenInfo.new(0.5, Enum.EasingStyle.Quad, Enum.EasingDirection.Out, 0, false, 0.14), {BackgroundTransparency = 1}):Play()
+            task.delay(0.75, function()
+                if obVeil and obVeil.Parent and obVeil.BackgroundTransparency > 0.9 then obVeil.Visible = false end
+            end)
+        end
+    end
+
+    pcall(function() propWindowSetVisible((loadConfig()).propWindow == true) end)
+
+    setBuildSpaceTab(buildSpaceTab or "build")
+    obRender()
+end
+
+function exitBuildSpace()
+    if not buildSpaceActive then return end
+    buildSpaceActive = false
+
+    local tw = TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
+    svc.TweenService:Create(buildSpaceExit, tw, {Position = UDim2.new(1, -18, 0, -62)}):Play()
+    local hint = buildSpaceRoot:FindFirstChild("Hint")
+    if hint then
+        svc.TweenService:Create(hint, TweenInfo.new(0.24), {TextTransparency = 1}):Play()
+    end
+    if bsDim then
+        svc.TweenService:Create(bsDim, TweenInfo.new(0.3), {BackgroundTransparency = 1}):Play()
+    end
+    if obWindow then
+        if obVeil then
+            obVeil.Visible = true
+            svc.TweenService:Create(obVeil, TweenInfo.new(0.26, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {BackgroundTransparency = 0}):Play()
+        end
+        svc.TweenService:Create(obWindow, TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
+            BackgroundTransparency = 1,
+            Size = UDim2.new(0, math.max(240, obWindow.Size.X.Offset - 110), 0, math.max(160, obWindow.Size.Y.Offset - 72)),
+        }):Play()
+    end
+
+    task.delay(0.34, function()
+        if buildSpaceActive then return end
+        buildSpaceRoot.Visible = false
+        if main and main.Parent then
+            main.Visible = true
+            fadeInUI(0.34)
+        end
+        bsFadeNavChrome(false, 0.34)
+        if orbFrame then orbFrame.Visible = orbWasVisibleBeforeBuildSpace end
+    end)
+end
+
+svc.UserInputService.InputBegan:Connect(function(input, handled)
+    if not buildSpaceActive then return end
+    if input.KeyCode ~= Enum.KeyCode.Escape then return end
+    if handled then return end
+    exitBuildSpace()
+end)
 ]===]
 
 local function ensureDependencies()

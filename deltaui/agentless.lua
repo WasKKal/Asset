@@ -1,5 +1,20 @@
  
 
+
+local pcall = (function()
+    local _orig = pcall
+    return function(fn, ...)
+        if type(fn) ~= "function" then
+            local f = fn
+            local args = { ... }
+            fn = function() return f(table.unpack(args)) end
+        end
+        local ok, r1, r2, r3, r4, r5, r6, r7, r8, r9, r10 = _orig(fn, ...)
+        if not ok then error(r1, 0) end
+        return ok, r1, r2, r3, r4, r5, r6, r7, r8, r9, r10
+    end
+end)()
+
 DeltaPageInfo = {
     name = "agentless",
     title = "AgentLess",
@@ -195,11 +210,11 @@ end
 
 
 local AGENTLESS_SOURCE = [==[
--- ============================================================
--- AgentLess 页面本体（从 DeltaUI_LanguageCore.lua 剥离）
--- 说明：运行在官方页面宿主注入的环境里，
---       theme / svc / v7 / AgentPage / contentFrame 由宿主提供。
--- ============================================================
+
+
+
+
+
 local AgentPage = __AGENTLESS_FRAME
 if contentFrame then AgentPage.Parent = contentFrame end
 
@@ -673,7 +688,7 @@ local function AgentTrackToolCall()
     AgentMetrics.toolCalls = AgentMetrics.toolCalls + 1
 end
 
-function AgentTrackFileOp(filePath) -- [官方页面] 提为全局：原文件部分引用早于 local 声明
+function AgentTrackFileOp(filePath) 
     AgentMetrics.fileOperations = AgentMetrics.fileOperations + 1
     if filePath and type(filePath) == "string" then
         table.insert(AgentRecentSavedFiles, filePath)
@@ -2085,7 +2100,7 @@ local function AgentDeleteRecentFiles()
 end
 
 
-AgentLocalAIConfig = { -- [官方页面] 提为全局：原文件部分引用早于 local 声明
+AgentLocalAIConfig = { 
     enabled = true,
     endpoint = "https://api.deepseek.com/chat/completions",
     model = "",
@@ -2113,7 +2128,7 @@ AgentLocalAIConfig = { -- [官方页面] 提为全局：原文件部分引用早
 }
 
 
--- 配置读写辅助（必须定义在所有调用它的函数之前，否则会被解析为全局变量而为 nil）
+
 local function AgentReadCfg()
     local ok, c = pcall(loadConfig)
     if ok and type(c) == "table" then return c end
@@ -2146,8 +2161,8 @@ local AGENT_PROVIDERS = {
         noThinking = true,
         bypassPoints = false,
     },
-    -- ===== 国内主流 AI 预设（填 API Key 即可用，OpenAI 兼容） =====
-    -- 注意：以下预设不内置任何模型名，模型列表由对应服务商 API 拉取后手动选择
+    
+    
     qwen = {
         label = "阿里通义千问",
         endpoint = "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
@@ -2192,10 +2207,10 @@ local AGENT_PROVIDERS = {
     },
 }
 
--- ===== 思考级别能力表（依据各服务商官方 API 文档整理的「思考 / 推理」能力）=====
--- switchable = false 表示当前模型不支持「思考级别切换」，界面将显示「当前模型不支持该操作」
--- style 决定请求体中如何注入级别参数：qwen/hunyuan 用 thinking_budget，其余用 OpenAI 风格 reasoning_effort
--- 注：以下均为全局，避免主函数局部变量超过 Lua 5.1 的 200 上限
+
+
+
+
 AgentUI = { objects = {}, presetFrame = nil, presetStatus = nil, presetArea = nil, thinkFrame = nil, currentPresetId = nil }
 AGENT_THINKING_CAPS = {
     flash   = {switchable = false},
@@ -2215,7 +2230,7 @@ AGENT_THINKING_CAPS = {
     },
 }
 
--- 从 chat/completions（或 messages）端点推导出 API 基址（用于拼接 /models）
+
 function AgentBaseFromEndpoint(endpoint)
     endpoint = tostring(endpoint or ""):gsub("%s+", "")
     endpoint = endpoint:gsub("/+$", "")
@@ -2224,7 +2239,7 @@ function AgentBaseFromEndpoint(endpoint)
     return endpoint
 end
 
--- 持久化某预设服务商拉取到的模型列表
+
 function AgentPersistPresetModels(id, list)
     if type(list) ~= "table" then return end
     local cfg = AgentReadCfg()
@@ -2233,7 +2248,7 @@ function AgentPersistPresetModels(id, list)
     pcall(saveConfig, cfg)
 end
 
--- 选中预设服务商下的某个具体模型
+
 function AgentApplyPresetModel(id, model)
     pcall(AgentApplyModel, id)
     if not model then return true end
@@ -2253,7 +2268,7 @@ function AgentApplyPresetModel(id, model)
     return true
 end
 
--- 拉取某预设服务商的模型列表
+
 function AgentFetchPresetModels(id)
     local m = AGENT_PROVIDERS[id]
     if not m then return end
@@ -2279,7 +2294,7 @@ function AgentFetchPresetModels(id)
         pcall(function() if AgentUI.presetStatus then AgentUI.presetStatus.Text = "未获取到模型"; AgentUI.presetStatus.TextColor3 = theme.red or Color3.fromRGB(255, 82, 104) end end)
         return
     end
-    -- 尚无选中模型时，以拉取到的第一个模型作为默认（来源是 API，非内置）
+    
     local cfg = AgentReadCfg()
     local savedSel = (cfg.providerSelectedModel and type(cfg.providerSelectedModel[tostring(id)]) == "string") and cfg.providerSelectedModel[tostring(id)] or ""
     if savedSel == "" and models[1] then
@@ -2294,7 +2309,7 @@ function AgentFetchPresetModels(id)
     pcall(function() if AgentUI.presetStatus then AgentUI.presetStatus.Text = "已拉取 " .. tostring(#models) .. " 个模型，点击选择"; AgentUI.presetStatus.TextColor3 = theme.accent or Color3.fromRGB(56, 189, 248) end end)
 end
 
--- 把模型列表渲染到共享面板
+
 function AgentRenderPresetModelList(id, list)
     if not AgentUI.presetFrame then return end
     pcall(function()
@@ -2335,7 +2350,7 @@ function AgentRenderPresetModelList(id, list)
     end)
 end
 
--- 刷新共享预设模型面板（优先缓存；无缓存且有 Key 时自动拉取）
+
 function AgentRefreshPresetModels(id)
     AgentUI.currentPresetId = id
     if not AgentUI.presetFrame then return end
@@ -2351,7 +2366,7 @@ function AgentRefreshPresetModels(id)
             pcall(function() if AgentUI.presetStatus then AgentUI.presetStatus.Text = "已加载 " .. tostring(#cached) .. " 个模型（来自缓存）"; AgentUI.presetStatus.TextColor3 = theme.textDim or Color3.fromRGB(150, 160, 184) end end)
             if AgentUI.presetArea then AgentUI.presetArea.Visible = true end
         else
-            -- 未拉取到模型列表：隐藏整个模型列表区域
+            
             if AgentUI.presetArea then AgentUI.presetArea.Visible = false end
             pcall(function() if AgentUI.presetStatus then AgentUI.presetStatus.Text = "" end end)
             if m and m.apiKey and m.apiKey ~= "" then
@@ -2365,7 +2380,7 @@ function AgentRefreshPresetModels(id)
     end)
 end
 
--- 读取当前模型的思考级别能力（自定义模型会从官方 API 读取到的能力覆盖）
+
 function AgentGetThinkingCaps(id)
     id = tostring(id or AgentLocalAIConfig.activeModel or "flash")
     local caps = AGENT_THINKING_CAPS[id] or AGENT_THINKING_CAPS.flash
@@ -2378,7 +2393,7 @@ function AgentGetThinkingCaps(id)
     return caps
 end
 
--- 从官方 API 返回的原始模型对象推断其是否支持思考级别切换
+
 function AgentDetectCustomThinking(modelId, obj)
     local switchable = true
     if type(obj) == "table" then
@@ -2393,7 +2408,7 @@ function AgentDetectCustomThinking(modelId, obj)
     return switchable
 end
 
--- 按当前模型能力与所选级别，把思考参数注入请求体
+
 function AgentInjectThinkingLevel(body)
     if type(body) ~= "table" then return end
     local cfg = AgentReadCfg()
@@ -2411,7 +2426,7 @@ function AgentInjectThinkingLevel(body)
     end
 end
 
--- 刷新「思考级别」控件（不支持时显示「当前模型不支持该操作」）
+
 function AgentRefreshThinkingControl()
     if not AgentUI.thinkFrame then return end
     pcall(function()
@@ -2479,7 +2494,7 @@ end
 
 function AgentApplyModel(id)
     local m = AGENT_PROVIDERS[id] or AGENT_PROVIDERS.flash
-    -- 不内置模型名：model 交由 API 拉取后手动选择；仅在已保存过选择时恢复
+    
     local cfg = AgentReadCfg()
     local savedSel = (cfg.providerSelectedModel and type(cfg.providerSelectedModel[tostring(id)]) == "string") and cfg.providerSelectedModel[tostring(id)] or ""
     AgentLocalAIConfig.model = savedSel
@@ -2502,7 +2517,7 @@ end
 local _aiModelSaved = loadConfig()
 if _aiModelSaved and _aiModelSaved.activeModel and AGENT_PROVIDERS[_aiModelSaved.activeModel] then
     AgentApplyModel(_aiModelSaved.activeModel)
-    -- 恢复该服务商此前手动选中的具体模型（来自 API 列表，非内置）
+    
     local selMap = _aiModelSaved.providerSelectedModel
     if type(selMap) == "table" and type(selMap[_aiModelSaved.activeModel]) == "string" then
         AgentLocalAIConfig.model = selMap[_aiModelSaved.activeModel]
@@ -3277,7 +3292,7 @@ function AgentApplyCustomProvider(baseUrl, apiKey, model)
             AgentModelLabel.TextColor3 = theme.textDim or Color3.fromRGB(150, 160, 184)
         end
     end)
-    -- 从官方 API 返回的原始模型对象推断该自定义模型是否支持思考级别切换
+    
     pcall(function()
         local obj = (AgentUI.objects[baseUrl] and AgentUI.objects[baseUrl][model]) or nil
         local sw = AgentDetectCustomThinking(model, obj)
@@ -3320,7 +3335,7 @@ local AGENT_DEEPSEEK_TOOLS = {
     {type="function", ["function"]={name="delete_recent_files", description="删除最近文件", parameters={type="object"}}},
     {type="function", ["function"]={name="noclip", description="穿墙", parameters={type="object", properties={enabled={type="boolean"}}}}},
     {type="function", ["function"]={name="anti_fling", description="防甩飞", parameters={type="object", properties={enabled={type="boolean"}}}}},
-    -- ===== 文件工具（read_file / edit_file / del_file）=====
+    
     {type="function", ["function"]={name="read_file", description="读取文件内容。可整读，也可按行读：start_line 起始行(1起)，count 读多少行或 end_line 结束行（二选一，count 优先）。默认带行号返回，便于配合 edit_file 精确改行。", parameters={type="object", properties={path={type="string", description="文件路径，如 DeltaUI/Script/a.lua"}, start_line={type="number", description="起始行号，1 起，默认 1"}, count={type="number", description="读取行数；与 end_line 同时省略时读到文件末尾"}, end_line={type="number", description="结束行号(含)，与 count 二选一"}, number={type="boolean", description="是否带行号，默认 true"}, max_chars={type="number", description="单次返回字符上限，默认 12000"}}, required={"path"}}}},
     {type="function", ["function"]={name="edit_file", description="编辑文件（默认先备份为 .bak）。mode：create/overwrite 整文件写入；append/prepend 末尾追加/开头插入；insert 在第 start_line 行后插入 content；replace_range 用 content 替换第 start_line~end_line 行；replace_text 把 old 换成 new（count 次数，默认 1，0=全部）。省略 mode 时按参数自动判断。", parameters={type="object", properties={path={type="string", description="文件路径"}, mode={type="string", description="create|overwrite|append|prepend|insert|replace_range|replace_text"}, content={type="string", description="写入/替换/插入的文本"}, start_line={type="number", description="起始行号，1 起"}, end_line={type="number", description="结束行号(含)"}, count={type="number", description="replace_range 的行数，或 replace_text 的替换次数"}, old={type="string", description="replace_text：被替换的原文（纯文本，不是模式串）"}, new={type="string", description="replace_text：替换后的文本"}, backup={type="boolean", description="是否备份 .bak，默认 true"}}, required={"path"}}}},
     {type="function", ["function"]={name="del_file", description="删除文件（默认先存入回收站 DeltaUI/Trash，backup=false 可关闭）。删除文件夹必须传 recursive=true。", parameters={type="object", properties={path={type="string", description="文件或文件夹路径"}, recursive={type="boolean", description="删除文件夹时必须为 true"}, backup={type="boolean", description="是否存入回收站，默认 true"}}, required={"path"}}}},
@@ -3650,7 +3665,7 @@ local function AgentDeepSeekChat(messages, tools, opts)
         end
     end
 
-    -- 注入思考级别参数（按当前模型能力判定是否支持）
+    
     pcall(AgentInjectThinkingLevel, body)
 
     local okEnc, bodyJson = pcall(AgentJSONEncode, body)
@@ -4514,19 +4529,19 @@ do
 end
 
 
--- ============================================================================
---  文件工具：read_file / edit_file / del_file
---  统一约定（规范）：
---    path        文件路径（必填，可用 DeltaUI/... 相对路径）
---    start_line  起始行号，1 起（read_file / edit_file 通用）
---    end_line    结束行号（含）；与 count 二选一，count 优先
---    count       行数；read_file 表示读多少行，edit_file 表示替换多少行
---    content     写入/替换/插入的文本
---    old/new     replace_text 模式的查找与替换文本（纯文本，非模式串）
---    backup      默认 true：改动前留备份（edit_file → .bak，del_file → 回收站）
---  所有工具统一以 [OK] / [ERR] / [WARN] 开头返回，便于模型判断结果。
--- ============================================================================
-AGENT_FILE_TOOLS_MAX_CHARS = 12000   -- read_file 单次返回字符上限
+
+
+
+
+
+
+
+
+
+
+
+
+AGENT_FILE_TOOLS_MAX_CHARS = 12000   
 
 local function AgentFileSplitLines(text)
     local out = {}
@@ -4549,7 +4564,7 @@ local function AgentFileJoinLines(lines)
     return table.concat(lines, "\n")
 end
 
--- 文本内容切成行数组；若以换行结尾，去掉尾部多出的空元素（避免多插一个空行）
+
 local function AgentFileContentToLines(content)
     content = tostring(content or "")
     local lines = AgentFileSplitLines(content)
@@ -4593,7 +4608,7 @@ local function AgentEscapeLuaPattern(s)
     return (tostring(s or ""):gsub("([%^%$%(%)%%%.%[%]%*%+%-%?])", "%%%1"))
 end
 
--- ---------------------------------------------------------------- read_file
+
 local function AgentToolReadFile(args)
     args = args or {}
     local path = tostring(args.path or "")
@@ -4645,7 +4660,7 @@ local function AgentToolReadFile(args)
     return head .. "\n" .. table.concat(buf, "\n")
 end
 
--- ---------------------------------------------------------------- edit_file
+
 local function AgentToolEditFile(args)
     args = args or {}
     if type(isfile) ~= "function" or type(writefile) ~= "function" then
@@ -4788,7 +4803,7 @@ local function AgentToolEditFile(args)
         backupPath and (" | 备份: " .. backupPath) or "")
 end
 
--- ---------------------------------------------------------------- del_file
+
 local function AgentToolDelFile(args)
     args = args or {}
     local path = tostring(args.path or "")
@@ -4798,7 +4813,7 @@ local function AgentToolDelFile(args)
     local isF = type(isfile) == "function" and isfile(path)
     if not isDir and not isF then return "[ERR] del_file: 路径不存在: " .. path end
 
-    -- 回收站：删除前把文件内容备份到 DeltaUI/Trash/（backup=false 可关闭）
+    
     local trashed = nil
     if isF and args.backup ~= false and type(readfile) == "function" and type(writefile) == "function" then
         local okR, content = pcall(readfile, path)
@@ -5179,7 +5194,7 @@ local function AgentGenerateResponseCore(input, authToken)
                 AgentThinkingPhase = "正在调用工具: " .. toolName
                 AgentLastToolName = toolName
                 AgentLastToolPhase = "正在调用工具: " .. toolName
-                -- 文件类工具结果更大，单独放宽上限（read_file 默认最多返回 12000 字符）
+                
                 local resultCap = 2500
                 if toolName == "read_file" then
                     resultCap = 12000
@@ -5231,7 +5246,7 @@ local function AgentGenerateResponseCore(input, authToken)
                 })
             end
             
-            -- 一轮工具调用结束：收尾当前「深度思考」卡片并开启新一轮
+            
             if AgentEndThinkingRound then pcall(AgentEndThinkingRound) end
             if AgentStartThinkingRound then pcall(AgentStartThinkingRound) end
 
@@ -5361,14 +5376,14 @@ local AgentTitleLabel = create("TextLabel", {
 })
 
 
--- 已移除标题栏的模型名称显示（原 AgentModelLabel），仅保留左侧标题与右侧按钮
+
 
 if type(updateExternalApiUI) == "function" then
     updateExternalApiUI()
 end
 
 
-local AgentManageMode = false   -- 对话管理面板保留，暂时不开放入口
+local AgentManageMode = false   
 local AgentSettingsButton = create("TextButton", {
     Name = "SettingsButton",
     Size = UDim2.new(0, 24, 0, 24),
@@ -5435,10 +5450,10 @@ local function AgentTween(obj, props, dur)
     if ok and t then pcall(function() t:Play() end) end
 end
 
--- 分区卡片：结构完全对齐 DeltaUI 本体设置页的 addSection / makeSectionCard。
--- 分区稳定的关键：标题栏与内容区都是「卡片自身 UIListLayout 的普通子项」——
---   标题栏 LayoutOrder = -1，永远排在第一位；内容区紧随其后。
---   两者都是显式尺寸 / 自动高度，不用绝对定位，因此不会互相覆盖或错位。
+
+
+
+
 local function AgentMakeCard(parent, title)
     local card = create("Frame", {
         Name = "Card_" .. tostring(title or ""),
@@ -5465,7 +5480,7 @@ local function AgentMakeCard(parent, title)
         Parent = card,
     })
 
-    -- ① 分区标题栏：LayoutOrder = -1，固定位于卡片最顶部
+    
     local header = create("Frame", {
         Name = "CardHeader",
         Size = UDim2.new(1, 0, 0, 24),
@@ -5498,7 +5513,7 @@ local function AgentMakeCard(parent, title)
         Parent = header,
     })
 
-    -- ② 内容区：自动高度，排在标题栏之后
+    
     local body = create("Frame", {
         Name = "CardBody",
         Size = UDim2.new(1, 0, 0, 0),
@@ -5747,7 +5762,7 @@ local function AgentEnsureDebugBar()
     corner(8, bar)
     create("UIPadding", { PaddingLeft = UDim.new(0, 8), PaddingRight = UDim.new(0, 8), Parent = bar })
     create("UIListLayout", {FillDirection = Enum.FillDirection.Horizontal, Padding = UDim.new(0, 6), Parent = bar})
-    -- 调试模式标识：明确提示当前已开启调试模式（之前纯透明条，开启后几乎看不出变化）
+    
     create("TextLabel", {
         Size = UDim2.new(0, 38, 1, 0),
         BackgroundTransparency = 1,
@@ -5783,7 +5798,7 @@ end
 
 local function AgentBuildProviderSection(panel)
     local card, body = AgentMakeCard(panel, "AI 服务商管理")
-    -- 服务商列表容器：外部 API 未开启时收起（不展开）
+    
     local providerBody = create("Frame", {
         Size = UDim2.new(1, 0, 0, 0),
         AutomaticSize = Enum.AutomaticSize.Y,
@@ -5926,8 +5941,8 @@ local function AgentBuildProviderSection(panel)
         providerButtons[#providerButtons + 1] = sel
     end
 
-    -- ===== 预设服务商模型列表（选择服务商后自动加载 / 点「拉取」刷新）=====
-    -- 未拉取到模型列表时不显示该区域（presetArea.Visible 由刷新逻辑控制）
+    
+    
     local presetArea = create("Frame", {
         Name = "PresetModelArea",
         Size = UDim2.new(1, 0, 0, 0),
@@ -5974,7 +5989,7 @@ local function AgentBuildProviderSection(panel)
     create("UIListLayout", { FillDirection = Enum.FillDirection.Vertical, Padding = UDim.new(0, 5), Parent = AgentUI.presetFrame })
     create("UIPadding", { PaddingLeft = UDim.new(0, 8), PaddingRight = UDim.new(0, 8), PaddingTop = UDim.new(0, 4), PaddingBottom = UDim.new(0, 4), Parent = AgentUI.presetFrame })
 
-    -- ===== 自定义服务商 =====
+    
     create("TextLabel", {
         Size = UDim2.new(1, 0, 0, 16),
         BackgroundTransparency = 1,
@@ -6143,7 +6158,7 @@ local function AgentBuildProviderSection(panel)
                     end)
                 end)
             end
-            -- 尚无选中模型时，以拉取到的第一个模型作为默认（来源是 API，非内置）
+            
             if not (AgentLocalAIConfig.customActiveModel) and models[1] then
                 local first = tostring(models[1])
                 AgentLocalAIConfig.customActiveModel = first
@@ -6197,7 +6212,7 @@ local function AgentBuildProviderSection(panel)
         end
     end)
 
-    -- ===== 思考级别切换 =====
+    
     do
         local thinkCard, thinkBody = AgentMakeCard(providerBody, "思考级别")
         create("TextLabel", {
@@ -6223,10 +6238,10 @@ local function AgentBuildProviderSection(panel)
     AgentMakeToggleRow(body, "启用外部 API", function() return AgentReadCfg().useExternalApi == true end,
         function(v) AgentWriteCfg("useExternalApi", v); if providerBody then providerBody.Visible = v end; pcall(updateExternalApiUI, v) end)
 
-    -- 初始化：恢复当前服务商的模型列表与思考级别控件
+    
     pcall(AgentRefreshPresetModels, cur)
     pcall(AgentRefreshThinkingControl)
-    -- 外部 API 未开启时收起服务商列表（不展开）
+    
     if providerBody then providerBody.Visible = (AgentReadCfg().useExternalApi == true) end
     return card
 end
@@ -6304,7 +6319,7 @@ local function AgentBuildGeneralSection(panel)
     return card
 end
 
--- 用两个旋转 Frame 绘制 Lucide 风格 X 图标（避免依赖字体字形，渲染稳定）
+
 local function AgentMakeLucideX(parent, size, color)
     local len = size * 0.62
     local thick = math.max(2, math.floor(size * 0.12))
@@ -6371,23 +6386,8 @@ local function AgentEnsureSettingsUI()
     pcall(AgentBuildProviderSection, panel)
     pcall(AgentBuildMemorySection, panel)
     pcall(AgentBuildGeneralSection, panel)
-    local closeBtn = create("TextButton", {
-        Name = "SettingsCloseButton",
-        Size = UDim2.new(0, 32, 0, 32),
-        Position = UDim2.new(1, -44, 0, 60),
-        BackgroundColor3 = theme.surfaceLight or Color3.fromRGB(30, 36, 52),
-        BackgroundTransparency = 0.25,
-        BorderSizePixel = 0,
-        Text = "",
-        Parent = AgentMainFrame,
-        ZIndex = 12,
-        Visible = false,
-    })
-    corner(6, closeBtn)
-    AgentMakeLucideX(closeBtn, 16, theme.text or Color3.fromRGB(242, 245, 252))
     scrim.MouseButton1Click:Connect(function() pcall(AgentCloseSettings) end)
-    closeBtn.MouseButton1Click:Connect(function() pcall(AgentCloseSettings) end)
-    AgentSettingsUi = { scrim = scrim, panel = panel, closeBtn = closeBtn }
+    AgentSettingsUi = { scrim = scrim, panel = panel }
 end
 
 local function AgentOpenSettings()
@@ -6397,7 +6397,6 @@ local function AgentOpenSettings()
     pcall(function() AgentTitleLabel.Text = "设置" end)
     pcall(function() AgentSettingsUi.scrim.Visible = true end)
     pcall(function() AgentSettingsUi.panel.Visible = true end)
-    pcall(function() if AgentSettingsUi.closeBtn then AgentSettingsUi.closeBtn.Visible = true end end)
     AgentTween(AgentSettingsUi.scrim, { BackgroundTransparency = 0.6 }, 0.3)
     AgentTween(AgentSettingsUi.panel, { BackgroundTransparency = 0 }, 0.3)
     pcall(function() AgentMessageFrame.Visible = false end)
@@ -6408,7 +6407,7 @@ local function AgentCloseSettings()
     AgentSettingsOpen = false
     pcall(function() AgentTitleLabel.Text = "AgentLess" end)
     if AgentSettingsUi then
-        -- 立即停止 scrim 拦截输入，避免淡出期间点不掉
+        
         pcall(function() AgentSettingsUi.scrim.Active = false end)
         AgentTween(AgentSettingsUi.scrim, { BackgroundTransparency = 1 }, 0.25)
         AgentTween(AgentSettingsUi.panel, { BackgroundTransparency = 1 }, 0.25)
@@ -6420,7 +6419,6 @@ local function AgentCloseSettings()
             if (not AgentSettingsOpen) and AgentSettingsUi then
                 AgentSettingsUi.scrim.Visible = false
                 AgentSettingsUi.panel.Visible = false
-                if AgentSettingsUi.closeBtn then AgentSettingsUi.closeBtn.Visible = false end
             end
         end)
     end)
@@ -6602,7 +6600,7 @@ local function AgentOpenStats()
     AgentEnsureStatsUI()
     AgentStatsOpen = true
     pcall(AgentRefreshStats)
-    -- 从右向左滑入：先把面板置于屏幕右侧外并可见，再做 Position 补间（方向不变）
+    
     pcall(function()
         AgentStatsUi.scrim.Visible = true
         AgentStatsUi.scrim.Active = true
@@ -6621,7 +6619,7 @@ local function AgentCloseStats()
     AgentStatsOpen = false
     if not AgentStatsUi then return end
     local ui = AgentStatsUi
-    -- 立刻解除遮罩拦截并隐藏面板，确保不会出现「关不掉」的情况
+    
     pcall(function()
         ui.scrim.Active = false
         ui.scrim.Visible = false
@@ -6629,7 +6627,7 @@ local function AgentCloseStats()
         ui.panel.Position = UDim2.new(1, 0, 0, 0)
         ui.panel.BackgroundTransparency = 1
     end)
-    -- 滑出 + 淡出（TweenService 不可用时，上面的直接隐藏已保证关闭）
+    
     AgentTween(ui.scrim, { BackgroundTransparency = 1 }, 0.25)
     AgentTween(ui.panel, { Position = UDim2.new(1, 0, 0, 0) }, 0.25)
     AgentTween(ui.panel, { BackgroundTransparency = 1 }, 0.25)
@@ -6749,7 +6747,7 @@ AgentSendButton = create("TextButton", {
 })
 applyGradient(AgentSendButton, theme.accent, theme.accent2, 120)
 corner(16, AgentSendButton)
--- 文字覆盖层：置于渐变图层之上，避免被渐变 ImageLabel 遮挡
+
 create("TextLabel", {
     Size = UDim2.new(1, 0, 1, 0),
     BackgroundTransparency = 1,
@@ -6764,7 +6762,7 @@ create("TextLabel", {
 })
 
 
--- ===== 深度思考开关（胶囊按钮，位于输入框栏上方最左侧）=====
+
 AgentDeepThinkingEnabled = not AgentLocalAIConfig.thinkingDisabled
 
 local AgentThinkPill = create("TextButton", {
@@ -6779,7 +6777,7 @@ local AgentThinkPill = create("TextButton", {
     Parent = AgentMainFrame,
     ZIndex = 6
 })
-corner(13, AgentThinkPill)   -- 13 = 高度一半，胶囊形
+corner(13, AgentThinkPill)   
 
 local AgentThinkStroke = stroke(theme.border, 1, AgentThinkPill)
 local AgentThinkGradient = applyGradient(AgentThinkPill, theme.accent, theme.accent2, 120)
@@ -6825,7 +6823,7 @@ AgentApplyThinkPill(AgentDeepThinkingEnabled)
 
 AgentApplyDebugBar()
 
--- 供设置卡等外部开关同步胶囊状态
+
 _G.__DeltaAI_updateThinkPill = AgentApplyThinkPill
 
 AgentThinkPill.MouseButton1Click:Connect(function()
@@ -7037,7 +7035,7 @@ AgentSetManageMode = function(on)
     if on then AgentRefreshConversationList() end
 end
 
--- 对话管理入口已移除（右上角改为设置按钮，暂不绑定事件）
+
 
 AgentFinalizeMessage = function(container, isUser)
     local avatar = container:FindFirstChild("Avatar")
@@ -7055,7 +7053,7 @@ AgentFinalizeMessage = function(container, isUser)
             end
         end
         if noAvatar then
-            -- 续接气泡：位置在创建时已定好，这里不再重设
+            
         elseif isUser then
             avatar.AnchorPoint = Vector2.new(1, 0)
             avatar.Position = UDim2.new(1, -8, 0, 0)
@@ -7082,7 +7080,7 @@ local function AgentEscapeRich(s)
     return s
 end
 
--- DeepSeek 标准围栏语言名 -> 统一短标签（卡片右上角显示）
+
 AGENT_LANG_TAGS = {
     lua = "lua", luau = "luau", lua_u = "lua", roblox = "lua", rbx = "lua",
     js = "js", javascript = "js", ts = "ts", typescript = "ts", jsx = "jsx", tsx = "tsx",
@@ -7105,7 +7103,7 @@ function AgentNormalizeLang(lang)
     return "text"
 end
 
--- 语言标签在卡片标题里的显示名
+
 AGENT_LANG_TITLES = {
     lua = "Lua 代码", luau = "Luau 代码", text = "代码",
     json = "JSON", yaml = "YAML", html = "HTML", css = "CSS", sql = "SQL",
@@ -7116,34 +7114,34 @@ function AgentLangTitle(lang)
     return AGENT_LANG_TITLES[lang] or (string.upper(tostring(lang)) .. " 代码")
 end
 
--- 行内 Markdown -> RichText（正文部分）
+
 local function AgentRenderAI(text)
     local s = AgentEscapeRich(text):gsub("^\r?\n", "")
-    -- 前后补换行：Lua 模式没有分组选择，用 \n 锚定才能匹配「行首」
+    
     s = "\n" .. s .. "\n"
 
-    -- 行内代码 `code`
+    
     s = s:gsub("`([^`\r\n]-)`", "<font color=\"#7dd3fc\">%1</font>")
-    -- 粗体 / 下划线 / 斜体
+    
     s = s:gsub("%*%*(.-)%*%*", "<b>%1</b>")
     s = s:gsub("__(.-)__", "<u>%1</u>")
     s = s:gsub("([^%w_])%*(%S[^*\r\n]-)%*([^%w_])", "%1<i>%2</i>%3")
-    -- 标题（### / ## / #）
+    
     s = s:gsub("\n%s*###+%s*([^\r\n]+)", "\n<b>%1</b>")
     s = s:gsub("\n%s*##%s*([^\r\n]+)", "\n<b>%1</b>")
     s = s:gsub("\n%s*#%s*([^\r\n]+)", "\n<b>%1</b>")
-    -- 分隔线
+    
     s = s:gsub("\n%s*%-%-%-[%-%s]*", "\n────────────\n")
     s = s:gsub("\n%s*%*%*%*[%*%s]*", "\n────────────\n")
-    -- 引用（> 已在转义阶段变成 &gt;）与无序列表
+    
     s = s:gsub("\n%s*&gt;%s?", "\n▎ ")
     s = s:gsub("\n%s*[%-%*+]%s+", "\n• ")
-    -- 收尾：去掉补进去的首尾换行
+    
     s = s:gsub("^\n", ""):gsub("\n$", "")
     return s
 end
 
--- 解析回复：标准 ```lang 围栏（兼容旧版 ##code## 单行/多行）
+
 function AgentIsLegacyCodeStart(reply, pos)
     local nxt = reply:sub(pos + 2, pos + 2)
     if nxt == "" or nxt == " " or nxt == "#" or nxt == "\n" or nxt == "\r" then return false end
@@ -7177,7 +7175,7 @@ function AgentSplitReply(reply)
         local legacyHeading = (mode == "hash") and not AgentIsLegacyCodeStart(reply, start)
 
         if legacyHeading then
-            -- 普通 Markdown 标题里的 ## ，当正文处理
+            
             local plain = reply:sub(pos, start + 1)
             if plain ~= "" then parts[#parts + 1] = {type = "text", text = plain} end
             pos = start + 2
@@ -7210,7 +7208,7 @@ function AgentSplitReply(reply)
                     hasCode = true
                     local tag = lang
                     if tag == nil or tag == "" then
-                        -- 没写语言时猜一下：像 Lua 就标 lua，否则标 text
+                        
                         if body:find("%f[%w]local%s") or body:find("%f[%w]function%s") or body:find("%f[%w]end%f[%A]")
                             or body:find("game%.") or body:find("workspace%.") or body:find("print%s*%(")
                             or body:find("^%s*%-%-") or body:find("%f[%w]then%f[%A]") then
@@ -7583,7 +7581,7 @@ end
 
 local _aWAuthZx9K7 = "Dlt" .. "7kZq" .. "W2m9vR4x" .. "Q9n"
 
--- ===== AI 工作时长计时（仅统计 AI 真正开始工作到结束的耗时，累计）=====
+
 AgentTotalWorkTime = AgentTotalWorkTime or 0
 AgentWorkStart = 0
 function AgentWorkTimerStart()
@@ -7617,7 +7615,7 @@ local function AgentGenerateResponse(userInput, authToken)
         }
     end
 
-    -- AI 真正开始工作：启动耗时计时（空输入 / 敏感内容不计入）
+    
     AgentWorkTimerStart()
 
     local cfgLocalUseApi = loadConfig()
@@ -7659,12 +7657,12 @@ end
 local AgentShowThinkingBubble
 local AgentRemoveThinkingBubble
 
--- ============================================================================
---  深度思考卡片（workbuddy / DeepSeek 风格）
---  · 头部：图标 + 「深度思考」+ 状态（进行中显示秒数与阶段 / 完成后显示用时）+ 折叠箭头
---  · 主体：推理内容（流式刷新），可点击头部展开或收起，超长时内部滚动
---  · 完成后自动收起，卡片保留在对话流里
--- ============================================================================
+
+
+
+
+
+
 do
     local currentThinkingContainer = nil
     local currentThinkingThread = nil
@@ -7714,7 +7712,7 @@ do
     AgentThinkingSetExpanded = AgentThinkSetExpanded
 
     AgentShowThinkingBubble = function()
-        -- 上一张还在进行中的卡片先收尾
+        
         if currentThinkingContainer then
             pcall(AgentRemoveThinkingBubble)
         end
@@ -7726,7 +7724,7 @@ do
         currentThinkingStartTime = tick()
 
         if bubble then
-            -- 整行卡片：宽度铺满、只按内容高度增长
+            
             bubble.AutomaticSize = Enum.AutomaticSize.Y
             bubble.Size = UDim2.new(1, -16, 0, 0)
             bubble.BackgroundTransparency = 0.55
@@ -7791,7 +7789,7 @@ do
             currentThinkingChevron.ZIndex = 6
         end
 
-        -- 左侧竖线 + 推理正文（超长时内部滚动）
+        
         local bodyWrap = create("ScrollingFrame", {
             Name = "ThinkBody",
             Position = UDim2.new(0, 10, 0, 30),
@@ -7845,7 +7843,7 @@ do
             AgentThinkSetExpanded(not currentThinkingExpanded)
         end)
 
-        -- 运行中：刷新计时 / 阶段文字 / 流式推理
+        
         local startTime = currentThinkingStartTime
         currentThinkingThread = task.spawn(function()
             while currentThinkingContainer == container do
@@ -7893,7 +7891,7 @@ do
 
         local elapsed = math.max(0, tick() - (currentThinkingStartTime or tick()))
 
-        -- 固化的正文：优先推理内容，其次最后的阶段文字
+        
         local finalText = ""
         pcall(function()
             local reasoning = tostring(AgentLocalAIState and AgentLocalAIState.lastReasoning or "")
@@ -7915,11 +7913,11 @@ do
             end)
         end
 
-        -- 完成后自动收起，卡片留在对话里
+        
         pcall(AgentThinkSetExpanded, false)
     end
 
-    -- 供工具循环使用：每完成一轮工具调用就收尾当前卡片、开启新一轮「深度思考」
+    
     AgentStartThinkingRound = function()
         return AgentShowThinkingBubble()
     end
@@ -8020,7 +8018,7 @@ local function AgentSaveLastScript()
 
     
     local code = nil
-    -- 优先标准 Markdown 围栏（```lua / ```luau / 无语言）
+    
     local fence = "`" .. "`" .. "`"
     local fStart, fEnd = lastAssistantMsg:find(fence .. "%s*[%w_%+%-%.]-%s*\n(.-)\n%s*" .. fence)
     if fStart then
@@ -8028,7 +8026,7 @@ local function AgentSaveLastScript()
         inner = inner:gsub("^" .. fence .. "%s*[%w_%+%-%.]-%s*\n", ""):gsub("\n%s*" .. fence .. "$", "")
         code = inner
     else
-        -- 兼容旧版 ##code##
+        
         local codeStart, codeEnd = lastAssistantMsg:find("##(.-)##")
         if codeStart then
             code = lastAssistantMsg:sub(codeStart + 2, codeEnd - 2)
@@ -8220,7 +8218,7 @@ AgentSendMessage = function()
             AgentRemoveThinkingBubble()
 
             
-            -- 思考内容已由「深度思考」卡片承载，不再单独发一条消息
+            
             AgentLocalAIState.lastReasoning = nil
 
             local statsText = AgentGenerateStatsText(true)
@@ -8377,7 +8375,7 @@ AgentShowScriptResult = function(title, source, lang, noAvatar)
 end
 
 
--- 渲染整条回复：文本走气泡，围栏代码走代码卡（DeepSeek 标准排版）
+
 AgentRenderMessageWithCode = function(reply, stats)
     if type(reply) ~= "string" or reply == "" then return nil end
 
@@ -8400,7 +8398,7 @@ AgentRenderMessageWithCode = function(reply, stats)
             flushText()
             blocks[#blocks + 1] = part
         else
-            -- 相邻文本原样拼接（后续整体裁剪），避免 Markdown 结构被破坏
+            
             pending = (pending or "") .. tostring(part.text or "")
         end
     end

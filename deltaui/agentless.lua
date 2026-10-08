@@ -5348,14 +5348,14 @@ local AgentMainFrame = create("Frame", {
 AgentResumeParent = AgentMainFrame
 
 local AgentTitleBar = create("Frame", {
-    Name = "TitleBar",
-    Size = UDim2.new(1, 0, 0, 32),
-    Position = UDim2.new(0, 0, 0, 0),
-    BackgroundColor3 = theme.surfaceLight,
-    BackgroundTransparency = 0.5,
-    BorderSizePixel = 0,
-    Parent = AgentMainFrame,
-    ZIndex = 4
+        Name = "TitleBar",
+        Size = UDim2.new(1, 0, 0, 32),
+        Position = UDim2.new(0, 0, 0, 0),
+        BackgroundColor3 = theme.surfaceLight,
+        BackgroundTransparency = 0.5,
+        BorderSizePixel = 0,
+        Parent = AgentMainFrame,
+        ZIndex = 20
 })
 corner(theme.radius, AgentTitleBar)
 stroke(theme.border, 1, AgentTitleBar)
@@ -6513,8 +6513,8 @@ local function AgentEnsureStatsUI()
     })
     local panel = create("Frame", {
         Name = "StatsPanel",
-        Size = UDim2.new(0, panelW, 1, 0),
-        Position = UDim2.new(1, 0, 0, 0),
+        Size = UDim2.new(0, panelW, 1, -32),
+        Position = UDim2.new(1, 0, 0, 32),
         BackgroundColor3 = theme.surface or Color3.fromRGB(18, 22, 34),
         BackgroundTransparency = 1,
         BorderSizePixel = 0,
@@ -6607,11 +6607,11 @@ local function AgentOpenStats()
         AgentStatsUi.scrim.BackgroundTransparency = 1
         AgentStatsUi.panel.Visible = true
         AgentStatsUi.panel.BackgroundTransparency = 1
-        AgentStatsUi.panel.Position = UDim2.new(1, 0, 0, 0)
+        AgentStatsUi.panel.Position = UDim2.new(1, 0, 0, 32)
     end)
     AgentTween(AgentStatsUi.scrim, { BackgroundTransparency = 0.5 }, 0.3)
     AgentTween(AgentStatsUi.panel, { BackgroundTransparency = 0 }, 0.3)
-    AgentTween(AgentStatsUi.panel, { Position = UDim2.new(1, -AgentStatsUi.panelW, 0, 0) }, 0.3)
+    AgentTween(AgentStatsUi.panel, { Position = UDim2.new(1, -AgentStatsUi.panelW, 0, 32) }, 0.3)
 end
 
 local function AgentCloseStats()
@@ -6624,7 +6624,7 @@ local function AgentCloseStats()
         ui.scrim.Active = false
         ui.scrim.Visible = false
         ui.panel.Visible = false
-        ui.panel.Position = UDim2.new(1, 0, 0, 0)
+        ui.panel.Position = UDim2.new(1, 0, 0, 32)
         ui.panel.BackgroundTransparency = 1
     end)
     

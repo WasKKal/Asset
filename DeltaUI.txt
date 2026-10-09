@@ -335,11 +335,18 @@ function makeGradientBtn(parent, size, anchorPoint, position, text, callback)
 end
 
 local translations = {
-    rejoin = {en = "Rejoin", zh = "重新加入", ko = "재접속", ja = "再参加"},
     script_loaded = {en = "Loaded: ", zh = "加载完成: ", ko = "로드 완료: ", ja = "読み込み完了: "},
-    rejoin_desc = {en = "Rejoins your current server", zh = "重新加入当前服务器", ko = "현재 서버에 재접속", ja = "現在のサーバーに再参加"},
     small_server = {en = "Small Server", zh = "小服务器", ko = "소규모 서버", ja = "小規模サーバー"},
     small_server_desc = {en = "Joins a server with a low playercount", zh = "加入玩家数较少的服务器", ko = "플레이어 수가 적은 서버 참가", ja = "プレイヤー数が少ないサーバーに参加"},
+    rejoin = {en = "Rejoin", zh = "重新加入", ko = "재접속", ja = "再参加"},
+    rejoin_desc = {en = "Rejoins your current server", zh = "重新加入当前服务器", ko = "현재 서버에 재접속", ja = "現在のサーバーに再参加"},
+    danger_features = {en = "Dangerous Features", zh = "危险功能", ko = "위험 기능", ja = "危険な機能"},
+    install_danger_btn = {en = "INSTALL", zh = "安装危险功能", ko = "설치", ja = "インストール"},
+    uninstall_danger_btn = {en = "UNINSTALL", zh = "卸载", ko = "제거", ja = "アンインストール"},
+    install_danger_desc = {en = "Download dangerous-feature script from remote to local", zh = "从远程下载危险功能脚本到本地", ko = "원격에서 위험 기능 스크립트를 로컬로 다운로드", ja = "リモートから危険機能スクリプトをローカルにダウンロード"},
+    danger_installed = {en = "Dangerous features installed", zh = "危险功能已安装到本地", ko = "위험 기능이 설치되었습니다", ja = "危険機能がインストールされました"},
+    danger_uninstalled = {en = "Dangerous features removed", zh = "已卸载危险功能", ko = "위험 기능이 제거되었습니다", ja = "危険機能が削除されました"},
+    danger_install_failed = {en = "Download failed", zh = "下载失败，请检查网络或地址", ko = "다운로드 실패", ja = "ダウンロード失敗"},
     fps_cap = {en = "FPS Cap", zh = "帧率限制", ko = "FPS 제한", ja = "FPS制限"},
     fps_cap_desc = {en = "Change the FPS cap for a smoother experience", zh = "更改帧率限制以获得更流畅的体验", ko = "더 부드러운 경험을 위해 FPS 제한 변경", ja = "よりスムーズな体験のためFPS制限を変更"},
     icon_size = {en = "Icon Size", zh = "图标大小", ko = "아이콘 크기", ja = "アイコンサイズ"},
@@ -517,8 +524,6 @@ local translations = {
     console_copied_count = {en = "Copied %d lines", zh = "已复制 %d 条输出", ko = "%d개 줄 복사됨", ja = "%d 行をコピーしました"},
     clipboard_unavailable = {en = "Clipboard API unavailable", zh = "剪贴板 API 不可用", ko = "클립보드 API 사용 불가", ja = "クリップボードAPIが利用できません"},
     execution_error_notify = {en = "Error occurred! Jump to console", zh = "遇到报错! 请跳转控制台!", ko = "오류 발생! 콘솔로 이동", ja = "エラー発生! コンソールへ"},
-    anti_kick = {en = "Anti Kick", zh = "反踢出", ko = "킥 방지", ja = "キック防止"},
-    anti_kick_desc = {en = "Prevent other scripts from kicking you", zh = "防止其他脚本调用kick踢出", ko = "다른 스크립트의 킥 방지", ja = "他のスクリプトによるキックを防止"},
     network_request_header = {en = "Network Request Header", zh = "网络请求头类型", ko = "네트워크 요청 헤더", ja = "ネットワークリクエストヘッダー"},
     network_request_header_desc = {en = "Select the platform for HTTP requests", zh = "选择HTTP请求的平台类型", ko = "HTTP 요청에 사용할 플랫폼 선택", ja = "HTTPリクエストのプラットフォームを選択"},
     interface_type = {en = "Interface Type", zh = "接口类型", ko = "인터페이스 유형", ja = "インターフェースタイプ"},
@@ -1256,35 +1261,6 @@ function HookManager.callOriginal(id, ...)
     return nil
 end
 
-function HookManager.wrapAntiKick(targetPlayer)
-    if not targetPlayer or typeof(targetPlayer) ~= "Instance" or not targetPlayer:IsA("Player") then
-        warn("[HookManager] Invalid player instance")
-        return nil, nil
-    end
-    local kickMethod = targetPlayer.Kick
-    if not kickMethod then
-        warn("[HookManager] Kick method not found")
-        return nil, nil
-    end
-    local id = "Kick_" .. tostring(targetPlayer.UserId)
-    local wrapper = function(self, ...)
-        if self ~= targetPlayer then
-            local ok, result = pcall(HookManager.callOriginal, id, self, ...)
-            if ok then return result end
-            return nil
-        end
-        warn("[DeltaUI] Kick blocked for " .. tostring(targetPlayer.Name))
-        return nil
-    end
-    local ok = HookManager.hook(kickMethod, wrapper)
-    if ok then
-        return wrapper, function()
-            HookManager.unhook(kickMethod)
-        end
-    end
-    return nil, nil
-end
-
 function HookManager.wrapTeleport(targetService)
     local tp = targetService or game:GetService("TeleportService")
     local methods = {"Teleport", "TeleportToPlaceInstance", "TeleportAsync"}
@@ -1796,7 +1772,6 @@ function makeMultiDropdown(parent, options, defaultSelected, callback, configKey
 end
 _G.__DeltaUI_t = t
 
-tpService = game:GetService("TeleportService")
 vUser = game:GetService("VirtualUser")
 
 pages = {}
@@ -1992,51 +1967,10 @@ end
 makeDropdown(row0, {"English", "中文", "한국어", "日本語"}, 1, onLanguageChange, "language")
 row0.Parent = settingsScroll
 
-row1 = makeSettingRow("rejoin", "rejoin_desc", 1)
-local function onRejoin()
-    tpService:TeleportToPlaceInstance(game.PlaceId, game.JobId, v7)
-end
-makeActionButton("click_here", row1, onRejoin)
-row1.Parent = settingsScroll
-
 row2 = makeSettingRow("small_server", "small_server_desc", 2)
 local function onSmallServer()
-    local placeId = game.PlaceId
-    local currentJobId = game.JobId
-    local targetServerId = nil
-    local cursor = ""
-    for _ = 1, 5 do
-        local url = "https://games.roblox.com/v1/games/" .. placeId .. "/servers/Public?limit=100"
-        if cursor ~= "" then url = url .. "&cursor=" .. cursor end
-        local raw = nil
-        local ok1, r1 = pcall(function() return requestWithUA(url) end)
-        if ok1 and r1 and r1 ~= "" then raw = r1
-        else
-            local ok2, r2 = pcall(function() return game:HttpGet(url) end)
-            if ok2 and r2 and r2 ~= "" then raw = r2 end
-        end
-        if not raw or raw == "" then break end
-        local ok3, data = pcall(svc.HttpService.JSONDecode, svc.HttpService, raw)
-        if not ok3 or not data or not data.data then break end
-        local candidates = {}
-        for _, srv in ipairs(data.data) do
-            if srv.playing < srv.maxPlayers and srv.id ~= currentJobId then
-                table.insert(candidates, srv)
-            end
-        end
-        table.sort(candidates, function(a, b) return a.playing < b.playing end)
-        if #candidates > 0 then
-            targetServerId = candidates[1].id
-            break
-        end
-        cursor = data.nextPageCursor or ""
-        if not cursor or cursor == "" then break end
-    end
-    if targetServerId then
-        pcall(function() tpService:TeleportToPlaceInstance(placeId, targetServerId, v7) end)
-    else
-        pcall(function() tpService:Teleport(placeId, v7) end)
-    end
+    -- 已移除自动重进/换服逻辑：改为提示用户手动重新加入
+    ShowNotification("你需要手动重新加入!", 3)
 end
 makeActionButton("click_here", row2, onSmallServer)
 row2.Parent = settingsScroll
@@ -2064,8 +1998,12 @@ makeToggle(row9, true, function(state)
             settingsData.afkConnection:Disconnect()
         end
         settingsData.afkConnection = v7.Idled:Connect(function()
-            vUser:CaptureController()
-            vUser:ClickButton2(Vector2.new())
+            -- 低风险实现：仅做一次极轻量按键模拟，不再抓取控制器(CaptureController)，
+            -- 也不合成鼠标点击(ClickButton2)，以降低 Byfron 输入仿真指纹强度
+            pcall(function()
+                vUser:SetKeyDown(Enum.KeyCode.W)
+                vUser:SetKeyUp(Enum.KeyCode.W)
+            end)
         end)
     else
         if settingsData.afkConnection then
@@ -2076,31 +2014,6 @@ makeToggle(row9, true, function(state)
 end, "antiAfk"
 )
 row9.Parent = settingsScroll
-
-rowAntiKick = makeSettingRow("anti_kick", "anti_kick_desc", 8)
-makeToggle(rowAntiKick, false, function(state)
-    if state then
-        local ok, wrapper, unhook = pcall(HookManager.wrapAntiKick, v7)
-        if ok and wrapper then
-            settingsData.kickUnhooker = unhook
-            settingsData.kickBlocked = true
-        else
-            warn("[DeltaUI] AntiKick hook failed")
-            settingsData.kickBlocked = false
-        end
-    else
-        if settingsData.kickUnhooker then
-            local ok = pcall(settingsData.kickUnhooker)
-            if not ok then warn("[DeltaUI] AntiKick unhook failed") end
-            settingsData.kickUnhooker = nil
-        end
-        settingsData.kickBlocked = nil
-    end
-    local cfg = loadConfig()
-    cfg.antiKick = state
-    saveConfig(cfg)
-end, "antiKick")
-rowAntiKick.Parent = settingsScroll
 
 row11 = makeSettingRow("auto_execute", "auto_execute_desc", 11)
 makeToggle(row11, true, function(state)
@@ -2922,6 +2835,57 @@ orbColorRow = createColorPickerRow("orb_border_color", "orb_border_color_desc", 
     end
 end)
 orbColorRow.Parent = settingsScroll
+
+-- ===== 危险功能分区（位于"页面扩展"上方）=====
+DANGER_FEATURES_URL = "https://raw.githubusercontent.com/WasKKal/Asset/master/deltaui/danger_features.lua"
+DANGER_FEATURES_LOCAL = "DeltaUI/DangerFeatures.lua"
+local dangerInstalled = false
+
+__secDanger = makeSectionCard(t("danger_features"), "danger_features", "triangle-alert", 26)
+
+-- 安装危险功能（远程下载到本地）；按钮切换为红色"卸载"
+rowDangerInstall = makeSettingRow("install_danger", "install_danger_desc", 1)
+local dangerInstallBtn = makeActionButton("install_danger_btn", rowDangerInstall, function()
+    if dangerInstalled then
+        pcall(function() if isfile(DANGER_FEATURES_LOCAL) then delfile(DANGER_FEATURES_LOCAL) end end)
+        dangerInstalled = false
+        setDangerBtnState(false)
+        ShowNotification(t("danger_uninstalled"), 2)
+    else
+        local content = nil
+        local ok = pcall(function() content = requestWithUA(DANGER_FEATURES_URL) end)
+        if not (ok and content and content ~= "") then
+            ok = pcall(function() content = game:HttpGet(DANGER_FEATURES_URL) end)
+        end
+        if ok and content and content ~= "" then
+            pcall(function() writefile(DANGER_FEATURES_LOCAL, content) end)
+            pcall(function() local f = loadstring(content); if f then f() end end)
+            dangerInstalled = true
+            setDangerBtnState(true)
+            ShowNotification(t("danger_installed"), 2)
+        else
+            ShowNotification(t("danger_install_failed"), 3)
+        end
+    end
+end)
+rowDangerInstall.Parent = settingsScroll
+
+local function setDangerBtnState(installed)
+    local grad = dangerInstallBtn:FindFirstChildOfClass("UIGradient")
+    if grad then grad:Destroy() end
+    dangerInstallBtn.BackgroundColor3 = installed and Color3.fromRGB(239, 68, 68) or theme.accent
+    local lbl = dangerInstallBtn:FindFirstChildOfClass("TextLabel")
+    if lbl then lbl.Text = installed and t("uninstall_danger_btn") or t("install_danger_btn") end
+end
+
+-- 重新加入（始终可用，内联实现）
+rowRejoin = makeSettingRow("rejoin", "rejoin_desc", 2)
+local function onRejoin()
+    local tp = game:GetService("TeleportService")
+    pcall(function() tp:TeleportToPlaceInstance(game.PlaceId, game.JobId, v7) end)
+end
+makeActionButton("click_here", rowRejoin, onRejoin)
+rowRejoin.Parent = settingsScroll
 
 __secPageExt = makeSectionCard(t("page_ext"), "page_ext", "puzzle", 26.5)
 
@@ -4476,11 +4440,9 @@ do
 
     __reparent(rowAutoAcceptExec, __secGeneral)
     __reparent(rowInit, __secGeneral)
-    __reparent(row1, __secGeneral)
     __reparent(row2, __secGeneral)
     __reparent(row0, __secGeneral)
     __reparent(row4, __secGeneral)
-    __reparent(rowAntiKick, __secGeneral)
     __reparent(row9, __secGeneral)
     __reparent(row11, __secGeneral)
     __reparent(rowTransPath, __secGeneral)
@@ -4507,6 +4469,8 @@ do
     __reparent(rowDeepCustom, __secDeep)
     __reparent(gradientThemeRow, __secDeep)
     __reparent(orbColorRow, __secDeep)
+    __reparent(rowDangerInstall, __secDanger)
+    __reparent(rowRejoin, __secDanger)
 end
 
 maxLogEntries = 500

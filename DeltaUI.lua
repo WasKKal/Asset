@@ -4294,7 +4294,7 @@ function installInstalledPage(p)
         end
     end
     if not code or code == "" then return end
-    registerExternalPage(code, p.url, {name = p.name, title = p.title, icon = p.icon})
+    registerExternalPage(code, p.url, {name = p.name, title = p.title, icon = p.icon}, p.unsafe)
 end
 
 local function parsePageMeta(code)
@@ -4332,7 +4332,9 @@ local function getInstalledPagesFromFiles()
                             title = (type(info.title) == "string" and info.title) or meta.title or meta.name,
                             icon = (type(info.icon) == "string" and info.icon) or meta.icon or "sparkles",
                             url = meta.url or "",
-                            unsafe = meta.unsafe == "1",
+                            -- Local Pages-folder pages are the user's own trusted files; run them
+                            -- unrestricted (warnings only) so scanPageSource never hard-blocks them.
+                            unsafe = true,
                             version = (type(info.version) == "string" and info.version) or meta.version or "1.0.0",
                             code = pureCode or content,
                         })

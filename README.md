@@ -21,7 +21,7 @@
 
 | 路径 | 说明 |
 |---|---|
-| `DeltaUI.txt` | 主 UI 脚本入口：加载页面、布局、设置、语言、危险功能分区 |
+| `DeltaUI.lua` | 主 UI 脚本入口：加载页面、布局、设置、语言、危险功能分区 |
 | `deltaui/agentless.lua` | AgentLess 页面：AI 助手、运行数据面板、设置（右侧滑入 + 点击空白收起） |
 | `deltaui/coding_blocks.lua` | 积木编程页面（含合并进来的对象浏览器模块） |
 | `deltaui/deobfuscator.lua` | 反混淆页面 |
@@ -45,7 +45,7 @@
 
 ## 使用说明
 
-1. 将 `DeltaUI.txt` 作为主脚本加载。
+1. 将 `DeltaUI.lua` 作为主脚本加载。
 2. 页面文件放在本地 `DeltaUI/Pages/`（以 `.lua` 结尾），重启 / 重新执行主 UI 后自动扫描加载。
 3. 页面脚本需符合注册规范（`DeltaPageInfo` / `DeltaRegisterPage` 或 `return {name,title,icon,build}`），才会生成选项卡。
 4. 「危险功能」分区中的「重新加入」按钮始终可用；「安装危险功能」按钮需在联网环境下从远程拉取脚本。

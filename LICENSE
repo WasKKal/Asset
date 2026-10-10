@@ -1,0 +1,50 @@
+MIT License（自定义 / Custom MIT License）
+========================================
+
+Copyright (c) 2026 WasKKalWe / 蛙QwQ
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, subject to the conditions stated in the Custom Terms
+below.
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+------------------------------------------------------------------------
+【自定义条款 / Custom Terms】
+------------------------------------------------------------------------
+
+1. 非商业用途授权（保留作者身份）
+   在**保留作者身份（WasKKalWe / 蛙QwQ）**的前提下，允许任何人进行以下
+   **非商业用途**行为：
+     · 二次分发（redistribution）
+     · 二次改造（modification）
+     · 学习交流（study / educational use）
+     · 私人持有（private use）
+     · 其他一切非商业用途
+   进行上述任一行为时，必须**明确保留原作者署名（WasKKalWe / 蛙QwQ）
+   及本许可声明**，不得移除、篡改或冒用作者身份。
+
+2. 闭源分发
+   允许对软件进行二次改造后**闭源（不公开源代码）分发**，但仍须遵守
+   第 1 条：保留作者身份与本许可声明，且仅限非商业用途。
+
+3. 禁止商用（绝对条款）
+   **绝对不允许将本软件用于任何商业用途**，包括但不限于：
+     · 销售、付费分发、收费订阅
+     · 嵌入任何商业产品 / 商业服务
+     · 以盈利为目的的运营、推广或二次分发
+   任何商业使用均视为对本许可的违反，本授权自动终止，作者保留追究
+   法律责任的权利。
+
+------------------------------------------------------------------------
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

@@ -1969,7 +1969,7 @@ row0.Parent = settingsScroll
 
 row2 = makeSettingRow("small_server", "small_server_desc", 2)
 local function onSmallServer()
-    -- 已移除自动重进/换服逻辑：改为提示用户手动重新加入
+    
     ShowNotification("你需要手动重新加入!", 3)
 end
 makeActionButton("click_here", row2, onSmallServer)
@@ -1998,8 +1998,8 @@ makeToggle(row9, true, function(state)
             settingsData.afkConnection:Disconnect()
         end
         settingsData.afkConnection = v7.Idled:Connect(function()
-            -- 低风险实现：仅做一次极轻量按键模拟，不再抓取控制器(CaptureController)，
-            -- 也不合成鼠标点击(ClickButton2)，以降低 Byfron 输入仿真指纹强度
+            
+            
             pcall(function()
                 vUser:SetKeyDown(Enum.KeyCode.W)
                 vUser:SetKeyUp(Enum.KeyCode.W)
@@ -2836,14 +2836,14 @@ orbColorRow = createColorPickerRow("orb_border_color", "orb_border_color_desc", 
 end)
 orbColorRow.Parent = settingsScroll
 
--- ===== 危险功能分区（位于"页面扩展"上方）=====
+
 DANGER_FEATURES_URL = "https://raw.githubusercontent.com/WasKKal/DeltaExecutor-UI-Rebuild/master/deltaui/danger_features.lua"
 DANGER_FEATURES_LOCAL = "DeltaUI/DangerFeatures.lua"
 local dangerInstalled = false
 
 __secDanger = makeSectionCard(t("danger_features"), "danger_features", "triangle-alert", 26)
 
--- 安装危险功能（远程下载到本地）；按钮切换为红色"卸载"
+
 rowDangerInstall = makeSettingRow("install_danger", "install_danger_desc", 1)
 local dangerInstallBtn = makeActionButton("install_danger_btn", rowDangerInstall, function()
     if dangerInstalled then
@@ -2878,7 +2878,7 @@ local function setDangerBtnState(installed)
     if lbl then lbl.Text = installed and t("uninstall_danger_btn") or t("install_danger_btn") end
 end
 
--- 重新加入（始终可用，内联实现）
+
 rowRejoin = makeSettingRow("rejoin", "rejoin_desc", 2)
 local function onRejoin()
     local tp = game:GetService("TeleportService")
@@ -4024,9 +4024,9 @@ function registerExternalPage(code, url, defOverride, forceUnsafe)
             local p = "DeltaUI/Pages/" .. pageName .. ".lua"
             if isfile(p) then
                 local content = readfile(p)
-                -- Only auto-remove files the installer wrote (they carry the -- DeltaUIPage: header).
-                -- Keep manually-placed files (no header) so the user never loses their own source
-                -- just because a page failed to build once.
+                
+                
+                
                 if content and content:match("^%-%- DeltaUIPage:") then
                     delfile(p)
                 end
@@ -4332,8 +4332,8 @@ local function getInstalledPagesFromFiles()
                             title = (type(info.title) == "string" and info.title) or meta.title or meta.name,
                             icon = (type(info.icon) == "string" and info.icon) or meta.icon or "sparkles",
                             url = meta.url or "",
-                            -- Local Pages-folder pages are the user's own trusted files; run them
-                            -- unrestricted (warnings only) so scanPageSource never hard-blocks them.
+                            
+                            
                             unsafe = true,
                             version = (type(info.version) == "string" and info.version) or meta.version or "1.0.0",
                             code = pureCode or content,
@@ -4345,9 +4345,9 @@ local function getInstalledPagesFromFiles()
                             title = (type(info.title) == "string" and info.title) or fname,
                             icon = (type(info.icon) == "string" and info.icon) or "sparkles",
                             url = "",
-                            -- Manually-placed files have no installer meta header. They are the
-                            -- user's own pages and rely on the full environment (theme/game/workspace),
-                            -- which safe mode blocks, so they must run unrestricted like preset pages.
+                            
+                            
+                            
                             unsafe = true,
                             version = (type(info.version) == "string" and info.version) or "1.0.0",
                             code = content,

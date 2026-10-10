@@ -60,7 +60,7 @@ function LoadLucide()
     if not content or content == "" then
         local moduleUrls = {
             "https://cdn.jsdelivr.net/gh/WasKKal/DeltaExecutor-UI-Rebuild@latest/lucide/init.lua",
-            "https://raw.githubusercontent.com/WasKKal/DeltaExecutor-UI-Rebuild/master/lucide/init.lua",
+            "https://cdn.jsdelivr.net/gh/WasKKal/DeltaExecutor-UI-Rebuild@master/lucide/init.lua",
         }
         for _, url in ipairs(moduleUrls) do
             for _ = 1, 2 do
@@ -2837,7 +2837,7 @@ end)
 orbColorRow.Parent = settingsScroll
 
 
-DANGER_FEATURES_URL = "https://raw.githubusercontent.com/WasKKal/DeltaExecutor-UI-Rebuild/master/deltaui/danger_features.lua"
+DANGER_FEATURES_URL = "https://cdn.jsdelivr.net/gh/WasKKal/DeltaExecutor-UI-Rebuild@master/deltaui/danger_features.lua"
 DANGER_FEATURES_LOCAL = "DeltaUI/DangerFeatures.lua"
 local dangerInstalled = false
 
@@ -2944,7 +2944,7 @@ local PRESET_PAGES = {
         titleKey = "preset_coding",
         descKey = "preset_coding_desc",
         icon = "blocks",
-        url = "https://raw.githubusercontent.com/WasKKal/DeltaExecutor-UI-Rebuild/master/deltaui/coding_blocks.lua",
+        url = "https://cdn.jsdelivr.net/gh/WasKKal/DeltaExecutor-UI-Rebuild@master/deltaui/coding_blocks.lua",
         unsafe = true,
     },
     {
@@ -2952,7 +2952,7 @@ local PRESET_PAGES = {
         titleKey = "preset_deobfuscator",
         descKey = "preset_deobfuscator_desc",
         icon = "shield-check",
-        url = "https://raw.githubusercontent.com/WasKKal/DeltaExecutor-UI-Rebuild/master/deltaui/deobfuscator.lua",
+        url = "https://cdn.jsdelivr.net/gh/WasKKal/DeltaExecutor-UI-Rebuild@master/deltaui/deobfuscator.lua",
         unsafe = true,
     },
     {
@@ -2960,7 +2960,7 @@ local PRESET_PAGES = {
         titleKey = "preset_agentless",
         descKey = "preset_agentless_desc",
         icon = "atom",
-        url = "https://raw.githubusercontent.com/WasKKal/DeltaExecutor-UI-Rebuild/master/deltaui/agentless.lua",
+        url = "https://cdn.jsdelivr.net/gh/WasKKal/DeltaExecutor-UI-Rebuild@master/deltaui/agentless.lua",
         unsafe = true,
     },
 }

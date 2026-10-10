@@ -8061,9 +8061,9 @@ function installRemoteBlockPatch(dataApi)
 end
 
 local RB_RS_URLS = {
-    "https://raw.githubusercontent.com/WasKKal/DeltaExecutor-UI-Rebuild/master/remotespy/main.lua",
+    "https://cdn.jsdelivr.net/gh/WasKKal/DeltaExecutor-UI-Rebuild@master/remotespy/main.lua",
     "https://cdn.jsdelivr.net/gh/WasKKal/DeltaExecutor-UI-Rebuild@7afd68ec9a661be37e796072e6e2f506f6e2be96/remotespy/main.lua",
-    "https://raw.githack.com/WasKKal/DeltaExecutor-UI-Rebuild/master/remotespy/main.lua",
+    "https://cdn.jsdelivr.net/gh/WasKKal/DeltaExecutor-UI-Rebuild@master/remotespy/main.lua",
 }
 local RB_RS_BUILD = "rs-cn.10"
 local RB_RS_CACHE = "Cache/RemoteSpy_main_" .. RB_RS_BUILD .. ".lua"
